@@ -1,5 +1,6 @@
 #pragma once
 #include "assets/pack.hpp"
+#include "core/material.hpp"
 #include "render/gl.hpp"
 #include <array>
 #include <cstddef>
@@ -13,7 +14,6 @@ struct Sprite {
     float red{1}, green{1}, blue{1}, alpha{1};
     float angle{};
 };
-enum class Material : unsigned { water, sand, grass, stone, wood, leaves, player, ember, count };
 
 class Renderer final {
 public:

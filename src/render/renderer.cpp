@@ -9,6 +9,31 @@ namespace {
 constexpr int tile = 32, pitch = tile + 2;
 constexpr int materials = static_cast<int>(Material::count);
 constexpr int atlas_width = pitch * materials;
+
+// How each generated material tile is drawn: flat noise, water bands, timber planks, or a round
+// sprite with a domed normal.
+enum class Pattern { speckle, water, planks, round };
+struct MaterialRecipe {
+    std::array<int, 3> color;
+    Pattern pattern;
+    int variation;
+};
+// Only this small recipe is shipped. Pixels and padding are derived at startup.
+constexpr std::array<MaterialRecipe, materials> recipes{{
+    {{29, 76, 104}, Pattern::water, 23},     // water
+    {{191, 172, 110}, Pattern::speckle, 23}, // sand
+    {{73, 111, 57}, Pattern::speckle, 23},   // grass
+    {{119, 126, 123}, Pattern::speckle, 23}, // stone
+    {{131, 85, 49}, Pattern::planks, 23},    // wood
+    {{42, 91, 44}, Pattern::round, 23},      // leaves
+    {{215, 167, 93}, Pattern::round, 23},    // player
+    {{255, 166, 45}, Pattern::round, 23},    // ember
+    {{17, 50, 79}, Pattern::water, 15},      // deep_water
+    {{47, 74, 38}, Pattern::speckle, 27},    // forest_floor
+    {{82, 71, 47}, Pattern::speckle, 19},    // mud
+    {{158, 148, 82}, Pattern::speckle, 25},  // dry_grass
+    {{226, 232, 238}, Pattern::speckle, 9},  // snow
+}};
 constexpr const char* vertex = R"GLSL(#version 410 core
 layout(location=0) in vec4 rectangle;
 layout(location=1) in vec4 region;
@@ -166,31 +191,26 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
                                     reinterpret_cast<const void*>(offsets[i]));
             gl_.VertexAttribDivisor(i, 1);
         }
-        // Only this small recipe is shipped. Pixels and padding are derived at startup.
-        constexpr std::array<std::array<int, 3>, materials> palette{{{29, 76, 104},
-                                                                     {191, 172, 110},
-                                                                     {73, 111, 57},
-                                                                     {119, 126, 123},
-                                                                     {131, 85, 49},
-                                                                     {42, 91, 44},
-                                                                     {215, 167, 93},
-                                                                     {255, 166, 45}}};
         std::vector<std::uint8_t> pixels(atlas_width * pitch * 4);
         for (int m = 0; m < materials; ++m) {
             for (int y = 0; y < pitch; ++y)
                 for (int x = 0; x < pitch; ++x) {
                     const int px = std::clamp(x - 1, 0, tile - 1), py = std::clamp(y - 1, 0, tile - 1);
+                    const auto& recipe = recipes[static_cast<std::size_t>(m)];
                     const auto noise = hash(static_cast<std::uint32_t>(m * 991 + py * tile + px));
-                    int variation = static_cast<int>(noise % 23) - 11;
-                    if (m == 4) variation += (py % 8 == 0 ? -32 : 0) + (px % 11 == 0 ? -10 : 0);
-                    if (m == 0) variation = (py % 9 == 0 ? 13 : variation / 3);
+                    int variation = static_cast<int>(noise % static_cast<std::uint32_t>(recipe.variation)) -
+                                    recipe.variation / 2;
+                    if (recipe.pattern == Pattern::planks)
+                        variation += (py % 8 == 0 ? -32 : 0) + (px % 11 == 0 ? -10 : 0);
+                    if (recipe.pattern == Pattern::water) variation = (py % 9 == 0 ? 13 : variation / 3);
                     const auto index = static_cast<std::size_t>((y * atlas_width + m * pitch + x) * 4);
                     for (int c = 0; c < 3; ++c)
                         pixels[index + c] =
-                            static_cast<std::uint8_t>(std::clamp(palette[m][c] + variation, 0, 255));
+                            static_cast<std::uint8_t>(std::clamp(recipe.color[c] + variation, 0, 255));
                     const float dx = (static_cast<float>(px) - 15.5F) / 16.0F;
                     const float dy = (static_cast<float>(py) - 15.5F) / 16.0F;
-                    pixels[index + 3] = ((m >= 5) && dx * dx + dy * dy > 0.9F) ? 0 : 255;
+                    pixels[index + 3] =
+                        (recipe.pattern == Pattern::round && dx * dx + dy * dy > 0.9F) ? 0 : 255;
                 }
         }
         gl_.GenTextures(1, &atlas_);
@@ -218,11 +238,12 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
                     const float dx = (static_cast<float>(std::clamp(x - 1, 0, tile - 1)) - 15.5F) / 16;
                     const float dy = (static_cast<float>(std::clamp(y - 1, 0, tile - 1)) - 15.5F) / 16;
                     float nx = 0, ny = 0, nz = 1;
-                    if (m >= 5) {
+                    const auto pattern = recipes[static_cast<std::size_t>(m)].pattern;
+                    if (pattern == Pattern::round) {
                         nx = dx * 0.7F;
                         ny = dy * 0.7F;
                         nz = std::sqrt(std::max(0.05F, 1 - nx * nx - ny * ny));
-                    } else if (m == 4) {
+                    } else if (pattern == Pattern::planks) {
                         ny = 0.3F * std::sin(static_cast<float>(y) * 0.8F);
                     } else {
                         nx = 0.05F * std::sin(static_cast<float>(x) * 2);

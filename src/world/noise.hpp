@@ -69,4 +69,13 @@ inline float fractal(std::uint64_t seed, ChunkCoord chunk, Vec2 local) {
     }
     return value;
 }
+// Samples noise at any canonical world position, so warped coordinates may cross chunk borders.
+inline float perlin(std::uint64_t seed, WorldPosition position, unsigned wavelength) {
+    position.move({});
+    return perlin(seed, position.chunk, position.local, wavelength);
+}
+inline float fractal(std::uint64_t seed, WorldPosition position) {
+    position.move({});
+    return fractal(seed, position.chunk, position.local);
+}
 } // namespace seed
