@@ -2,7 +2,15 @@
 
 Validation is intentionally limited to this Mac at the user's request. No Docker image was created, and no validation packages were installed system-wide. The prepared container recipe and cross-compilation script have not been run.
 
-## Observed results
+## Measurement and checkpoint validation — 2026-09-24
+
+Release and Debug builds use the strict warning settings. Four focused test executables cover core logic, storage, chunk/physics behavior and legacy record migration, and checkpoint recovery/statistics. Checkpoint tests exercise interruptions after file writes, manifest publication, recovery-pointer publication, and current-pointer publication. A child exits abruptly without destructors before publication, then the parent reopens the last complete save. Other checks cover writer exclusion, manifest/payload corruption, current-pointer corruption, bounded retention, unchanged original flat files, and unknown checkpoint versions.
+
+Real Mac OpenGL runs imported and reloaded the previous compact standalone building save (15 grounded pieces). A combined run edited terrain, destroyed a plank, streamed terrain/buildings out and back, collapsed the platform, committed, and reopened with all 14 remaining fallen pieces grounded. Six final benchmark runs measured 600 frames each after 60 warmup frames; see [measurement definitions and results](measurement.md). F5 and the timed autosave use the same tested checkpoint operation; physical keyboard activation and a power-loss scenario were not independently exercised.
+
+## Earlier observed results
+
+The following records describe the earlier implementation, before chunk-owned building storage and checkpoint publication; their save sizes/formats are historical.
 
 | Check | Result |
 | --- | --- |
@@ -21,7 +29,7 @@ Validation is intentionally limited to this Mac at the user's request. No Docker
 | Final packaged run | Passed after the macOS display-wait fix; both intact and damaged scenes rendered and exited |
 | Save sizes | Untouched island: 40 bytes; tested damaged building: 514 bytes, plus a 46-byte terrain delta and 40-byte world metadata |
 
-The size is a measurement of this demo, not a content-budget guarantee for a future game. No frame-rate benchmark across target hardware has been performed.
+The size is a measurement of this demo, not a content-budget guarantee for a future game. The current local benchmark is documented above; no benchmark across Windows/Linux target hardware has been performed.
 
 ## Actual platform issues found
 
@@ -48,4 +56,4 @@ All eight requested systems have implementations and a runnable integrated local
 
 ## Scope bounds relevant to shipping
 
-The demo's 256-body building set remains resident; terrain streams, but arbitrary building-body migration between chunks does not yet exist. The construction control places loose blocks, not a full snapping/stacking system. Save replacement is atomic per file, not a whole-world transaction. These are explicit limits of the current delivery, not hidden stubs.
+Buildings now stream with their owner chunks within bounded resident pools; ownership does not migrate when bodies move. The construction control places loose blocks, not a full snapping/stacking system. Saves publish a whole-world checkpoint with one previous checkpoint retained. Checkpoint creation copies all existing delta files and may pause on large saves; current timing covers only the small demo. These are explicit limits of the current delivery.

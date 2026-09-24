@@ -57,6 +57,13 @@ namespace seed {
     X(void, ClearColor, (GLfloat, GLfloat, GLfloat, GLfloat))                                                \
     X(void, Clear, (GLbitfield))                                                                             \
     X(GLenum, GetError, ())                                                                                  \
+    X(const GLubyte*, GetString, (GLenum))                                                                   \
+    X(void, GenQueries, (GLsizei, GLuint*))                                                                  \
+    X(void, DeleteQueries, (GLsizei, const GLuint*))                                                         \
+    X(void, BeginQuery, (GLenum, GLuint))                                                                    \
+    X(void, EndQuery, (GLenum))                                                                              \
+    X(void, GetQueryObjectiv, (GLuint, GLenum, GLint*))                                                      \
+    X(void, GetQueryObjectui64v, (GLuint, GLenum, GLuint64*))                                                \
     X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*))
 
 struct Gl {

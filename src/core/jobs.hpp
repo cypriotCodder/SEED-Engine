@@ -9,11 +9,25 @@
 #include <vector>
 
 namespace seed {
+// Counts the outstanding jobs of one subsystem so it can wait for its own work only.
+// A group must outlive every job submitted with it.
+class JobGroup final {
+public:
+    JobGroup() = default;
+    JobGroup(const JobGroup&) = delete;
+    JobGroup& operator=(const JobGroup&) = delete;
+
+private:
+    friend class Jobs;
+    std::size_t outstanding_{};
+};
+
 class Jobs final {
 public:
     struct Job {
         void (*run)(void*) noexcept {};
         void* context{};
+        JobGroup* group{};
     };
     explicit Jobs(unsigned count = 0) {
         if (!count) count = std::clamp(std::thread::hardware_concurrency(), 1U, 4U);
@@ -38,11 +52,22 @@ public:
         queue_[(head_ + queued_) % queue_.size()] = job;
         ++queued_;
         ++outstanding_;
+        if (job.group) ++job.group->outstanding_;
         ready_.notify_one();
     }
+    // Waits for every job, regardless of group.
     void wait() {
         std::unique_lock lock(mutex_);
         idle_.wait(lock, [this] { return outstanding_ == 0; });
+    }
+    // Waits only for jobs submitted with this group.
+    void wait(JobGroup& group) {
+        std::unique_lock lock(mutex_);
+        idle_.wait(lock, [&group] { return group.outstanding_ == 0; });
+    }
+    bool busy(const JobGroup& group) {
+        std::lock_guard lock(mutex_);
+        return group.outstanding_ != 0;
     }
 
 private:
@@ -71,7 +96,8 @@ private:
             {
                 std::lock_guard lock(mutex_);
                 --outstanding_;
-                if (!outstanding_) idle_.notify_all();
+                const bool group_idle = job.group && --job.group->outstanding_ == 0;
+                if (!outstanding_ || group_idle) idle_.notify_all();
             }
         }
     }

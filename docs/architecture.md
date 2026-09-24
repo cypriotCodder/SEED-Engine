@@ -10,21 +10,21 @@ Gradient Perlin noise hashes integer lattice coordinates with a 64-bit seed. Fiv
 
 `seed_engine` owns platform, rendering, streaming, persistence, and physics code. The demo drives their lifetime explicitly. There are no inheritance hierarchies. `Scene` provides generational entity handles and dense sparse-set transform/visual components. Systems may retain handles, never component addresses across structural edits. Packed components are required to be trivially copyable.
 
-A 2 MiB arena backs entity/component storage. A fixed pool holds 49 terrain chunks. The particle pool contains 512 slots. Physics uses fixed arrays for 256 bodies, 1,024 center-distance joints, spatial-hash entries, and pair deduplication. The renderer allocates its 32,768-instance CPU store once and orphans the GPU stream buffer on each flush. Ordinary frame iteration does not grow STL containers. Allocation is allowed during initialization, loading, serialization, and failure reporting.
+A 2 MiB arena backs entity/component storage. A fixed pool holds 49 terrain chunks. The particle pool contains 512 slots. Physics uses fixed pools for 4,096 bodies, 16,384 center-distance joints, and spatial-hash entries. Each chunk stores at most 256 bodies and 1,024 recipe joints. The renderer allocates its 32,768-instance CPU store once and orphans the GPU stream buffer on each flush. Ordinary frame iteration does not grow STL containers. Allocation is allowed during initialization, loading, serialization, and failure reporting.
 
-These are explicit current limits, not estimates of unlimited capacity. The building system is intentionally still bounded globally; chunk-owned body migration/eviction is outstanding for larger worlds.
+These are explicit current limits, not estimates of unlimited capacity. Buildings enter and leave the physics pools with their owner chunks. The global pool bounds resident work; owner identity stays fixed while a body moves within its neighboring chunks.
 
 ## Update and job ownership
 
 The loop accumulates time into 60 Hz simulation steps and clamps long frame gaps to 100 ms. Rendering interpolates previous/current transforms. Losing window focus releases held keys.
 
-A bounded 128-entry job queue feeds up to four worker threads. Generation, chunk I/O, asset decompression, and physics execute as jobs. Workers publish completed chunks using release/acquire atomic state transitions. A slot is never reused while its worker owns it. OpenGL and scene mutation remain on the main thread. Physics currently joins at a frame barrier; this also waits for outstanding generation jobs. A dedicated fence would reduce that coupling and remains a performance improvement.
+A bounded 128-entry job queue feeds up to four worker threads. Generation, chunk I/O, asset decompression, and physics execute as jobs. Workers publish completed chunks using release/acquire atomic state transitions. A slot is never reused while its worker owns it. OpenGL and scene mutation remain on the main thread. Separate job groups let physics join only its own work. Its last step runs while the frame renders; the next frame joins before reading bodies or changing chunk residency. Scene synchronization occurs on the main thread after that join.
 
 ## Chunk lifecycle and saves
 
 Chunks progress through empty → generating → ready → active → saving → saved → empty. Generation and disk-delta loading happen together before publication. A five-by-five desired region is surrounded by retention hysteresis out to three chunks. Clean chunks unload without writing. Dirty chunks remain owned by their save job until replacement completes.
 
-Only the world seed/version, modified tile records, changed body states/broken joints, and player position are stored. Files use explicit little-endian encoding, LZ4, lengths, and CRC32. Save replacement writes a temporary file, flushes it, and replaces the old file; POSIX also syncs the parent directory. Each file is atomic independently. A whole-world multi-file transaction is not implemented.
+Only the world seed/version, modified tile records, changed body states/broken joints, and player position are stored. Files use explicit little-endian encoding, LZ4, lengths, and CRC32. Save replacement writes a temporary file, flushes it, and replaces the old file; POSIX also syncs the parent directory. These writes target a private working directory. A checkpoint copies its compact delta files into an immutable directory with a checksummed manifest, then publishes one atomic pointer. The prior checkpoint remains available for whole-world recovery. An OS writer lock prevents concurrent sessions. Checkpoint copying currently runs on the main thread; benchmark reports measure its cost separately from frames.
 
 ## Rendering
 

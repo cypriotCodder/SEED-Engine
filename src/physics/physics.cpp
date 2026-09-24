@@ -1,262 +1,273 @@
 #include "physics/physics.hpp"
-#include "io/binary.hpp"
-#include "io/storage.hpp"
-#include "world/generator.hpp"
-#include <bit>
-#include <span>
+#include "world/chunk_file.hpp"
+#include <algorithm>
+#include <chrono>
+#include <limits>
 
 namespace seed {
 namespace {
 constexpr float dt = 1.0F / 60.0F;
-constexpr std::size_t record_size = 81;
-void floating(Bytes& out, float value) {
-    out.u32(std::bit_cast<std::uint32_t>(value));
-}
-float floating(Reader& in) {
-    const float value = std::bit_cast<float>(in.u32());
-    if (!std::isfinite(value)) throw std::runtime_error("Non-finite physics record");
-    return value;
-}
-void position(Bytes& out, WorldPosition value) {
-    out.u64(std::uint64_t(value.chunk.x));
-    out.u64(std::uint64_t(value.chunk.y));
-    floating(out, value.local.x);
-    floating(out, value.local.y);
-}
-WorldPosition position(Reader& input) {
-    WorldPosition result{{std::bit_cast<std::int64_t>(input.u64()), std::bit_cast<std::int64_t>(input.u64())},
-                         {floating(input), floating(input)}};
-    if (result.local.x < 0 || result.local.y < 0 || result.local.x >= chunk_side ||
-        result.local.y >= chunk_side)
-        throw std::runtime_error("Non-canonical physics position");
-    return result;
+constexpr float cell_size = 4;
+constexpr std::uint32_t hash_mask = 4095;
+
+Material material_of(const BodyState& state) {
+    return state.inverse_mass == 0 ? Material::stone : Material::wood;
 }
 } // namespace
-std::size_t Physics::add(WorldPosition position, Vec2 half, bool fixed, float height) {
-    if (count_ == capacity) throw std::runtime_error("Physics body budget exhausted");
-    position.move({});
-    auto& body = bodies_[count_];
-    body.position = body.previous = position;
-    body.half = half;
-    body.inverse_mass = fixed ? 0.0F : 1.0F;
-    body.height = body.previous_height = height;
-    body.exists = true;
+
+Physics::Physics(Scene& scene, Jobs& jobs)
+    : scene_(scene), jobs_(jobs), storage_(std::make_unique<Storage>()) {
+    // Free lists pop ascending slots first, keeping pool order deterministic.
+    for (std::size_t i = 0; i < body_capacity; ++i)
+        storage_->free_bodies[i] = static_cast<std::uint16_t>(body_capacity - 1 - i);
+    for (std::size_t i = 0; i < joint_capacity; ++i)
+        storage_->free_joints[i] = static_cast<std::uint16_t>(joint_capacity - 1 - i);
+    free_body_count_ = body_capacity;
+    free_joint_count_ = joint_capacity;
+}
+
+Physics::~Physics() {
+    if (pending_) jobs_.wait(group_);
+}
+
+void Physics::require_idle() const {
+    if (pending_) throw std::logic_error("Physics state accessed while a step is running");
+}
+
+ChunkHooks Physics::hooks() {
+    ChunkHooks hooks;
+    hooks.context = this;
+    hooks.activate = [](void* context, ChunkCoord coord, Chunk& chunk) {
+        static_cast<Physics*>(context)->attach(coord, chunk.bodies);
+    };
+    hooks.release = [](void* context, ChunkCoord coord, Chunk& chunk) {
+        if (static_cast<Physics*>(context)->release(coord, chunk.bodies)) chunk.dirty = true;
+    };
+    hooks.store = [](void* context, ChunkCoord coord, Chunk& chunk) {
+        if (static_cast<Physics*>(context)->store(coord, chunk.bodies)) chunk.dirty = true;
+    };
+    return hooks;
+}
+
+Physics::Resident* Physics::resident(ChunkCoord coord) {
+    for (auto& entry : storage_->residents)
+        if (entry.used && entry.coord == coord) return &entry;
+    return nullptr;
+}
+const Physics::Resident* Physics::resident(ChunkCoord coord) const {
+    for (const auto& entry : storage_->residents)
+        if (entry.used && entry.coord == coord) return &entry;
+    return nullptr;
+}
+
+std::uint16_t Physics::allocate_body(const BodyState& state, ChunkCoord owner, std::uint16_t id) {
+    if (!free_body_count_) throw std::runtime_error("Physics body budget exhausted");
+    const auto index = storage_->free_bodies[--free_body_count_];
+    auto& body = storage_->bodies[index];
+    body = Body{};
+    body.state = state;
+    body.owner = owner;
+    body.id = id;
+    body.live = true;
     body.entity =
-        scene_.create({position, position, 0}, {fixed ? Material::stone : Material::wood, half * 2});
-    return count_++;
+        scene_.create({state.position, state.previous, state.angle}, {material_of(state), state.half * 2});
+    body_end_ = std::max<std::size_t>(body_end_, index + 1U);
+    support_dirty_ = true;
+    return index;
 }
-void Physics::connect(std::size_t a, std::size_t b) {
-    if (joint_count_ == joints_.size()) throw std::runtime_error("Building joint budget exhausted");
-    joints_[joint_count_++] = {static_cast<std::uint16_t>(a), static_cast<std::uint16_t>(b),
-                               length(relative(bodies_[a].position, bodies_[b].position)), false};
+
+void Physics::free_body(std::uint16_t index) {
+    auto& body = storage_->bodies[index];
+    if (body.state.exists) scene_.destroy(body.entity);
+    body.live = false;
+    body.link_count = 0;
+    storage_->free_bodies[free_body_count_++] = index;
 }
-Physics::Physics(Scene& scene, std::uint64_t seed, const std::filesystem::path& save)
-    : scene_(scene), seed_(seed), file_(save / "0_0.bodies") {
-    // Four anchored piers carry a small timber platform. The recipe is never saved.
-    for (float y : {3.0F, 7.0F})
-        for (float x : {-3.0F, 3.0F})
-            add({{}, {x, y}}, {0.4F, 0.4F}, true, 0.9F);
-    for (float y : {3.0F, 7.0F})
-        for (float x : {-2.0F, 0.0F, 2.0F})
-            add({{}, {x, y}}, {0.95F, 0.24F}, false, 0.9F);
-    for (float x : {-3.0F, 3.0F})
-        for (float y : {4.0F, 6.0F})
-            add({{}, {x, y}}, {0.24F, 0.95F}, false, 0.9F);
-    for (float x : {-2.0F, -1.0F, 0.0F, 1.0F, 2.0F})
-        add({{}, {x, 5}}, {0.42F, 1.65F}, false, 0.9F);
-    for (std::size_t i = 0; i < count_; ++i)
-        for (std::size_t j = i + 1; j < count_; ++j)
-            if (length(relative(bodies_[i].position, bodies_[j].position)) < 2.4F) connect(i, j);
-    baseline_count_ = count_;
-    for (std::size_t i = 0; i < count_; ++i) {
-        const auto bytes = encode_body(bodies_[i]);
-        baseline_.insert(baseline_.end(), bytes.begin(), bytes.end());
+
+void Physics::link(std::uint16_t body, std::uint16_t joint) {
+    auto& target = storage_->bodies[body];
+    if (target.link_count == links_per_body) throw std::runtime_error("Too many joints on one building body");
+    target.links[target.link_count++] = joint;
+}
+
+void Physics::attach(ChunkCoord owner, const ChunkBodies& bodies) {
+    require_idle();
+    if (resident(owner)) throw std::logic_error("Chunk bodies attached twice");
+    auto slot = std::find_if(storage_->residents.begin(), storage_->residents.end(),
+                             [](const Resident& entry) { return !entry.used; });
+    if (slot == storage_->residents.end())
+        throw std::runtime_error("Physics resident chunk budget exhausted");
+    *slot = {owner, bodies.recipe_count, true};
+
+    std::array<std::uint16_t, chunk_body_capacity> pool_index;
+    pool_index.fill(none);
+    for (std::uint16_t i = 0; i < bodies.count; ++i)
+        if (bodies.bodies[i].exists) pool_index[i] = allocate_body(bodies.bodies[i], owner, i);
+
+    for (std::uint16_t i = 0; i < bodies.joint_count; ++i) {
+        const auto& recipe = bodies.joints[i];
+        const auto a = pool_index[recipe.a], b = pool_index[recipe.b];
+        if (bodies.broken[i] || a == none || b == none) continue;
+        if (!free_joint_count_) throw std::runtime_error("Physics joint budget exhausted");
+        const auto index = storage_->free_joints[--free_joint_count_];
+        storage_->joints[index] = {owner, a, b, i, recipe.length, true, false};
+        joint_end_ = std::max<std::size_t>(joint_end_, index + 1U);
+        link(a, index);
+        link(b, index);
     }
-    load();
-    support();
-    sync_scene();
+    support_dirty_ = true;
 }
-std::vector<std::uint8_t> Physics::encode_body(const Body& b) const {
-    Bytes out;
-    out.u8(b.exists ? 1 : 0);
-    position(out, b.position);
-    position(out, b.previous);
-    for (float f : {b.half.x, b.half.y, b.angle, b.previous_angle, b.height, b.previous_height,
-                    b.inverse_mass, b.health})
-        floating(out, f);
-    return out.data;
-}
-void Physics::load() {
-    if (!std::filesystem::exists(file_)) return;
-    const auto bytes = read_blob(file_);
-    Reader input(bytes);
-    if (input.u32() != 0x59444f42) throw std::runtime_error("Invalid building save magic");
-    const auto version = input.u32();
-    if (version != 1 && version != 2) throw std::runtime_error("Unknown building save version");
-    if (version == 2 && input.u32() != generator_version)
-        throw std::runtime_error("Building generator version mismatch");
-    if (input.u64() != seed_) throw std::runtime_error("Building seed mismatch");
-    const auto total = input.u16(), changes = input.u16();
-    if (total < baseline_count_ || total > capacity || changes > total)
-        throw std::runtime_error("Invalid building counts");
-    std::bitset<capacity> seen;
-    for (unsigned n = 0; n < changes; ++n) {
-        const auto i = input.u16();
-        if (i >= total || seen[i]) throw std::runtime_error("Duplicate building record");
-        seen[i] = true;
-        auto& b = bodies_[i];
-        const auto exists = input.u8();
-        if (exists > 1) throw std::runtime_error("Invalid body flag");
-        b.exists = exists != 0;
-        b.position = position(input);
-        b.previous = position(input);
-        b.half = {floating(input), floating(input)};
-        b.angle = floating(input);
-        b.previous_angle = floating(input);
-        b.height = floating(input);
-        b.previous_height = floating(input);
-        b.inverse_mass = floating(input);
-        b.health = floating(input);
-        if (b.half.x <= 0 || b.half.y <= 0 || b.half.x > 2 || b.half.y > 2 || b.height < 0 || b.height > 16 ||
-            b.previous_height < 0 || b.previous_height > 16 || std::abs(b.angle) > 1000000 ||
-            std::abs(b.previous_angle) > 1000000 || b.inverse_mass < 0 || b.inverse_mass > 1 ||
-            b.health < 0 || b.health > 100 || (b.exists && b.health == 0) ||
-            !nearby(b.position.chunk, b.previous.chunk, 1))
-            throw std::runtime_error("Invalid physics state");
-        if (i >= baseline_count_ && b.exists)
-            b.entity = scene_.create({b.position, b.previous, b.angle}, {Material::wood, b.half * 2});
-        else if (i < baseline_count_ && !b.exists)
-            scene_.destroy(b.entity);
-    }
-    for (std::size_t i = baseline_count_; i < total; ++i)
-        if (!seen[i]) throw std::runtime_error("Missing added body");
-    count_ = total;
-    const auto stored_joints = input.u16();
-    if (version == 1) {
-        if (stored_joints != joint_count_) throw std::runtime_error("Legacy building recipe mismatch");
-        for (std::size_t i = 0; i < joint_count_; ++i) {
-            auto& j = joints_[i];
-            const auto a = input.u16(), b = input.u16();
-            const auto rest = floating(input);
-            const auto broken = input.u8();
-            if (a != j.a || b != j.b || std::abs(rest - j.length) > 0.0001F || broken > 1)
-                throw std::runtime_error("Invalid legacy joint");
-            j.broken = broken != 0;
-        }
-    } else {
-        if (stored_joints > joint_count_) throw std::runtime_error("Invalid broken joint count");
-        std::bitset<1024> broken;
-        for (unsigned i = 0; i < stored_joints; ++i) {
-            const auto index = input.u16();
-            if (index >= joint_count_ || broken[index])
-                throw std::runtime_error("Invalid broken joint delta");
-            broken[index] = true;
-            joints_[index].broken = true;
+
+bool Physics::store(ChunkCoord owner, ChunkBodies& bodies) const {
+    require_idle();
+    const auto* entry = resident(owner);
+    if (!entry) throw std::logic_error("Storing a chunk that is not resident");
+    bool changed = false;
+    auto copy = [&changed](const BodyState& from, BodyState& to) {
+        if (encode_body(from) == encode_body(to)) return;
+        to = from;
+        changed = true;
+    };
+
+    // Built bodies are written after the recipe in a stable order: loaded ones by their previous
+    // index, then newly built ones by pool slot. Destroyed built bodies are dropped.
+    std::array<std::uint16_t, chunk_body_capacity> built{};
+    std::size_t built_count = 0;
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        if (!body.live || !(body.owner == owner)) continue;
+        if (body.id < entry->recipe_count) {
+            copy(body.state, bodies.bodies[body.id]);
+        } else if (body.state.exists) {
+            if (entry->recipe_count + built_count == chunk_body_capacity)
+                throw std::logic_error("Built bodies exceed the chunk budget");
+            built[built_count++] = static_cast<std::uint16_t>(i);
         }
     }
-    if (!input.done()) throw std::runtime_error("Trailing building data");
-}
-void Physics::save() {
-    Bytes records;
-    std::uint16_t changes = 0;
-    for (std::size_t i = 0; i < count_; ++i) {
-        const auto bytes = encode_body(bodies_[i]);
-        if (bytes.size() != record_size) throw std::logic_error("Physics record schema size mismatch");
-        if (i >= baseline_count_ ||
-            !std::equal(bytes.begin(), bytes.end(),
-                        baseline_.begin() + static_cast<std::ptrdiff_t>(i * record_size))) {
-            records.u16(static_cast<std::uint16_t>(i));
-            records.data.insert(records.data.end(), bytes.begin(), bytes.end());
-            ++changes;
-        }
+    std::stable_sort(built.begin(), built.begin() + static_cast<std::ptrdiff_t>(built_count),
+                     [this](auto a, auto b) { return storage_->bodies[a].id < storage_->bodies[b].id; });
+    const auto count = static_cast<std::uint16_t>(entry->recipe_count + built_count);
+    if (count != bodies.count) changed = true;
+    for (std::size_t k = 0; k < built_count; ++k) {
+        auto& target = bodies.bodies[entry->recipe_count + k];
+        if (entry->recipe_count + k >= bodies.count) target = BodyState{};
+        copy(storage_->bodies[built[k]].state, target);
     }
-    if (!changes && !std::filesystem::exists(file_)) return;
-    Bytes out;
-    out.u32(0x59444f42);
-    out.u32(2);
-    out.u32(generator_version);
-    out.u64(seed_);
-    out.u16(static_cast<std::uint16_t>(count_));
-    out.u16(changes);
-    out.data.insert(out.data.end(), records.data.begin(), records.data.end());
-    std::uint16_t broken = 0;
-    for (std::size_t i = 0; i < joint_count_; ++i)
-        if (joints_[i].broken) ++broken;
-    out.u16(broken);
-    for (std::size_t i = 0; i < joint_count_; ++i)
-        if (joints_[i].broken) out.u16(static_cast<std::uint16_t>(i));
-    write_blob(file_, out.data);
+    bodies.count = count;
+
+    for (std::size_t i = 0; i < joint_end_; ++i) {
+        const auto& joint = storage_->joints[i];
+        if (!joint.live || !joint.broken || !(joint.owner == owner) || bodies.broken[joint.recipe]) continue;
+        bodies.broken.set(joint.recipe);
+        changed = true;
+    }
+    return changed;
 }
+
+bool Physics::release(ChunkCoord owner, ChunkBodies& bodies) {
+    const bool changed = store(owner, bodies);
+    // Free in descending order so the free lists hand slots back lowest-first, keeping the pool
+    // order of a reloaded chunk the same as when it was first attached.
+    for (std::size_t i = body_end_; i-- > 0;) {
+        const auto& body = storage_->bodies[i];
+        if (body.live && body.owner == owner) free_body(static_cast<std::uint16_t>(i));
+    }
+    for (std::size_t i = joint_end_; i-- > 0;) {
+        auto& joint = storage_->joints[i];
+        if (!joint.live || !(joint.owner == owner)) continue;
+        joint.live = false;
+        storage_->free_joints[free_joint_count_++] = static_cast<std::uint16_t>(i);
+    }
+    resident(owner)->used = false;
+    support_dirty_ = true;
+    return changed;
+}
+
+bool Physics::active(const Body& body) const {
+    return body.live && body.state.exists && nearby(body.owner, anchor_.chunk, simulation_radius);
+}
+
+bool Physics::joined(std::uint16_t a, std::uint16_t b) const {
+    const auto& body = storage_->bodies[a];
+    for (std::uint8_t i = 0; i < body.link_count; ++i) {
+        const auto& joint = storage_->joints[body.links[i]];
+        if (!joint.broken && (joint.a == b || joint.b == b)) return true;
+    }
+    return false;
+}
+
+// Breadth-first search from anchored bodies across intact joints. Reruns only after damage,
+// joint breakage or residency changes.
 void Physics::support() {
-    for (std::size_t i = 0; i < count_; ++i)
-        bodies_[i].supported = bodies_[i].exists && bodies_[i].inverse_mass == 0;
-    for (std::size_t pass = 0; pass < count_; ++pass) {
-        bool changed = false;
-        for (std::size_t i = 0; i < joint_count_; ++i) {
-            const auto& j = joints_[i];
-            auto& a = bodies_[j.a];
-            auto& b = bodies_[j.b];
-            if (j.broken || !a.exists || !b.exists || a.supported == b.supported) continue;
-            a.supported = b.supported = true;
-            changed = true;
-        }
-        if (!changed) break;
+    auto& bodies = storage_->bodies;
+    auto& queue = storage_->queue;
+    std::size_t head = 0, tail = 0;
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        auto& body = bodies[i];
+        body.supported = body.live && body.state.exists && body.state.inverse_mass == 0;
+        if (body.supported) queue[tail++] = static_cast<std::uint16_t>(i);
     }
+    while (head < tail) {
+        const auto& body = bodies[queue[head++]];
+        for (std::uint8_t i = 0; i < body.link_count; ++i) {
+            const auto& joint = storage_->joints[body.links[i]];
+            if (joint.broken) continue;
+            auto& other = bodies[joint.a == queue[head - 1] ? joint.b : joint.a];
+            if (!other.state.exists || other.supported) continue;
+            other.supported = true;
+            queue[tail++] = joint.a == queue[head - 1] ? joint.b : joint.a;
+        }
+    }
+    support_dirty_ = false;
 }
+
 void Physics::contacts() {
-    heads_.fill(-1);
-    pairs_.reset();
+    auto& s = *storage_;
+    s.heads.fill(-1);
     std::size_t used = 0;
     auto hash = [](int x, int y) {
-        return (std::uint32_t(x) * 73856093U ^ std::uint32_t(y) * 19349663U) & 511U;
+        return (std::uint32_t(x) * 73856093U ^ std::uint32_t(y) * 19349663U) & hash_mask;
     };
-    for (std::size_t i = 0; i < count_; ++i) {
-        const auto& b = bodies_[i];
-        if (!active(b)) continue;
-        const auto aabb = bounds({relative(b.position, anchor_), b.half, b.angle});
-        const int x0 = static_cast<int>(std::floor(aabb.minimum.x / 4)),
-                  x1 = static_cast<int>(std::floor(aabb.maximum.x / 4));
-        const int y0 = static_cast<int>(std::floor(aabb.minimum.y / 4)),
-                  y1 = static_cast<int>(std::floor(aabb.maximum.y / 4));
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = s.bodies[i];
+        if (!active(body)) continue;
+        const auto aabb = bounds({relative(body.state.position, anchor_), body.state.half, body.state.angle});
+        const int x0 = static_cast<int>(std::floor(aabb.minimum.x / cell_size));
+        const int x1 = static_cast<int>(std::floor(aabb.maximum.x / cell_size));
+        const int y0 = static_cast<int>(std::floor(aabb.minimum.y / cell_size));
+        const int y1 = static_cast<int>(std::floor(aabb.maximum.y / cell_size));
+        s.first_cell[i] = {x0, y0};
         for (int y = y0; y <= y1; ++y)
             for (int x = x0; x <= x1; ++x) {
-                if (used == entries_.size()) throw std::runtime_error("Spatial hash capacity exhausted");
+                if (used == s.entries.size()) throw std::runtime_error("Spatial hash capacity exhausted");
                 const auto h = hash(x, y);
-                entries_[used] = {x, y, heads_[h], static_cast<std::uint16_t>(i)};
-                heads_[h] = static_cast<int>(used++);
+                s.entries[used] = {x, y, s.heads[h], static_cast<std::uint16_t>(i)};
+                s.heads[h] = static_cast<int>(used++);
             }
     }
     for (std::size_t e = 0; e < used; ++e) {
-        const auto& entry = entries_[e];
-        for (int link = entry.next; link >= 0; link = entries_[static_cast<std::size_t>(link)].next) {
-            const auto& other = entries_[static_cast<std::size_t>(link)];
+        const auto& entry = s.entries[e];
+        for (int link = entry.next; link >= 0; link = s.entries[static_cast<std::size_t>(link)].next) {
+            const auto& other = s.entries[static_cast<std::size_t>(link)];
             if (entry.x != other.x || entry.y != other.y || entry.body == other.body) continue;
             const auto low = std::min(entry.body, other.body), high = std::max(entry.body, other.body);
-            const auto pair = low * capacity + high;
-            if (pairs_[pair]) continue;
-            pairs_[pair] = true;
-            bool connected = false;
-            for (std::size_t j = 0; j < joint_count_; ++j) {
-                const auto& joint = joints_[j];
-                if (!joint.broken &&
-                    ((joint.a == low && joint.b == high) || (joint.a == high && joint.b == low))) {
-                    connected = true;
-                    break;
-                }
-            }
-            if (connected) continue; // Joined timbers may intentionally intersect at a joint.
-            auto& a = bodies_[low];
-            auto& b = bodies_[high];
+            // Two bodies can share several cells. Handle the pair only in the first cell of their
+            // overlap, so it is resolved exactly once without a pair table.
+            const int reference_x = std::max(s.first_cell[low][0], s.first_cell[high][0]);
+            const int reference_y = std::max(s.first_cell[low][1], s.first_cell[high][1]);
+            if (entry.x != reference_x || entry.y != reference_y) continue;
+            if (joined(low, high)) continue; // Joined timbers may intentionally intersect at a joint.
+
+            auto& a = s.bodies[low].state;
+            auto& b = s.bodies[high].state;
             const float mass = a.inverse_mass + b.inverse_mass;
             if (mass == 0 || std::abs(a.height - b.height) > 0.4F) continue;
             Contact c;
-            if (!collide({relative(a.position, anchor_), a.half, a.angle},
-                         {relative(b.position, anchor_), b.half, b.angle}, c))
-                continue;
-            const auto ra = c.point - relative(a.position, anchor_),
-                       rb = c.point - relative(b.position, anchor_);
-            const float ia = 3 * a.inverse_mass / dot(a.half, a.half),
-                        ib = 3 * b.inverse_mass / dot(b.half, b.half);
+            const auto pa = relative(a.position, anchor_), pb = relative(b.position, anchor_);
+            if (!collide({pa, a.half, a.angle}, {pb, b.half, b.angle}, c)) continue;
+            const auto ra = c.point - pa, rb = c.point - pb;
+            const float ia = 3 * a.inverse_mass / dot(a.half, a.half);
+            const float ib = 3 * b.inverse_mass / dot(b.half, b.half);
             const float ca = cross(ra, c.normal), cb = cross(rb, c.normal);
             const float correction =
                 std::max(0.0F, c.depth - 0.002F) * 0.7F / (mass + ca * ca * ia + cb * cb * ib);
@@ -267,18 +278,21 @@ void Physics::contacts() {
         }
     }
 }
+
 void Physics::simulate() {
-    support();
-    for (std::size_t i = 0; i < count_; ++i) {
-        auto& b = bodies_[i];
-        if (!active(b) || b.inverse_mass == 0) continue;
+    auto& s = *storage_;
+    if (support_dirty_) support();
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        auto& body = s.bodies[i];
+        auto& b = body.state;
+        if (!active(body) || b.inverse_mass == 0) continue;
         const auto velocity = relative(b.position, b.previous) * 0.985F;
         b.previous = b.position;
         b.position.move(velocity);
         const auto angular = (b.angle - b.previous_angle) * 0.97F;
         b.previous_angle = b.angle;
         b.angle += angular;
-        if (!b.supported) {
+        if (!body.supported) {
             const float previous = b.height;
             b.height += (b.height - b.previous_height) * 0.98F - 9.81F * dt * dt;
             b.previous_height = previous;
@@ -289,103 +303,201 @@ void Physics::simulate() {
         }
     }
     for (int iteration = 0; iteration < 6; ++iteration) {
-        for (std::size_t i = 0; i < joint_count_; ++i) {
-            auto& j = joints_[i];
-            auto& a = bodies_[j.a];
-            auto& b = bodies_[j.b];
-            if (j.broken || !active(a) || !active(b)) continue;
+        for (std::size_t i = 0; i < joint_end_; ++i) {
+            auto& joint = s.joints[i];
+            if (!joint.live || joint.broken) continue;
+            auto& body_a = s.bodies[joint.a];
+            auto& body_b = s.bodies[joint.b];
+            if (!active(body_a) || !active(body_b)) continue;
+            auto& a = body_a.state;
+            auto& b = body_b.state;
             const auto delta = relative(b.position, a.position);
             const float distance = length(delta), mass = a.inverse_mass + b.inverse_mass;
-            if (distance > j.length + 1.25F) {
-                j.broken = true;
+            if (distance > joint.length + 1.25F) {
+                joint.broken = true;
+                support_dirty_ = true;
                 continue;
             }
             if (distance < 1e-6F || mass == 0) continue;
-            const auto correction = delta * ((distance - j.length) * 0.7F / (distance * mass));
+            const auto correction = delta * ((distance - joint.length) * 0.7F / (distance * mass));
             a.position.move(correction * a.inverse_mass);
             b.position.move(correction * (-b.inverse_mass));
         }
         contacts();
     }
+    // Ownership is fixed, so a body may not wander beyond its owner's neighbourhood. Holding it at
+    // its last valid position keeps every saved state loadable.
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        auto& body = s.bodies[i];
+        if (!active(body) || within_owner_reach(body.owner, body.state)) continue;
+        body.state.position = body.state.previous;
+        body.state.angle = body.state.previous_angle;
+    }
 }
+
 void Physics::job(void* context) noexcept {
     auto& physics = *static_cast<Physics*>(context);
     try {
+        const auto begin = std::chrono::steady_clock::now();
         physics.simulate();
+        physics.last_step_ns_ = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - begin)
+                .count());
     } catch (...) {
         physics.error_ = std::current_exception();
     }
 }
-void Physics::step(Jobs& jobs, WorldPosition anchor) {
+
+void Physics::begin_step(WorldPosition anchor) {
+    require_idle();
     anchor_ = anchor;
     error_ = nullptr;
-    jobs.submit({job, this});
-    jobs.wait();
+    pending_ = true;
+    try {
+        jobs_.submit({job, this, &group_});
+    } catch (...) {
+        pending_ = false;
+        throw;
+    }
+}
+
+void Physics::finish_step() {
+    if (!pending_) return;
+    jobs_.wait(group_);
+    pending_ = false;
     if (error_) std::rethrow_exception(error_);
     sync_scene();
 }
+
 void Physics::sync_scene() {
-    for (std::size_t i = 0; i < count_; ++i) {
-        const auto& b = bodies_[i];
-        if (!b.exists) continue;
-        auto& t = *scene_.transforms.find(b.entity);
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        if (!body.live || !body.state.exists) continue;
+        const auto& b = body.state;
+        auto& t = *scene_.transforms.find(body.entity);
         t.position = b.position;
         t.previous = b.previous;
         t.angle = b.angle;
+        // Height is drawn as a small upward screen offset.
         t.position.move({0, b.height * 0.35F});
         t.previous.move({0, b.previous_height * 0.35F});
     }
 }
+
 bool Physics::damage(WorldPosition target, float amount) {
+    require_idle();
     if (!std::isfinite(amount) || amount <= 0)
         throw std::invalid_argument("Damage must be positive and finite");
-    for (std::size_t i = 0; i < count_; ++i) {
-        auto& b = bodies_[i];
-        if (!b.exists || !nearby(b.position.chunk, target.chunk, 1)) continue;
+    // Overlapping pieces can all cover the target; hit the one whose centre is closest, so the
+    // result does not depend on pool order.
+    std::size_t hit = body_capacity;
+    float best = std::numeric_limits<float>::max();
+    Vec2 hit_delta{};
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        const auto& b = body.state;
+        if (!body.live || !b.exists || !nearby(b.position.chunk, target.chunk, 1)) continue;
         const auto delta = rotate(relative(target, b.position), -b.angle);
         if (std::abs(delta.x) > b.half.x + 0.15F || std::abs(delta.y) > b.half.y + 0.15F) continue;
-        b.health = std::max(0.0F, b.health - amount);
-        if (b.health == 0) {
-            b.exists = false;
-            scene_.destroy(b.entity);
-        } else if (b.inverse_mass > 0) {
-            b.previous.move(normalized(delta) * (-0.06F));
-            b.previous_angle -= 0.025F;
-        }
-        support();
-        return true;
+        if (dot(delta, delta) >= best) continue;
+        best = dot(delta, delta);
+        hit = i;
+        hit_delta = delta;
     }
-    return false;
-}
-bool Physics::build(WorldPosition target) {
-    if (count_ == capacity || blocks(target)) return false;
-    add(target, {0.45F, 0.45F}, false, 0);
+    if (hit == body_capacity) return false;
+    auto& body = storage_->bodies[hit];
+    auto& b = body.state;
+    b.health = std::max(0.0F, b.health - amount);
+    if (b.health == 0) {
+        b.exists = false;
+        scene_.destroy(body.entity);
+    } else if (b.inverse_mass > 0) {
+        b.previous.move(normalized(hit_delta) * (-0.06F));
+        b.previous_angle -= 0.025F;
+    }
+    support_dirty_ = true;
     return true;
 }
+
+bool Physics::build(WorldPosition target) {
+    require_idle();
+    target.move({});
+    const auto* entry = resident(target.chunk);
+    if (!entry || blocks(target)) return false;
+    std::size_t built = 0;
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        if (body.live && body.owner == target.chunk && body.id >= entry->recipe_count && body.state.exists)
+            ++built;
+    }
+    if (entry->recipe_count + built >= chunk_body_capacity || !free_body_count_) return false;
+    BodyState state;
+    state.position = state.previous = target;
+    state.half = {0.45F, 0.45F};
+    allocate_body(state, target.chunk, built_id);
+    return true;
+}
+
 bool Physics::blocks(WorldPosition position) const {
-    for (std::size_t i = 0; i < count_; ++i) {
-        const auto& b = bodies_[i];
-        if (!b.exists || !nearby(position.chunk, b.position.chunk, 1)) continue;
+    require_idle();
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        const auto& b = body.state;
+        if (!body.live || !b.exists || !nearby(position.chunk, b.position.chunk, 1)) continue;
         Contact c;
         if (collide({relative(position, b.position), {0.25F, 0.25F}, 0}, {{}, b.half, b.angle}, c))
             return true;
     }
     return false;
 }
+
 void Physics::collapse_demo() {
-    for (std::size_t i = 0; i < 4; ++i)
-        if (bodies_[i].exists) damage(bodies_[i].position, 100);
+    require_idle();
+    // Recipe bodies 0-3 of chunk (0, 0) are the stone piers.
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        auto& body = storage_->bodies[i];
+        if (!body.live || !body.state.exists || !(body.owner == ChunkCoord{}) || body.id >= 4) continue;
+        body.state.health = 0;
+        body.state.exists = false;
+        scene_.destroy(body.entity);
+        support_dirty_ = true;
+    }
 }
-unsigned Physics::unsupported() const {
-    unsigned result = 0;
-    for (std::size_t i = 0; i < count_; ++i)
-        if (bodies_[i].exists && !bodies_[i].supported) ++result;
+
+std::optional<WorldPosition> Physics::find(ChunkCoord owner, std::uint16_t recipe_id) const {
+    require_idle();
+    const auto* entry = resident(owner);
+    if (!entry || recipe_id >= entry->recipe_count) return std::nullopt;
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        if (body.live && body.state.exists && body.owner == owner && body.id == recipe_id)
+            return body.state.position;
+    }
+    return std::nullopt;
+}
+
+std::size_t Physics::count() const {
+    std::size_t result = 0;
+    for (std::size_t i = 0; i < body_end_; ++i)
+        if (storage_->bodies[i].live && storage_->bodies[i].state.exists) ++result;
     return result;
 }
+
+unsigned Physics::unsupported() const {
+    unsigned result = 0;
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        if (body.live && body.state.exists && !body.supported) ++result;
+    }
+    return result;
+}
+
 unsigned Physics::grounded_unsupported() const {
     unsigned result = 0;
-    for (std::size_t i = 0; i < count_; ++i)
-        if (bodies_[i].exists && !bodies_[i].supported && bodies_[i].height <= 0.0001F) ++result;
+    for (std::size_t i = 0; i < body_end_; ++i) {
+        const auto& body = storage_->bodies[i];
+        if (body.live && body.state.exists && !body.supported && body.state.height <= 0.0001F) ++result;
+    }
     return result;
 }
 } // namespace seed

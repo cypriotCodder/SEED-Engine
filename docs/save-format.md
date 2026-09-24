@@ -10,17 +10,15 @@ The 20-byte header contains five u32 values: magic `0x344c4453`, envelope versio
 
 `world.seed` contains u32 magic `0x444c5257`, u32 schema version 1, u32 generator version, and u64 seed. Loading an incompatible seed or generator is an error. Untouched generated chunks do not create files.
 
-## Terrain changes
+## Chunk changes, version 2
 
-`X_Y.chunk` contains u32 magic `0x4b4e4843`, u32 schema version 1, u32 generator version, u64 seed, two signed 64-bit chunk coordinates, and u16 record count. Each sorted record is u16 tile index (row-major 32×32) plus u8 change flags. Bit 0 removes vegetation; bit 1 excavates terrain into water. Repeated edits compact into one record per tile. Duplicate indices, unknown flags, oversized counts, and trailing bytes are errors.
+`X_Y.chunk` contains u32 magic `0x4b4e4843`, u32 schema version 2, u32 generator version, u64 seed, two signed 64-bit chunk coordinates, and u16 terrain-record count. Each terrain record is u16 tile index (row-major 32×32) plus u8 change flags. Bit 0 removes vegetation; bit 1 excavates terrain into water. Repeated edits compact into one record per tile.
 
-## Building state
+Next are u16 body-record count and records containing u16 body ID plus an 81-byte body state: u8 existence flag; current and previous positions (each two i64 chunk coordinates and two f32 local offsets); then eight f32 values: half-width, half-height, angle, previous angle, height, previous height, inverse mass, health. Generated recipe IDs remain stable, and unchanged recipe bodies are omitted. Destroyed recipe bodies remain tombstones. Built bodies are stored densely after the recipe; destroyed built bodies are omitted. Built-body indices are not persistent external handles.
 
-`0_0.bodies` currently stores the demo's globally bounded building set. Version 2 contains u32 magic `0x59444f42`, u32 version 2, u32 generator version, u64 seed, u16 total body slots, and u16 changed-record count.
+Finally, u16 broken-joint count precedes u16 joint recipe IDs. Endpoints/rest lengths are regenerated. Bodies and joints belong to the chunk that generated or placed them. Unknown versions, duplicate IDs, invalid state, and trailing bytes are errors.
 
-Each record begins with u16 stable recipe/body ID, followed by 81 bytes: u8 existence flag; current and previous positions (each two i64 chunk coordinates and two f32 local offsets); then eight f32 values: half-width, half-height, angle, previous angle, height, previous height, inverse mass, health. Existing recipe bodies are omitted if identical to the baseline. Added bodies always have records. Deleted IDs remain tombstones and are not reused.
-
-After bodies, a u16 broken-joint count is followed by u16 joint recipe IDs. Joint endpoints/rest lengths are regenerated. The reader also accepts the initial local-development version 1 and rewrites it to version 2 on save. Unknown versions are rejected.
+Terrain-only chunk version 1 loads directly. Standalone `0_0.bodies` version 2 is migrated into origin chunk version 2 in the private working directory, preserving terrain, destroyed/generated bodies, built bodies, and broken joints. Older standalone body version 1 is rejected explicitly; its original files remain untouched. A save containing both standalone bodies and version-2 origin-chunk bodies is ambiguous and rejected.
 
 ## Player
 
@@ -30,6 +28,16 @@ After bodies, a u16 broken-joint count is followed by u16 joint recipe IDs. Join
 
 `demo.pak` contains u32 magic `0x4b504453`, u32 version 1, and u32 entry count (up to 64). Each entry contains u16 name length, name bytes, u8 format (1 = BC3), u16 width, u16 height, u32 block byte count, u32 block CRC32, and BC3 blocks. Names are unique. Dimensions are positive multiples of four, at most 4096. The whole archive also uses the shared compressed envelope.
 
-## Durability boundary
+## Whole-world checkpoints, version 1
 
-Replacement is atomic per file. The world is not a single multi-file transaction, so abrupt process/power loss between file replacements can expose different checkpoint ages. Shutdown save failures are reported; they do not claim successful persistence. Multi-file recovery/journaling remains a release-hardening item.
+The save root contains `writer.lock`, private `working/`, immutable `checkpoints/<id>/`, atomic `CURRENT`, and, after a second commit, `RECOVERY`. The exclusive OS lock lasts for the open save session and is released automatically after a process crash. Stream-out writes only to `working/`.
+
+At commit, physics finishes and resident terrain/building changes plus player state are written to the working directory. Every delta is then checksummed, compressed, and written durably into a new checkpoint directory. A manifest is written last. After directory synchronization, `RECOVERY` is replaced with the previous known-good ID, then `CURRENT` is replaced atomically. Only after publication are older/orphan numeric checkpoint directories pruned, keeping current plus previous. Original flat files are never pruned. Only seed and delta payloads are copied; generated terrain, textures, and audio are not persisted.
+
+Both pointer files use the shared LZ4 envelope. Their payload is u32 magic `0x52545043`, u32 version 1, u64 current ID, u64 previous ID (zero when absent). IDs identify immutable snapshots, not world-generation seeds. The manifest payload is u32 magic `0x464e4d43`, u32 version 1, u64 checkpoint ID, u32 file count, then lexicographically sorted entries: u16 filename length, filename bytes, u32 uncompressed length, u32 uncompressed CRC32. Filenames must be recognized flat save filenames; duplicates, traversal paths, symlinks, missing files, and mismatched checksums are rejected. Each envelope also has its own CRC.
+
+Startup validates the whole manifest before using a checkpoint. If current is corrupt, it tries the previous ID and then the recovery pointer. Recovery is reported. If neither committed checkpoint is valid, startup fails and preserves the save. Unknown checkpoint schema versions fail explicitly rather than rolling back. Unreferenced checkpoint directories and stale working files are never treated as committed saves. A crash before the first publication leaves the original flat save, or a new world with no committed player changes.
+
+Interactive saves occur every 60 seconds, on F5, and on exit. Recovery rolls back the **whole** snapshot, so it cannot mix player/building/terrain ages. Retaining a previous checkpoint and private working copy adds bounded snapshot duplication; save size still grows with the number of player changes. Commits currently copy all delta files and can pause the main thread. Incremental checkpoint copying is a future optimization to measure against large saves.
+
+POSIX writes flush files and synchronize renamed-file parent directories. Windows uses flushed files and `MoveFileExW` with replacement/write-through. Process-interruption and corruption recovery were exercised on this Mac; power-loss durability and Windows/Linux behavior have not been validated here.

@@ -30,7 +30,8 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 | Right mouse, held | Excavate a tile; digging under a support can destroy it |
 | B | Place a timber block at the pointer within reach |
 | Tab | Toggle the wider island view |
-| Escape / window close | Save deltas and quit |
+| F5 | Commit a checkpoint now |
+| Escape / window close | Commit a checkpoint and quit |
 | F12 | Write a frame when `--screenshot FILE.ppm` was supplied |
 
 The four stone piers support the generated timber platform. Removing all supports makes the remaining pieces fall to ground level. Ground-plane contacts use a spatial hash and oriented-box SAT; vertical support/gravity are a separate top-down model. New blocks are loose ground-level bodies, not an editor or a complete construction game.
@@ -44,6 +45,20 @@ The four stone piers support the generated timber platform. Removing all support
 The second command edits a tile, streams it out and back, checks the saved delta, removes the platform supports, simulates sixty frames, verifies pieces reached the ground, captures a frame, and saves. Use a separate save directory because these checks deliberately change the world. `--overview` starts with the wider view. A mismatched seed/generator or corrupt file produces an explicit error.
 
 Smoke runs skip hardware audio and driver vsync. The macOS development build uses explicit frame pacing because an SDL Cocoa display-link wait stalled during validation when display timing stopped progressing.
+
+## Measurement and persistence
+
+Interactive play checkpoints every 60 seconds, on F5, and on exit. Terrain, chunk-owned buildings, and the player commit together. An exclusive writer lock prevents simultaneous saves; an interrupted commit leaves the prior checkpoint loadable. The previous complete checkpoint is retained for corruption recovery. Existing flat saves are imported into a private working directory without changing their original files. See [the save contract](docs/save-format.md) for recovery and migration details.
+
+Repeatable benchmarks disable audio, frame pacing, and player input, discard 60 warmup frames, and require a fresh save directory:
+
+```sh
+./build/release/seed_demo --benchmark build/static.json --frames 600 \
+  --workload static --save build/benchmark-fresh-save
+python3 tools/benchmark.py build/release/seed_demo build/benchmark-new-run
+```
+
+The second command records three static and three streaming runs, with separate saves and a summary. Its output directory must not already exist. Reports include CPU/GPU timing percentiles, physics worker time, chunk-generation totals, resident body counts, process peak memory, checkpoint duration, and save size. See [measurement definitions and the Mac baseline](docs/measurement.md).
 
 ## Assets and distribution
 
@@ -60,6 +75,6 @@ The demo cooker supplies a tiny flame sample automatically; its archive is 437 b
 
 [Architecture](docs/architecture.md) covers data ownership, streaming, threading, and fixed memory budgets. [Save format](docs/save-format.md) specifies byte order, versioning, and records. [Validation](docs/validation.md) records checks and outstanding gates.
 
-The current demo budgets are 49 resident terrain chunks, 4,096 ECS entities, 256 building bodies, 1,024 joints, 512 cosmetic particles, 32 visible lights, and 32,768 sprites per batch. Batches flush when full. Body placement stops at its explicit budget. Terrain streams; the small building set remains resident and sleeps outside the simulation neighborhood. Larger games need chunk-owned building streaming and a broader construction model before that limit can scale with exploration.
+The current demo budgets are 49 resident terrain chunks, 4,096 ECS entities, a physics pool of 4,096 bodies and 16,384 joints, 256 body slots per chunk, 512 cosmetic particles, 32 visible lights, and 32,768 sprites per batch. Batches flush when full. Buildings stream with their owner chunks and retain that ownership while moving nearby; construction currently places loose blocks. The demo island is a small workload, so its benchmark is a baseline rather than a full game performance target.
 
 No networking, editor, 3D renderer, or third-party physics engine is included. Files under `sources/` remain read-only.

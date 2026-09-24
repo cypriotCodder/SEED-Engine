@@ -1,5 +1,6 @@
 #pragma once
 #include "world/noise.hpp"
+#include "world/structures.hpp"
 #include <array>
 
 namespace seed {
@@ -12,10 +13,15 @@ struct Tile {
 struct Chunk {
     std::array<Tile, chunk_side * chunk_side> tiles{};
     std::array<std::uint8_t, chunk_side * chunk_side> changes{};
+    ChunkBodies bodies;
     bool dirty{};
 };
 inline void generate(Chunk& chunk, std::uint64_t seed, ChunkCoord coord) {
-    chunk = Chunk{};
+    // Reset in place: a Chunk is tens of kilobytes and this runs on worker-thread stacks.
+    chunk.tiles.fill({});
+    chunk.changes.fill(0);
+    chunk.dirty = false;
+    generate_structures(chunk.bodies, seed, coord);
     for (int y = 0; y < chunk_side; ++y)
         for (int x = 0; x < chunk_side; ++x) {
             const Vec2 local{static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F};

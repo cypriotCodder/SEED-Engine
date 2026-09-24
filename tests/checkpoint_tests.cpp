@@ -1,0 +1,135 @@
+#include "core/metrics.hpp"
+#include "io/binary.hpp"
+#include "io/checkpoint.hpp"
+#include "io/storage.hpp"
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+
+namespace {
+void check(bool value, const char* message) {
+    if (!value) throw std::runtime_error(message);
+}
+template<class F>
+void rejects(F&& fn) {
+    bool rejected = false;
+    try {
+        fn();
+    } catch (const std::exception&) {
+        rejected = true;
+    }
+    check(rejected, "Expected failure was accepted");
+}
+void state(const std::filesystem::path& path, std::uint8_t value) {
+    for (const auto* name : {"world.seed", "0_0.chunk", "player.delta"})
+        seed::write_blob(path / name, std::span(&value, 1));
+}
+void verify(const std::filesystem::path& path, std::uint8_t value) {
+    for (const auto* name : {"world.seed", "0_0.chunk", "player.delta"})
+        check(seed::read_blob(path / name) == std::vector<std::uint8_t>{value}, "Mixed checkpoint ages");
+}
+seed::Checkpoint::Stage interruption{};
+void interrupt(seed::Checkpoint::Stage stage) {
+    if (stage == interruption) throw std::runtime_error("Injected interrupted commit");
+}
+void crash(seed::Checkpoint::Stage stage) {
+    if (stage == seed::Checkpoint::Stage::recovery_written) std::_Exit(73);
+}
+std::filesystem::path latest(const std::filesystem::path& root) {
+    const auto data = seed::read_blob(root / "CURRENT");
+    seed::Reader r(data);
+    r.u32();
+    r.u32();
+    return root / "checkpoints" / std::to_string(r.u64());
+}
+} // namespace
+int main(int argc, char** argv) {
+    try {
+        if (argc < 2) throw std::runtime_error("Expected private test directory");
+        const std::filesystem::path root(argv[1]);
+        if (argc == 3) {
+            seed::Checkpoint save(root);
+            state(save.working_directory(), 9);
+            save.commit(crash);
+            throw std::runtime_error("Crash hook did not execute");
+        }
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root);
+        state(root, 1); // Legacy flat save must survive migration unchanged.
+        {
+            seed::Checkpoint save(root);
+            verify(save.working_directory(), 1);
+            rejects([&] { seed::Checkpoint other(root); });
+            save.commit();
+            state(save.working_directory(), 2);
+            save.commit();
+        }
+        verify(root, 1);
+        for (const auto stage :
+             {seed::Checkpoint::Stage::files_written, seed::Checkpoint::Stage::manifest_written,
+              seed::Checkpoint::Stage::recovery_written, seed::Checkpoint::Stage::published}) {
+            {
+                seed::Checkpoint save(root);
+                state(save.working_directory(), 3);
+                interruption = stage;
+                rejects([&] { save.commit(interrupt); });
+            }
+            seed::Checkpoint reopened(root);
+            verify(reopened.working_directory(), stage == seed::Checkpoint::Stage::published ? 3 : 2);
+        }
+        // A real process exit skips destructors and releases the OS writer lock.
+        std::string command = "\"" + std::string(argv[0]) + "\" \"" + root.string() + "\" crash";
+        check(std::system(command.c_str()) != 0, "Crash child unexpectedly succeeded");
+        {
+            seed::Checkpoint save(root);
+            verify(save.working_directory(), 3);
+            state(save.working_directory(), 4);
+            save.commit();
+        }
+        // Replacing a payload with a valid but wrong envelope must fail its manifest CRC.
+        state(latest(root), 5);
+        {
+            seed::Checkpoint save(root);
+            check(save.recovered(), "Corrupt checkpoint did not report recovery");
+            verify(save.working_directory(), 3);
+            state(save.working_directory(), 6);
+            save.commit();
+        }
+        std::ofstream(root / "CURRENT", std::ios::binary | std::ios::trunc) << "broken";
+        {
+            seed::Checkpoint save(root);
+            check(save.recovered(), "Corrupt pointer did not report recovery");
+            verify(save.working_directory(), 3);
+            state(save.working_directory(), 7);
+            save.commit();
+        }
+        unsigned retained = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(root / "checkpoints"))
+            if (entry.is_directory()) ++retained;
+        check(retained == 2, "Checkpoint retention is not bounded");
+        // An unknown version is not corruption and must never silently roll back.
+        auto data = seed::read_blob(root / "CURRENT");
+        data[4] = 2;
+        seed::write_blob(root / "CURRENT", data);
+        rejects([&] { seed::Checkpoint save(root); });
+        verify(root, 1);
+        seed::Samples samples(100);
+        for (unsigned i = 1; i <= 100; ++i)
+            samples.add(i);
+        const auto summary = samples.summarize();
+        check(summary.p50 == 50 && summary.p95 == 95 && summary.p99 == 99 && summary.mean == 50.5,
+              "Nearest-rank statistics are wrong");
+        rejects([&] { samples.add(1); });
+        seed::Samples empty(1);
+        rejects([&] { empty.add(-1); });
+        std::ostringstream json;
+        seed::write_distribution(json, empty);
+        check(json.str() == "null", "Missing samples reported as zero measurements");
+        std::cout << "Checkpoint recovery, interrupted commits, process crash, locking, migration and "
+                     "metrics passed.\n";
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}

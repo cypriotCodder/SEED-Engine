@@ -10,7 +10,7 @@ struct Entity {
     std::uint32_t index{}, generation{};
     bool operator==(const Entity&) const = default;
 };
-constexpr std::uint32_t entity_capacity = 4096;
+constexpr std::uint32_t entity_capacity = 8192; // Building bodies (4,096) plus everything else.
 constexpr auto absent = std::numeric_limits<std::uint32_t>::max();
 
 class Entities final {

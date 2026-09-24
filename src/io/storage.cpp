@@ -31,6 +31,14 @@ void sync_file(const std::filesystem::path& path) {
 #endif
 }
 } // namespace
+void sync_directory(const std::filesystem::path& path) {
+#ifndef _WIN32
+    sync_file(path);
+#else
+    // File replacement uses MOVEFILE_WRITE_THROUGH on Windows.
+    (void)path;
+#endif
+}
 std::vector<std::uint8_t> read_blob(const std::filesystem::path& path) {
     const auto length = std::filesystem::file_size(path);
     if (length < 20 || length > maximum + 20) throw std::runtime_error("Invalid compressed file size");

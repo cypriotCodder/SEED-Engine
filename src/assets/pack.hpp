@@ -54,11 +54,11 @@ private:
 class PackStream final {
 public:
     PackStream(Jobs& jobs, std::filesystem::path path) : jobs_(jobs), path_(std::move(path)) {
-        jobs_.submit({load, this});
+        jobs_.submit({load, this, &group_});
     }
-    ~PackStream() { jobs_.wait(); }
+    ~PackStream() { jobs_.wait(group_); }
     const Pack& get() {
-        jobs_.wait();
+        jobs_.wait(group_);
         if (error_) std::rethrow_exception(error_);
         return *pack_;
     }
@@ -73,6 +73,7 @@ private:
         }
     }
     Jobs& jobs_;
+    JobGroup group_;
     std::filesystem::path path_;
     std::unique_ptr<Pack> pack_;
     std::exception_ptr error_;
