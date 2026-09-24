@@ -12,9 +12,12 @@ namespace seed {
 //
 // Bodies and joints live in fixed pools shared by all chunks. A chunk's bodies enter the pools
 // when World activates the chunk (attach) and leave when it unloads (release), so the pools only
-// ever hold the neighbourhood around the player. Only bodies whose owner chunk lies within
-// `simulation_radius` of the anchor are simulated; resident chunks reach one chunk farther, so
-// every simulated body's neighbours are present.
+// ever hold the neighbourhood around the player.
+//
+// A chunk's bodies are simulated only when the chunk lies within `simulation_radius` of the
+// anchor and all eight neighbouring chunks are resident, so a moving body can never miss a
+// neighbour that has not loaded yet. Bodies of resident chunks one ring farther out still take part
+// in collisions, as immovable obstacles.
 //
 // A step runs on a worker between begin_step and finish_step. In that window the pools belong to
 // the worker: every other member function throws std::logic_error rather than race with it.
@@ -24,7 +27,7 @@ public:
     static constexpr std::size_t joint_capacity = 16384;
     static constexpr std::size_t links_per_body = 16;
     static constexpr std::size_t resident_capacity = 64;
-    static constexpr std::uint64_t simulation_radius = 2;
+    static constexpr std::uint64_t simulation_radius = 1;
 
     Physics(Scene& scene, Jobs& jobs);
     ~Physics();
@@ -67,7 +70,8 @@ private:
     struct Body {
         BodyState state;
         ChunkCoord owner{};
-        std::uint16_t id{}; // Recipe ID, the chunk index of a loaded built body, or built_id.
+        std::uint16_t id{};      // Recipe ID, the chunk index of a loaded built body, or built_id.
+        std::uint8_t resident{}; // Index of the owner's Resident entry.
         bool live{}, supported{};
         Entity entity{};
         std::array<std::uint16_t, links_per_body> links{}; // Joint indices.
@@ -87,6 +91,7 @@ private:
         ChunkCoord coord{};
         std::uint16_t recipe_count{};
         bool used{};
+        bool simulate{}, collide{}; // Decided at the start of each step.
     };
     // Allocated once; far too large for the stack and never resized.
     struct Storage {
@@ -103,12 +108,15 @@ private:
 
     static void job(void* context) noexcept;
     void require_idle() const;
-    std::uint16_t allocate_body(const BodyState& state, ChunkCoord owner, std::uint16_t id);
+    std::uint16_t allocate_body(const BodyState& state, ChunkCoord owner, std::uint16_t id,
+                                std::uint8_t resident);
     void free_body(std::uint16_t index);
     void link(std::uint16_t body, std::uint16_t joint);
     Resident* resident(ChunkCoord coord);
     const Resident* resident(ChunkCoord coord) const;
+    void plan_step();
     bool active(const Body& body) const;
+    bool collider(const Body& body) const;
     bool joined(std::uint16_t a, std::uint16_t b) const;
     void simulate();
     void support();

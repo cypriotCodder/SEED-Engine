@@ -160,6 +160,28 @@ void legacy_codec() {
     check(fresh->changes[0] == 3 && fresh->tiles[0].elevation < 0, "Legacy terrain migration lost edits");
 }
 
+// Attaches empty chunks around `center` (skipping chunks already resident via `skip`), so that
+// bodies owned by `center` are eligible for simulation.
+void attach_neighbours(seed::Physics& physics, seed::ChunkCoord center,
+                       seed::ChunkCoord skip = {INT64_MAX, 0}) {
+    static const auto empty = std::make_unique<seed::ChunkBodies>();
+    for (std::int64_t dy = -1; dy <= 1; ++dy)
+        for (std::int64_t dx = -1; dx <= 1; ++dx) {
+            const seed::ChunkCoord coord{center.x + dx, center.y + dy};
+            if ((dx || dy) && !(coord == skip)) physics.attach(coord, *empty);
+        }
+}
+
+std::unique_ptr<seed::ChunkBodies> single_body(seed::ChunkCoord owner, seed::Vec2 local, float inverse_mass) {
+    auto bodies = std::make_unique<seed::ChunkBodies>();
+    seed::BodyState body;
+    body.position = body.previous = {owner, local};
+    body.inverse_mass = inverse_mass;
+    bodies->bodies[0] = body;
+    bodies->count = bodies->recipe_count = 1;
+    return bodies;
+}
+
 void residency() {
     seed::Jobs jobs(2);
     seed::Scene scene;
@@ -168,6 +190,7 @@ void residency() {
     auto chunk = generated(origin);
     const auto baseline = generated(origin);
 
+    attach_neighbours(physics, origin);
     physics.attach(origin, chunk->bodies);
     check(physics.count() == 19, "All recipe bodies attached");
     for (int i = 0; i < 60; ++i)
@@ -223,6 +246,98 @@ void residency() {
     check(physics.count() == 0 && scene.transforms.values().empty(),
           "Scene entities are released with their chunk");
 }
+// Regression (Codex review 1): destroyed built blocks must return their pool slot at once.
+void built_slots_are_reclaimed() {
+    seed::Jobs jobs(1);
+    seed::Scene scene;
+    seed::Physics physics(scene, jobs);
+    const seed::ChunkCoord owner{8, 8};
+    auto bodies = std::make_unique<seed::ChunkBodies>();
+    physics.attach(owner, *bodies);
+    for (std::size_t i = 0; i < seed::Physics::body_capacity + 100; ++i) {
+        check(physics.build({owner, {12, 12}}), "Build must succeed while the chunk has no blocks");
+        check(physics.damage({owner, {12, 12}}, 100), "Destroy the block");
+    }
+    check(physics.count() == 0 && physics.build({owner, {12, 12}}), "Pool is not exhausted by churn");
+    check(physics.release(owner, *bodies) && bodies->count == 1, "The surviving block is saved");
+}
+
+// Regression (Codex review 2): a simulated body must collide with a resident neighbour whose owner
+// is outside the simulation radius, and must not move at all while a neighbour is missing.
+void boundary_collisions() {
+    seed::Jobs jobs(1);
+    seed::Scene scene;
+    seed::Physics physics(scene, jobs);
+    const seed::ChunkCoord mover_owner{1, 0}, wall_owner{2, 0};
+    auto mover = single_body(mover_owner, {31.8F, 12}, 1);
+    auto wall = single_body(wall_owner, {0.2F, 12}, 0);
+    physics.attach(mover_owner, *mover);
+    attach_neighbours(physics, mover_owner, wall_owner);
+    const seed::WorldPosition anchor{{0, 0}, {16, 16}};
+
+    // The wall's chunk is not resident yet: the mover must wait rather than simulate blind.
+    physics.step(anchor);
+    physics.release(mover_owner, *mover);
+    check(mover->bodies[0].position.local.x == 31.8F, "Body simulated before its neighbours loaded");
+    physics.attach(mover_owner, *mover);
+
+    physics.attach(wall_owner, *wall);
+    for (int i = 0; i < 30; ++i)
+        physics.step(anchor);
+    physics.release(mover_owner, *mover);
+    physics.release(wall_owner, *wall);
+    const auto gap = seed::relative(wall->bodies[0].position, mover->bodies[0].position).x;
+    check(gap > 0.95F, "Mover must be pushed out of the static neighbour");
+    check(wall->bodies[0].position.local.x == 0.2F, "An unsimulated neighbour must not move");
+}
+
+// Regression (Codex review 3): every state reader rejects access while a step runs.
+void readers_reject_pending_step() {
+    seed::Jobs jobs(1);
+    seed::Scene scene;
+    seed::Physics physics(scene, jobs);
+    physics.begin_step({});
+    rejects<std::logic_error>([&] { (void)physics.count(); }, "count() during a step");
+    rejects<std::logic_error>([&] { (void)physics.unsupported(); }, "unsupported() during a step");
+    rejects<std::logic_error>([&] { (void)physics.grounded_unsupported(); },
+                              "grounded_unsupported() during a step");
+    physics.finish_step();
+}
+
+// Regression (Codex review 4): a rejected attach changes nothing and can be retried.
+void failed_attach_is_clean() {
+    seed::Jobs jobs(1);
+    seed::Scene scene;
+    seed::Physics physics(scene, jobs);
+    auto full = std::make_unique<seed::ChunkBodies>();
+    for (std::uint16_t i = 0; i < 255; ++i) {
+        full->bodies[i].position =
+            full->bodies[i].previous = {{}, {1 + static_cast<float>(i % 30), 1 + static_cast<float>(i / 30)}};
+    }
+    full->count = full->recipe_count = 255;
+    for (std::int64_t c = 0; c < 16; ++c) {
+        for (std::uint16_t i = 0; i < 255; ++i) {
+            full->bodies[i].position.chunk = full->bodies[i].previous.chunk = {c + 100, 0};
+        }
+        physics.attach({c + 100, 0}, *full);
+    }
+    auto rest = single_body({200, 0}, {5, 5}, 1);
+    auto fifteen = std::make_unique<seed::ChunkBodies>(*rest);
+    for (std::uint16_t i = 1; i < 15; ++i)
+        fifteen->bodies[i] = fifteen->bodies[0];
+    fifteen->count = fifteen->recipe_count = 15;
+    physics.attach({200, 0}, *fifteen);
+    check(physics.count() == seed::Physics::body_capacity - 1, "Pool holds 4,095 bodies");
+
+    auto two = single_body({300, 0}, {5, 5}, 1);
+    two->bodies[1] = two->bodies[0];
+    two->count = two->recipe_count = 2;
+    rejects([&] { physics.attach({300, 0}, *two); }, "Over-budget attach accepted");
+    check(physics.count() == seed::Physics::body_capacity - 1, "Rejected attach allocated bodies");
+    physics.release({200, 0}, *fifteen);
+    physics.attach({300, 0}, *two);
+    check(physics.count() == seed::Physics::body_capacity - 14, "Retry succeeds after capacity frees up");
+}
 } // namespace
 
 int main() {
@@ -231,6 +346,10 @@ int main() {
         codec();
         legacy_codec();
         residency();
+        built_slots_are_reclaimed();
+        boundary_collisions();
+        readers_reject_pending_step();
+        failed_attach_is_clean();
         std::cout << "Job group, chunk codec and physics residency checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

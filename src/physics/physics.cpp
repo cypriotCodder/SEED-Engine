@@ -60,17 +60,21 @@ const Physics::Resident* Physics::resident(ChunkCoord coord) const {
     return nullptr;
 }
 
-std::uint16_t Physics::allocate_body(const BodyState& state, ChunkCoord owner, std::uint16_t id) {
+std::uint16_t Physics::allocate_body(const BodyState& state, ChunkCoord owner, std::uint16_t id,
+                                     std::uint8_t resident) {
     if (!free_body_count_) throw std::runtime_error("Physics body budget exhausted");
+    // Create the entity first: if the scene is full, no pool slot has been taken.
+    const auto entity =
+        scene_.create({state.position, state.previous, state.angle}, {material_of(state), state.half * 2});
     const auto index = storage_->free_bodies[--free_body_count_];
     auto& body = storage_->bodies[index];
     body = Body{};
     body.state = state;
     body.owner = owner;
     body.id = id;
+    body.resident = resident;
     body.live = true;
-    body.entity =
-        scene_.create({state.position, state.previous, state.angle}, {material_of(state), state.half * 2});
+    body.entity = entity;
     body_end_ = std::max<std::size_t>(body_end_, index + 1U);
     support_dirty_ = true;
     return index;
@@ -97,24 +101,53 @@ void Physics::attach(ChunkCoord owner, const ChunkBodies& bodies) {
                              [](const Resident& entry) { return !entry.used; });
     if (slot == storage_->residents.end())
         throw std::runtime_error("Physics resident chunk budget exhausted");
-    *slot = {owner, bodies.recipe_count, true};
+    const auto slot_index = static_cast<std::uint8_t>(slot - storage_->residents.begin());
 
+    // Check every budget before changing anything, so a rejected chunk leaves no trace and can be
+    // retried once capacity frees up.
+    if (bodies.count > chunk_body_capacity || bodies.recipe_count > bodies.count ||
+        bodies.joint_count > chunk_joint_capacity)
+        throw std::runtime_error("Invalid chunk body counts");
+    std::size_t needed_bodies = 0, needed_joints = 0;
+    std::array<std::uint8_t, chunk_body_capacity> degree{};
+    for (std::uint16_t i = 0; i < bodies.count; ++i)
+        if (bodies.bodies[i].exists) ++needed_bodies;
+    for (std::uint16_t i = 0; i < bodies.joint_count; ++i) {
+        const auto& recipe = bodies.joints[i];
+        if (recipe.a >= bodies.recipe_count || recipe.b >= bodies.recipe_count || recipe.a == recipe.b)
+            throw std::runtime_error("Invalid joint recipe");
+        if (bodies.broken[i] || !bodies.bodies[recipe.a].exists || !bodies.bodies[recipe.b].exists) continue;
+        ++needed_joints;
+        if (++degree[recipe.a] > links_per_body || ++degree[recipe.b] > links_per_body)
+            throw std::runtime_error("Too many joints on one building body");
+    }
+    if (needed_bodies > free_body_count_) throw std::runtime_error("Physics body budget exhausted");
+    if (needed_joints > free_joint_count_) throw std::runtime_error("Physics joint budget exhausted");
+
+    // Scene allocation can still fail; undo everything built so far if it does.
     std::array<std::uint16_t, chunk_body_capacity> pool_index;
     pool_index.fill(none);
-    for (std::uint16_t i = 0; i < bodies.count; ++i)
-        if (bodies.bodies[i].exists) pool_index[i] = allocate_body(bodies.bodies[i], owner, i);
-
+    try {
+        for (std::uint16_t i = 0; i < bodies.count; ++i)
+            if (bodies.bodies[i].exists)
+                pool_index[i] = allocate_body(bodies.bodies[i], owner, i, slot_index);
+    } catch (...) {
+        for (std::size_t i = bodies.count; i-- > 0;)
+            if (pool_index[i] != none) free_body(pool_index[i]);
+        throw;
+    }
     for (std::uint16_t i = 0; i < bodies.joint_count; ++i) {
         const auto& recipe = bodies.joints[i];
         const auto a = pool_index[recipe.a], b = pool_index[recipe.b];
         if (bodies.broken[i] || a == none || b == none) continue;
-        if (!free_joint_count_) throw std::runtime_error("Physics joint budget exhausted");
         const auto index = storage_->free_joints[--free_joint_count_];
         storage_->joints[index] = {owner, a, b, i, recipe.length, true, false};
         joint_end_ = std::max<std::size_t>(joint_end_, index + 1U);
         link(a, index);
         link(b, index);
     }
+    // Publish residency last.
+    *slot = {owner, bodies.recipe_count, true, false, false};
     support_dirty_ = true;
 }
 
@@ -183,8 +216,24 @@ bool Physics::release(ChunkCoord owner, ChunkBodies& bodies) {
     return changed;
 }
 
+// Decides which resident chunks simulate and which only collide during this step.
+void Physics::plan_step() {
+    auto& residents = storage_->residents;
+    for (auto& entry : residents) {
+        entry.collide = entry.used && nearby(entry.coord, anchor_.chunk, simulation_radius + 1);
+        entry.simulate = entry.used && nearby(entry.coord, anchor_.chunk, simulation_radius);
+        for (std::int64_t dy = -1; dy <= 1 && entry.simulate; ++dy)
+            for (std::int64_t dx = -1; dx <= 1 && entry.simulate; ++dx)
+                entry.simulate = resident({checked_add(entry.coord.x, dx), checked_add(entry.coord.y, dy)});
+    }
+}
+
 bool Physics::active(const Body& body) const {
-    return body.live && body.state.exists && nearby(body.owner, anchor_.chunk, simulation_radius);
+    return body.live && body.state.exists && storage_->residents[body.resident].simulate;
+}
+
+bool Physics::collider(const Body& body) const {
+    return body.live && body.state.exists && storage_->residents[body.resident].collide;
 }
 
 bool Physics::joined(std::uint16_t a, std::uint16_t b) const {
@@ -230,7 +279,7 @@ void Physics::contacts() {
     };
     for (std::size_t i = 0; i < body_end_; ++i) {
         const auto& body = s.bodies[i];
-        if (!active(body)) continue;
+        if (!collider(body)) continue;
         const auto aabb = bounds({relative(body.state.position, anchor_), body.state.half, body.state.angle});
         const int x0 = static_cast<int>(std::floor(aabb.minimum.x / cell_size));
         const int x1 = static_cast<int>(std::floor(aabb.maximum.x / cell_size));
@@ -260,19 +309,22 @@ void Physics::contacts() {
 
             auto& a = s.bodies[low].state;
             auto& b = s.bodies[high].state;
-            const float mass = a.inverse_mass + b.inverse_mass;
+            // Bodies that are not simulated this step act as immovable obstacles.
+            const float mass_a = active(s.bodies[low]) ? a.inverse_mass : 0.0F;
+            const float mass_b = active(s.bodies[high]) ? b.inverse_mass : 0.0F;
+            const float mass = mass_a + mass_b;
             if (mass == 0 || std::abs(a.height - b.height) > 0.4F) continue;
             Contact c;
             const auto pa = relative(a.position, anchor_), pb = relative(b.position, anchor_);
             if (!collide({pa, a.half, a.angle}, {pb, b.half, b.angle}, c)) continue;
             const auto ra = c.point - pa, rb = c.point - pb;
-            const float ia = 3 * a.inverse_mass / dot(a.half, a.half);
-            const float ib = 3 * b.inverse_mass / dot(b.half, b.half);
+            const float ia = 3 * mass_a / dot(a.half, a.half);
+            const float ib = 3 * mass_b / dot(b.half, b.half);
             const float ca = cross(ra, c.normal), cb = cross(rb, c.normal);
             const float correction =
                 std::max(0.0F, c.depth - 0.002F) * 0.7F / (mass + ca * ca * ia + cb * cb * ib);
-            a.position.move(c.normal * (-correction * a.inverse_mass));
-            b.position.move(c.normal * (correction * b.inverse_mass));
+            a.position.move(c.normal * (-correction * mass_a));
+            b.position.move(c.normal * (correction * mass_b));
             a.angle -= ca * correction * ia;
             b.angle += cb * correction * ib;
         }
@@ -281,6 +333,7 @@ void Physics::contacts() {
 
 void Physics::simulate() {
     auto& s = *storage_;
+    plan_step();
     if (support_dirty_) support();
     for (std::size_t i = 0; i < body_end_; ++i) {
         auto& body = s.bodies[i];
@@ -411,6 +464,10 @@ bool Physics::damage(WorldPosition target, float amount) {
     if (b.health == 0) {
         b.exists = false;
         scene_.destroy(body.entity);
+        // Built bodies have no joints and no save record once destroyed, so their slot returns
+        // to the pool now. Destroyed recipe bodies stay until unload: their tombstone is saved.
+        if (body.id >= storage_->residents[body.resident].recipe_count)
+            free_body(static_cast<std::uint16_t>(hit));
     } else if (b.inverse_mass > 0) {
         b.previous.move(normalized(hit_delta) * (-0.06F));
         b.previous_angle -= 0.025F;
@@ -434,7 +491,8 @@ bool Physics::build(WorldPosition target) {
     BodyState state;
     state.position = state.previous = target;
     state.half = {0.45F, 0.45F};
-    allocate_body(state, target.chunk, built_id);
+    allocate_body(state, target.chunk, built_id,
+                  static_cast<std::uint8_t>(entry - storage_->residents.data()));
     return true;
 }
 
@@ -477,6 +535,7 @@ std::optional<WorldPosition> Physics::find(ChunkCoord owner, std::uint16_t recip
 }
 
 std::size_t Physics::count() const {
+    require_idle();
     std::size_t result = 0;
     for (std::size_t i = 0; i < body_end_; ++i)
         if (storage_->bodies[i].live && storage_->bodies[i].state.exists) ++result;
@@ -484,6 +543,7 @@ std::size_t Physics::count() const {
 }
 
 unsigned Physics::unsupported() const {
+    require_idle();
     unsigned result = 0;
     for (std::size_t i = 0; i < body_end_; ++i) {
         const auto& body = storage_->bodies[i];
@@ -493,6 +553,7 @@ unsigned Physics::unsupported() const {
 }
 
 unsigned Physics::grounded_unsupported() const {
+    require_idle();
     unsigned result = 0;
     for (std::size_t i = 0; i < body_end_; ++i) {
         const auto& body = storage_->bodies[i];
