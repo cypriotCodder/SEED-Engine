@@ -1,0 +1,5 @@
+/build*/
+/.tools/
+/.deps/
+/saves/
+*.DS_Store

@@ -1,0 +1,26 @@
+{
+  "version": 5,
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug with strict compiler warnings",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "SEED_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "release", "configuration": "Release" }
+  ]
+}
