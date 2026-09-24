@@ -84,9 +84,13 @@ void main() {
     pixel=vec4(mix(pow(lit,vec3(1.0/2.2)),vec3(0.085,0.13,0.17),fog),1);
 })GLSL";
 std::uint32_t hash(std::uint32_t n) {
-    n ^= n >> 16; n *= 0x7feb352dU; n ^= n >> 15; n *= 0x846ca68bU; return n ^ (n >> 16);
+    n ^= n >> 16;
+    n *= 0x7feb352dU;
+    n ^= n >> 15;
+    n *= 0x846ca68bU;
+    return n ^ (n >> 16);
 }
-}
+} // namespace
 GLuint Renderer::shader(GLenum type, const char* source) {
     const auto result = gl_.CreateShader(type);
     gl_.ShaderSource(result, 1, &source, nullptr);
@@ -101,17 +105,25 @@ GLuint Renderer::shader(GLenum type, const char* source) {
     }
     return result;
 }
-GLuint Renderer::link_program(const char* vertex_source,const char* fragment_source) {
-    GLuint vs=0,fs=0,result=0;
+GLuint Renderer::link_program(const char* vertex_source, const char* fragment_source) {
+    GLuint vs = 0, fs = 0, result = 0;
     try {
-        vs=shader(GL_VERTEX_SHADER,vertex_source); fs=shader(GL_FRAGMENT_SHADER,fragment_source);
-        result=gl_.CreateProgram(); gl_.AttachShader(result,vs); gl_.AttachShader(result,fs); gl_.LinkProgram(result);
-        GLint ok{}; gl_.GetProgramiv(result,GL_LINK_STATUS,&ok);
+        vs = shader(GL_VERTEX_SHADER, vertex_source);
+        fs = shader(GL_FRAGMENT_SHADER, fragment_source);
+        result = gl_.CreateProgram();
+        gl_.AttachShader(result, vs);
+        gl_.AttachShader(result, fs);
+        gl_.LinkProgram(result);
+        GLint ok{};
+        gl_.GetProgramiv(result, GL_LINK_STATUS, &ok);
         if (!ok) {
-            std::array<char,4096> log{}; gl_.GetProgramInfoLog(result,static_cast<GLsizei>(log.size()),nullptr,log.data());
-            throw std::runtime_error(std::string("Lighting shader link: ")+log.data());
+            std::array<char, 4096> log{};
+            gl_.GetProgramInfoLog(result, static_cast<GLsizei>(log.size()), nullptr, log.data());
+            throw std::runtime_error(std::string("Lighting shader link: ") + log.data());
         }
-        gl_.DeleteShader(vs); gl_.DeleteShader(fs); return result;
+        gl_.DeleteShader(vs);
+        gl_.DeleteShader(fs);
+        return result;
     } catch (...) {
         if (vs) gl_.DeleteShader(vs);
         if (fs) gl_.DeleteShader(fs);
@@ -125,10 +137,13 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
         vs = shader(GL_VERTEX_SHADER, vertex);
         fs = shader(GL_FRAGMENT_SHADER, fragment);
         program_ = gl_.CreateProgram();
-        gl_.AttachShader(program_, vs); gl_.AttachShader(program_, fs);
+        gl_.AttachShader(program_, vs);
+        gl_.AttachShader(program_, fs);
         gl_.LinkProgram(program_);
-        gl_.DeleteShader(vs); vs = 0;
-        gl_.DeleteShader(fs); fs = 0;
+        gl_.DeleteShader(vs);
+        vs = 0;
+        gl_.DeleteShader(fs);
+        fs = 0;
         GLint ok{};
         gl_.GetProgramiv(program_, GL_LINK_STATUS, &ok);
         if (!ok) {
@@ -138,11 +153,13 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
         }
         camera_uniform_ = gl_.GetUniformLocation(program_, "camera");
         scale_uniform_ = gl_.GetUniformLocation(program_, "scale");
-        gl_.GenVertexArrays(1, &vao_); gl_.BindVertexArray(vao_);
-        gl_.GenBuffers(1, &buffer_); gl_.BindBuffer(GL_ARRAY_BUFFER, buffer_);
+        gl_.GenVertexArrays(1, &vao_);
+        gl_.BindVertexArray(vao_);
+        gl_.GenBuffers(1, &buffer_);
+        gl_.BindBuffer(GL_ARRAY_BUFFER, buffer_);
         gl_.BufferData(GL_ARRAY_BUFFER, capacity * sizeof(Sprite), nullptr, GL_STREAM_DRAW);
-        constexpr std::array<std::size_t,4> offsets{offsetof(Sprite,x), offsetof(Sprite,u0),
-                                                   offsetof(Sprite,red), offsetof(Sprite,angle)};
+        constexpr std::array<std::size_t, 4> offsets{offsetof(Sprite, x), offsetof(Sprite, u0),
+                                                     offsetof(Sprite, red), offsetof(Sprite, angle)};
         for (GLuint i = 0; i < offsets.size(); ++i) {
             gl_.EnableVertexAttribArray(i);
             gl_.VertexAttribPointer(i, i == 3 ? 1 : 4, GL_FLOAT, GL_FALSE, sizeof(Sprite),
@@ -150,189 +167,273 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
             gl_.VertexAttribDivisor(i, 1);
         }
         // Only this small recipe is shipped. Pixels and padding are derived at startup.
-        constexpr std::array<std::array<int,3>, materials> palette{{
-            {29,76,104}, {191,172,110}, {73,111,57}, {119,126,123},
-            {131,85,49}, {42,91,44}, {215,167,93}, {255,166,45}}};
+        constexpr std::array<std::array<int, 3>, materials> palette{{{29, 76, 104},
+                                                                     {191, 172, 110},
+                                                                     {73, 111, 57},
+                                                                     {119, 126, 123},
+                                                                     {131, 85, 49},
+                                                                     {42, 91, 44},
+                                                                     {215, 167, 93},
+                                                                     {255, 166, 45}}};
         std::vector<std::uint8_t> pixels(atlas_width * pitch * 4);
         for (int m = 0; m < materials; ++m) {
-            for (int y = 0; y < pitch; ++y) for (int x = 0; x < pitch; ++x) {
-                const int px = std::clamp(x-1, 0, tile-1), py = std::clamp(y-1, 0, tile-1);
-                const auto noise = hash(static_cast<std::uint32_t>(m*991 + py*tile + px));
-                int variation = static_cast<int>(noise % 23) - 11;
-                if (m == 4) variation += (py % 8 == 0 ? -32 : 0) + (px % 11 == 0 ? -10 : 0);
-                if (m == 0) variation = (py % 9 == 0 ? 13 : variation / 3);
-                const auto index = static_cast<std::size_t>((y*atlas_width + m*pitch + x)*4);
-                for (int c = 0; c < 3; ++c)
-                    pixels[index + c] = static_cast<std::uint8_t>(std::clamp(palette[m][c] + variation, 0, 255));
-                const float dx = (static_cast<float>(px) - 15.5F) / 16.0F;
-                const float dy = (static_cast<float>(py) - 15.5F) / 16.0F;
-                pixels[index+3] = ((m >= 5) && dx*dx+dy*dy > 0.9F) ? 0 : 255;
-            }
+            for (int y = 0; y < pitch; ++y)
+                for (int x = 0; x < pitch; ++x) {
+                    const int px = std::clamp(x - 1, 0, tile - 1), py = std::clamp(y - 1, 0, tile - 1);
+                    const auto noise = hash(static_cast<std::uint32_t>(m * 991 + py * tile + px));
+                    int variation = static_cast<int>(noise % 23) - 11;
+                    if (m == 4) variation += (py % 8 == 0 ? -32 : 0) + (px % 11 == 0 ? -10 : 0);
+                    if (m == 0) variation = (py % 9 == 0 ? 13 : variation / 3);
+                    const auto index = static_cast<std::size_t>((y * atlas_width + m * pitch + x) * 4);
+                    for (int c = 0; c < 3; ++c)
+                        pixels[index + c] =
+                            static_cast<std::uint8_t>(std::clamp(palette[m][c] + variation, 0, 255));
+                    const float dx = (static_cast<float>(px) - 15.5F) / 16.0F;
+                    const float dy = (static_cast<float>(py) - 15.5F) / 16.0F;
+                    pixels[index + 3] = ((m >= 5) && dx * dx + dy * dy > 0.9F) ? 0 : 255;
+                }
         }
-        gl_.GenTextures(1, &atlas_); gl_.BindTexture(GL_TEXTURE_2D, atlas_);
-        gl_.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, atlas_width, pitch, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        gl_.GenTextures(1, &atlas_);
+        gl_.BindTexture(GL_TEXTURE_2D, atlas_);
+        gl_.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, atlas_width, pitch, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                       pixels.data());
         gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        const auto& flame=pack.texture("flame");
-        gl_.GenTextures(1,&detail_); gl_.BindTexture(GL_TEXTURE_2D,detail_);
-        gl_.CompressedTexImage2D(GL_TEXTURE_2D,0,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
-            static_cast<GLsizei>(flame.width),static_cast<GLsizei>(flame.height),0,
-            static_cast<GLsizei>(flame.blocks.size()),flame.blocks.data());
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        const auto& flame = pack.texture("flame");
+        gl_.GenTextures(1, &detail_);
+        gl_.BindTexture(GL_TEXTURE_2D, detail_);
+        gl_.CompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
+                                 static_cast<GLsizei>(flame.width), static_cast<GLsizei>(flame.height), 0,
+                                 static_cast<GLsizei>(flame.blocks.size()), flame.blocks.data());
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         std::vector<std::uint8_t> normal_pixels(pixels.size());
-        for (int m=0;m<materials;++m) for (int y=0;y<pitch;++y) for (int x=0;x<pitch;++x) {
-            const float dx=(static_cast<float>(std::clamp(x-1,0,tile-1))-15.5F)/16;
-            const float dy=(static_cast<float>(std::clamp(y-1,0,tile-1))-15.5F)/16;
-            float nx=0,ny=0,nz=1;
-            if (m>=5) { nx=dx*0.7F; ny=dy*0.7F; nz=std::sqrt(std::max(0.05F,1-nx*nx-ny*ny)); }
-            else if (m==4) { ny=0.3F*std::sin(static_cast<float>(y)*0.8F); }
-            else { nx=0.05F*std::sin(static_cast<float>(x)*2); ny=0.05F*std::sin(static_cast<float>(y)*3); }
-            const float inverse=1/std::sqrt(nx*nx+ny*ny+nz*nz);
-            const auto i=static_cast<std::size_t>((y*atlas_width+m*pitch+x)*4);
-            normal_pixels[i]=static_cast<std::uint8_t>((nx*inverse*0.5F+0.5F)*255);
-            normal_pixels[i+1]=static_cast<std::uint8_t>((ny*inverse*0.5F+0.5F)*255);
-            normal_pixels[i+2]=static_cast<std::uint8_t>((nz*inverse*0.5F+0.5F)*255); normal_pixels[i+3]=255;
-        }
-        gl_.GenTextures(1,&normals_); gl_.BindTexture(GL_TEXTURE_2D,normals_);
-        gl_.TexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,atlas_width,pitch,0,GL_RGBA,GL_UNSIGNED_BYTE,normal_pixels.data());
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-        gl_.UseProgram(program_); gl_.Uniform1i(gl_.GetUniformLocation(program_,"normalAtlas"),1);
-        normal_enabled_=gl_.GetUniformLocation(program_,"normalEnabled");
-        light_program_=link_program(screen_vertex,light_fragment);
-        light_rect_=gl_.GetUniformLocation(light_program_,"rectangle");
-        light_position_=gl_.GetUniformLocation(light_program_,"lightPosition");
-        light_view_=gl_.GetUniformLocation(light_program_,"viewSize");
-        light_color_=gl_.GetUniformLocation(light_program_,"lightColor");
-        composite_program_=link_program(screen_vertex,composite_fragment);
+        for (int m = 0; m < materials; ++m)
+            for (int y = 0; y < pitch; ++y)
+                for (int x = 0; x < pitch; ++x) {
+                    const float dx = (static_cast<float>(std::clamp(x - 1, 0, tile - 1)) - 15.5F) / 16;
+                    const float dy = (static_cast<float>(std::clamp(y - 1, 0, tile - 1)) - 15.5F) / 16;
+                    float nx = 0, ny = 0, nz = 1;
+                    if (m >= 5) {
+                        nx = dx * 0.7F;
+                        ny = dy * 0.7F;
+                        nz = std::sqrt(std::max(0.05F, 1 - nx * nx - ny * ny));
+                    } else if (m == 4) {
+                        ny = 0.3F * std::sin(static_cast<float>(y) * 0.8F);
+                    } else {
+                        nx = 0.05F * std::sin(static_cast<float>(x) * 2);
+                        ny = 0.05F * std::sin(static_cast<float>(y) * 3);
+                    }
+                    const float inverse = 1 / std::sqrt(nx * nx + ny * ny + nz * nz);
+                    const auto i = static_cast<std::size_t>((y * atlas_width + m * pitch + x) * 4);
+                    normal_pixels[i] = static_cast<std::uint8_t>((nx * inverse * 0.5F + 0.5F) * 255);
+                    normal_pixels[i + 1] = static_cast<std::uint8_t>((ny * inverse * 0.5F + 0.5F) * 255);
+                    normal_pixels[i + 2] = static_cast<std::uint8_t>((nz * inverse * 0.5F + 0.5F) * 255);
+                    normal_pixels[i + 3] = 255;
+                }
+        gl_.GenTextures(1, &normals_);
+        gl_.BindTexture(GL_TEXTURE_2D, normals_);
+        gl_.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, atlas_width, pitch, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                       normal_pixels.data());
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        gl_.UseProgram(program_);
+        gl_.Uniform1i(gl_.GetUniformLocation(program_, "normalAtlas"), 1);
+        normal_enabled_ = gl_.GetUniformLocation(program_, "normalEnabled");
+        light_program_ = link_program(screen_vertex, light_fragment);
+        light_rect_ = gl_.GetUniformLocation(light_program_, "rectangle");
+        light_position_ = gl_.GetUniformLocation(light_program_, "lightPosition");
+        light_view_ = gl_.GetUniformLocation(light_program_, "viewSize");
+        light_color_ = gl_.GetUniformLocation(light_program_, "lightColor");
+        composite_program_ = link_program(screen_vertex, composite_fragment);
         gl_.UseProgram(composite_program_);
-        gl_.Uniform1i(gl_.GetUniformLocation(composite_program_,"albedo"),0);
-        gl_.Uniform1i(gl_.GetUniformLocation(composite_program_,"illumination"),1);
-        gl_.Uniform4f(gl_.GetUniformLocation(composite_program_,"rectangle"),0,0,1,1);
-        gl_.GenFramebuffers(1,&geometry_fbo_); gl_.GenFramebuffers(1,&light_fbo_);
-        gl_.GenTextures(1,&albedo_target_); gl_.GenTextures(1,&normal_target_); gl_.GenTextures(1,&light_target_);
+        gl_.Uniform1i(gl_.GetUniformLocation(composite_program_, "albedo"), 0);
+        gl_.Uniform1i(gl_.GetUniformLocation(composite_program_, "illumination"), 1);
+        gl_.Uniform4f(gl_.GetUniformLocation(composite_program_, "rectangle"), 0, 0, 1, 1);
+        gl_.GenFramebuffers(1, &geometry_fbo_);
+        gl_.GenFramebuffers(1, &light_fbo_);
+        gl_.GenTextures(1, &albedo_target_);
+        gl_.GenTextures(1, &normal_target_);
+        gl_.GenTextures(1, &light_target_);
         gl_.check();
     } catch (...) {
         if (vs) gl_.DeleteShader(vs);
         if (fs) gl_.DeleteShader(fs);
-        release(); throw;
+        release();
+        throw;
     }
 }
-Renderer::~Renderer() { release(); }
+Renderer::~Renderer() {
+    release();
+}
 void Renderer::release() noexcept {
-    gl_.DeleteTextures(1, &atlas_); gl_.DeleteBuffers(1, &buffer_);
-    gl_.DeleteTextures(1,&detail_);
-    gl_.DeleteTextures(1,&normals_); gl_.DeleteTextures(1,&albedo_target_);
-    gl_.DeleteTextures(1,&normal_target_); gl_.DeleteTextures(1,&light_target_);
-    gl_.DeleteFramebuffers(1,&geometry_fbo_); gl_.DeleteFramebuffers(1,&light_fbo_);
+    gl_.DeleteTextures(1, &atlas_);
+    gl_.DeleteBuffers(1, &buffer_);
+    gl_.DeleteTextures(1, &detail_);
+    gl_.DeleteTextures(1, &normals_);
+    gl_.DeleteTextures(1, &albedo_target_);
+    gl_.DeleteTextures(1, &normal_target_);
+    gl_.DeleteTextures(1, &light_target_);
+    gl_.DeleteFramebuffers(1, &geometry_fbo_);
+    gl_.DeleteFramebuffers(1, &light_fbo_);
     if (light_program_) gl_.DeleteProgram(light_program_);
     if (composite_program_) gl_.DeleteProgram(composite_program_);
     gl_.DeleteVertexArrays(1, &vao_);
     if (program_) gl_.DeleteProgram(program_);
 }
-void Renderer::resize_targets(int width,int height) {
-    if (width_==width && height_==height) return;
-    auto texture=[&](GLuint id,int w,int h,GLint format) {
-        gl_.BindTexture(GL_TEXTURE_2D,id); gl_.TexImage2D(GL_TEXTURE_2D,0,format,w,h,0,GL_RGBA,GL_FLOAT,nullptr);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-        gl_.TexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+void Renderer::resize_targets(int width, int height) {
+    if (width_ == width && height_ == height) return;
+    auto texture = [&](GLuint id, int w, int h, GLint format) {
+        gl_.BindTexture(GL_TEXTURE_2D, id);
+        gl_.TexImage2D(GL_TEXTURE_2D, 0, format, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     };
-    texture(albedo_target_,width,height,GL_RGBA8); texture(normal_target_,width,height,GL_RGBA8);
-    texture(light_target_,std::max(1,width/2),std::max(1,height/2),GL_RGBA16F);
-    gl_.BindFramebuffer(GL_FRAMEBUFFER,geometry_fbo_);
-    gl_.FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,albedo_target_,0);
-    gl_.FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D,normal_target_,0);
-    const std::array<GLenum,2> outputs{GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1}; gl_.DrawBuffers(2,outputs.data());
-    if (gl_.CheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE) throw std::runtime_error("Incomplete geometry framebuffer");
-    gl_.BindFramebuffer(GL_FRAMEBUFFER,light_fbo_);
-    gl_.FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,light_target_,0);
-    gl_.DrawBuffers(1,outputs.data());
-    if (gl_.CheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE) throw std::runtime_error("Incomplete light framebuffer");
-    width_=width; height_=height; gl_.check();
+    texture(albedo_target_, width, height, GL_RGBA8);
+    texture(normal_target_, width, height, GL_RGBA8);
+    texture(light_target_, std::max(1, width / 2), std::max(1, height / 2), GL_RGBA16F);
+    gl_.BindFramebuffer(GL_FRAMEBUFFER, geometry_fbo_);
+    gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, albedo_target_, 0);
+    gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, normal_target_, 0);
+    const std::array<GLenum, 2> outputs{GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    gl_.DrawBuffers(2, outputs.data());
+    if (gl_.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        throw std::runtime_error("Incomplete geometry framebuffer");
+    gl_.BindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
+    gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, light_target_, 0);
+    gl_.DrawBuffers(1, outputs.data());
+    if (gl_.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        throw std::runtime_error("Incomplete light framebuffer");
+    width_ = width;
+    height_ = height;
+    gl_.check();
 }
 void Renderer::begin(int width, int height, float x, float y, float zoom) {
     if (width <= 0 || height <= 0 || zoom <= 0) throw std::invalid_argument("Invalid viewport");
-    size_ = 0; calls_ = 0;
-    using_detail_=false;
-    light_count_=0; resize_targets(width,height);
-    view_width_=static_cast<float>(width)/zoom; view_height_=static_cast<float>(height)/zoom;
-    gl_.BindFramebuffer(GL_FRAMEBUFFER,geometry_fbo_);
+    size_ = 0;
+    calls_ = 0;
+    using_detail_ = false;
+    light_count_ = 0;
+    resize_targets(width, height);
+    view_width_ = static_cast<float>(width) / zoom;
+    view_height_ = static_cast<float>(height) / zoom;
+    gl_.BindFramebuffer(GL_FRAMEBUFFER, geometry_fbo_);
     gl_.Viewport(0, 0, width, height);
-    gl_.ClearColor(0.035F, 0.065F, 0.085F, 1); gl_.Clear(GL_COLOR_BUFFER_BIT);
-    gl_.Enable(GL_BLEND); gl_.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    gl_.UseProgram(program_); gl_.BindVertexArray(vao_);
-    gl_.Uniform1i(normal_enabled_,1);
-    gl_.ActiveTexture(GL_TEXTURE1); gl_.BindTexture(GL_TEXTURE_2D,normals_);
-    gl_.ActiveTexture(GL_TEXTURE0); gl_.BindTexture(GL_TEXTURE_2D, atlas_);
+    gl_.ClearColor(0.035F, 0.065F, 0.085F, 1);
+    gl_.Clear(GL_COLOR_BUFFER_BIT);
+    gl_.Enable(GL_BLEND);
+    gl_.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    gl_.UseProgram(program_);
+    gl_.BindVertexArray(vao_);
+    gl_.Uniform1i(normal_enabled_, 1);
+    gl_.ActiveTexture(GL_TEXTURE1);
+    gl_.BindTexture(GL_TEXTURE_2D, normals_);
+    gl_.ActiveTexture(GL_TEXTURE0);
+    gl_.BindTexture(GL_TEXTURE_2D, atlas_);
     gl_.Uniform2f(camera_uniform_, x, y);
-    gl_.Uniform2f(scale_uniform_, 2*zoom/static_cast<float>(width), 2*zoom/static_cast<float>(height));
+    gl_.Uniform2f(scale_uniform_, 2 * zoom / static_cast<float>(width),
+                  2 * zoom / static_cast<float>(height));
 }
-void Renderer::sprite(Material material, float x, float y, float width, float height, float angle, float shade) {
+void Renderer::sprite(Material material, float x, float y, float width, float height, float angle,
+                      float shade) {
     if (material >= Material::count) throw std::invalid_argument("Invalid material");
-    const bool detail=material==Material::ember;
-    if (detail!=using_detail_) {
-        flush(); using_detail_=detail; gl_.ActiveTexture(GL_TEXTURE0);
-        gl_.BindTexture(GL_TEXTURE_2D,detail?detail_:atlas_);
-        gl_.Uniform1i(normal_enabled_,detail?0:1);
+    const bool detail = material == Material::ember;
+    if (detail != using_detail_) {
+        flush();
+        using_detail_ = detail;
+        gl_.ActiveTexture(GL_TEXTURE0);
+        gl_.BindTexture(GL_TEXTURE_2D, detail ? detail_ : atlas_);
+        gl_.Uniform1i(normal_enabled_, detail ? 0 : 1);
     }
     if (size_ == capacity) flush();
-    const float origin = static_cast<float>(static_cast<unsigned>(material)*pitch+1);
-    sprites_[size_++] = {x,y,width,height, origin/atlas_width, 1.0F/pitch,
-        (origin+tile)/atlas_width, static_cast<float>(tile+1)/pitch, shade,shade,shade,1,angle};
-    if (detail) { auto& sprite=sprites_[size_-1]; sprite.u0=sprite.v0=0; sprite.u1=sprite.v1=1; }
+    const float origin = static_cast<float>(static_cast<unsigned>(material) * pitch + 1);
+    sprites_[size_++] = {x,
+                         y,
+                         width,
+                         height,
+                         origin / atlas_width,
+                         1.0F / pitch,
+                         (origin + tile) / atlas_width,
+                         static_cast<float>(tile + 1) / pitch,
+                         shade,
+                         shade,
+                         shade,
+                         1,
+                         angle};
+    if (detail) {
+        auto& sprite = sprites_[size_ - 1];
+        sprite.u0 = sprite.v0 = 0;
+        sprite.u1 = sprite.v1 = 1;
+    }
 }
 void Renderer::flush() {
     if (!size_) return;
     gl_.BindBuffer(GL_ARRAY_BUFFER, buffer_);
     // Orphan the old store so the driver need not wait for the preceding frame.
-    gl_.BufferData(GL_ARRAY_BUFFER, capacity*sizeof(Sprite), nullptr, GL_STREAM_DRAW);
-    gl_.BufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(size_*sizeof(Sprite)), sprites_.get());
+    gl_.BufferData(GL_ARRAY_BUFFER, capacity * sizeof(Sprite), nullptr, GL_STREAM_DRAW);
+    gl_.BufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(size_ * sizeof(Sprite)), sprites_.get());
     gl_.DrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(size_));
-    size_ = 0; ++calls_;
+    size_ = 0;
+    ++calls_;
 }
-void Renderer::light(float x,float y,float radius,float red,float green,float blue,float intensity,float height) {
-    if (light_count_==lights_.size()) throw std::runtime_error("Visible light budget exhausted");
-    if (radius<=0 || height<=0) throw std::invalid_argument("Light radius and height must be positive");
-    lights_[light_count_++]={x,y,radius,red,green,blue,intensity,height};
+void Renderer::light(float x, float y, float radius, float red, float green, float blue, float intensity,
+                     float height) {
+    if (light_count_ == lights_.size()) throw std::runtime_error("Visible light budget exhausted");
+    if (radius <= 0 || height <= 0) throw std::invalid_argument("Light radius and height must be positive");
+    lights_[light_count_++] = {x, y, radius, red, green, blue, intensity, height};
 }
 void Renderer::finish() {
     flush();
-    gl_.BindFramebuffer(GL_FRAMEBUFFER,light_fbo_);
-    gl_.Viewport(0,0,std::max(1,width_/2),std::max(1,height_/2));
-    gl_.ClearColor(0.34F,0.43F,0.56F,1); gl_.Clear(GL_COLOR_BUFFER_BIT);
-    gl_.UseProgram(light_program_); gl_.BlendFunc(GL_ONE,GL_ONE);
-    gl_.ActiveTexture(GL_TEXTURE0); gl_.BindTexture(GL_TEXTURE_2D,normal_target_);
-    gl_.Uniform2f(light_view_,view_width_,view_height_);
-    for (std::size_t i=0;i<light_count_;++i) {
-        const auto& l=lights_[i]; const float x=0.5F+l.x/view_width_,y=0.5F+l.y/view_height_;
-        gl_.Uniform4f(light_rect_,x-l.radius/view_width_,y-l.radius/view_height_,x+l.radius/view_width_,y+l.radius/view_height_);
-        gl_.Uniform4f(light_position_,x,y,l.radius,l.height);
-        gl_.Uniform4f(light_color_,l.red,l.green,l.blue,l.intensity);
-        gl_.DrawArraysInstanced(GL_TRIANGLES,0,6,1); ++calls_;
+    gl_.BindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
+    gl_.Viewport(0, 0, std::max(1, width_ / 2), std::max(1, height_ / 2));
+    gl_.ClearColor(0.34F, 0.43F, 0.56F, 1);
+    gl_.Clear(GL_COLOR_BUFFER_BIT);
+    gl_.UseProgram(light_program_);
+    gl_.BlendFunc(GL_ONE, GL_ONE);
+    gl_.ActiveTexture(GL_TEXTURE0);
+    gl_.BindTexture(GL_TEXTURE_2D, normal_target_);
+    gl_.Uniform2f(light_view_, view_width_, view_height_);
+    for (std::size_t i = 0; i < light_count_; ++i) {
+        const auto& l = lights_[i];
+        const float x = 0.5F + l.x / view_width_, y = 0.5F + l.y / view_height_;
+        gl_.Uniform4f(light_rect_, x - l.radius / view_width_, y - l.radius / view_height_,
+                      x + l.radius / view_width_, y + l.radius / view_height_);
+        gl_.Uniform4f(light_position_, x, y, l.radius, l.height);
+        gl_.Uniform4f(light_color_, l.red, l.green, l.blue, l.intensity);
+        gl_.DrawArraysInstanced(GL_TRIANGLES, 0, 6, 1);
+        ++calls_;
     }
-    gl_.BindFramebuffer(GL_FRAMEBUFFER,0); gl_.Viewport(0,0,width_,height_); gl_.Disable(GL_BLEND);
+    gl_.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl_.Viewport(0, 0, width_, height_);
+    gl_.Disable(GL_BLEND);
     gl_.UseProgram(composite_program_);
-    gl_.ActiveTexture(GL_TEXTURE0); gl_.BindTexture(GL_TEXTURE_2D,albedo_target_);
-    gl_.ActiveTexture(GL_TEXTURE1); gl_.BindTexture(GL_TEXTURE_2D,light_target_);
-    gl_.DrawArraysInstanced(GL_TRIANGLES,0,6,1); ++calls_; gl_.check();
+    gl_.ActiveTexture(GL_TEXTURE0);
+    gl_.BindTexture(GL_TEXTURE_2D, albedo_target_);
+    gl_.ActiveTexture(GL_TEXTURE1);
+    gl_.BindTexture(GL_TEXTURE_2D, light_target_);
+    gl_.DrawArraysInstanced(GL_TRIANGLES, 0, 6, 1);
+    ++calls_;
+    gl_.check();
 }
 void Renderer::screenshot(const char* path, int width, int height) {
-    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width)*height*4);
-    gl_.ReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);
+    gl_.ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
     gl_.check();
     std::ofstream out(path, std::ios::binary);
     out << "P6\n" << width << ' ' << height << "\n255\n";
-    for (int y = height-1; y >= 0; --y) for (int x = 0; x < width; ++x)
-        out.write(reinterpret_cast<const char*>(pixels.data() + (static_cast<std::size_t>(y)*width+x)*4), 3);
+    for (int y = height - 1; y >= 0; --y)
+        for (int x = 0; x < width; ++x)
+            out.write(
+                reinterpret_cast<const char*>(pixels.data() + (static_cast<std::size_t>(y) * width + x) * 4),
+                3);
     if (!out) throw std::runtime_error("Cannot write screenshot");
 }
 } // namespace seed

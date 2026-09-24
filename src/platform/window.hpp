@@ -20,7 +20,7 @@ struct Input {
 // Owns SDL video and a single GL context. All methods run on the main thread.
 class Window final {
 public:
-    explicit Window(bool vsync=true);
+    explicit Window(bool vsync = true);
     ~Window();
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
@@ -30,13 +30,14 @@ public:
     void title(std::string_view value);
     void drawable_size(int& width, int& height) const;
     void logical_size(int& width, int& height) const;
+
 private:
     void release() noexcept;
     SDL_Window* window_{};
     SDL_GLContext context_{};
-    using ViewportFn = void (APIENTRY*)(int, int, int, int);
-    using ClearColorFn = void (APIENTRY*)(float, float, float, float);
-    using ClearFn = void (APIENTRY*)(unsigned int);
+    using ViewportFn = void(APIENTRY*)(int, int, int, int);
+    using ClearColorFn = void(APIENTRY*)(float, float, float, float);
+    using ClearFn = void(APIENTRY*)(unsigned int);
     ViewportFn viewport_{};
     ClearColorFn clear_color_{};
     ClearFn clear_{};

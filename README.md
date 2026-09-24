@@ -19,6 +19,8 @@ With a multi-configuration Windows generator, run `build/release/Release/seed_de
 
 This workspace also contains a project-local CMake installation and downloaded dependencies. `sh tools/build-local.sh release` uses them without a system-wide installation.
 
+Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project sources; `sh tools/format.sh --check` reports unformatted files without editing them.
+
 ## Demo controls
 
 | Control | Action |

@@ -1,7 +1,7 @@
 #pragma once
-#include "world/generator.hpp"
 #include "core/jobs.hpp"
 #include "core/memory.hpp"
+#include "world/generator.hpp"
 #include <atomic>
 #include <exception>
 #include <filesystem>
@@ -9,7 +9,7 @@
 namespace seed {
 class World final {
 public:
-    World(Jobs& jobs,std::uint64_t seed,std::filesystem::path directory);
+    World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory);
     ~World();
     World(const World&) = delete;
     World& operator=(const World&) = delete;
@@ -19,12 +19,14 @@ public:
     bool remove_tree(WorldPosition position);
     bool dig(WorldPosition position);
     const Tile* tile(WorldPosition position) const;
-    template<class F> void each(F&& visitor) const {
-        for (const auto& slot:slots_)
-            if (slot.state.load(std::memory_order_acquire)==State::active) visitor(slot.coord,*slot.chunk);
+    template<class F>
+    void each(F&& visitor) const {
+        for (const auto& slot : slots_)
+            if (slot.state.load(std::memory_order_acquire) == State::active) visitor(slot.coord, *slot.chunk);
     }
+
 private:
-    enum class State { empty,generating,ready,active,saving,saved,failed };
+    enum class State { empty, generating, ready, active, saving, saved, failed };
     struct Slot {
         World* world{};
         Chunk* chunk{};
@@ -41,7 +43,7 @@ private:
     Jobs& jobs_;
     std::uint64_t seed_;
     std::filesystem::path directory_;
-    Pool<Chunk,49> pool_;
-    std::array<Slot,49> slots_;
+    Pool<Chunk, 49> pool_;
+    std::array<Slot, 49> slots_;
 };
 } // namespace seed

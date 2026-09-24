@@ -1,5 +1,5 @@
-#include <SDL_opengl.h>
 #include "platform/window.hpp"
+#include <SDL_opengl.h>
 
 #include <stdexcept>
 #include <string>
@@ -12,12 +12,13 @@ namespace {
 void attribute(SDL_GLattr key, int value) {
     if (SDL_GL_SetAttribute(key, value) != 0) fail("Set OpenGL attribute");
 }
-template<class T> T load(const char* name) {
+template<class T>
+T load(const char* name) {
     auto result = reinterpret_cast<T>(SDL_GL_GetProcAddress(name));
     if (!result) throw std::runtime_error(std::string("Missing OpenGL function: ") + name);
     return result;
 }
-}
+} // namespace
 
 Window::Window(bool vsync) {
     SDL_SetMainReady();
@@ -28,9 +29,8 @@ Window::Window(bool vsync) {
         attribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         attribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
         attribute(SDL_GL_DOUBLEBUFFER, 1);
-        window_ = SDL_CreateWindow("Seed Engine", SDL_WINDOWPOS_CENTERED,
-            SDL_WINDOWPOS_CENTERED, 1280, 720,
-            SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+        window_ = SDL_CreateWindow("Seed Engine", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
+                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         if (!window_) fail("Create window");
         context_ = SDL_GL_CreateContext(window_);
         if (!context_) fail("Create OpenGL 4.1 context");
@@ -46,17 +46,18 @@ Window::Window(bool vsync) {
 #ifdef __APPLE__
         // SDL2's Cocoa display-link wait can stop progressing while the display sleeps.
         // The client loop paces frames explicitly on this development platform.
-        vsync=false;
+        vsync = false;
 #endif
-        if (SDL_GL_SetSwapInterval(vsync?1:0) != 0)
-            SDL_Log("VSync unavailable: %s", SDL_GetError());
+        if (SDL_GL_SetSwapInterval(vsync ? 1 : 0) != 0) SDL_Log("VSync unavailable: %s", SDL_GetError());
         SDL_Log("OpenGL context %d.%d", major, minor);
     } catch (...) {
         release();
         throw;
     }
 }
-Window::~Window() { release(); }
+Window::~Window() {
+    release();
+}
 void Window::release() noexcept {
     if (context_) SDL_GL_DeleteContext(context_);
     if (window_) SDL_DestroyWindow(window_);
@@ -94,9 +95,15 @@ void Window::clear(float red, float green, float blue) {
     clear_color_(red, green, blue, 1.0F);
     clear_(GL_COLOR_BUFFER_BIT);
 }
-void Window::present() { SDL_GL_SwapWindow(window_); }
-void Window::drawable_size(int& width, int& height) const { SDL_GL_GetDrawableSize(window_, &width, &height); }
-void Window::logical_size(int& width, int& height) const { SDL_GetWindowSize(window_, &width, &height); }
+void Window::present() {
+    SDL_GL_SwapWindow(window_);
+}
+void Window::drawable_size(int& width, int& height) const {
+    SDL_GL_GetDrawableSize(window_, &width, &height);
+}
+void Window::logical_size(int& width, int& height) const {
+    SDL_GetWindowSize(window_, &width, &height);
+}
 void Window::title(std::string_view value) {
     const std::string terminated(value);
     SDL_SetWindowTitle(window_, terminated.c_str());
