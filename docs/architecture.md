@@ -58,6 +58,10 @@ A support graph floods from fixed piers. Unsupported components undergo vertical
 
 Impact sounds are synthesized from damped oscillators and noise. A bounded SPSC queue feeds the SDL audio callback; the callback allocates no memory and takes no locks. If no audio device is available, startup logs that sound is disabled. Cosmetic particles and active sounds are transient and are not persisted.
 
+## Input
+
+Games read named actions, not keys. Each action has up to four bindings (keys or mouse buttons), and the engine derives `held`, `pressed` and `released` per action once a frame, including mouse-button edges. The engine registers `quit` (Escape), `checkpoint` (F5) and `screenshot` (F12) first; games register theirs in `Game::actions` and may rebind any action at runtime. Bindings are not yet saved between sessions, and there is no gamepad support.
+
 ## Engine assumptions a new game inherits
 
 These parts of the engine still assume a top-down game shaped like the demo. They are real limits, not stubs, and each needs engine work before a game that differs there.
@@ -66,7 +70,6 @@ These parts of the engine still assume a top-down game shaped like the demo. The
 - **Fixed chunk and tile geometry.** Chunks are always 32×32 one-unit tiles with one tile layer. The streamed region (5×5 requested, 7×7 retained, 49 slots) and the physics simulation radius are compile-time constants.
 - **Physics is for buildings.** Bodies are oriented boxes from per-chunk recipes or built blocks. They support one another from anchored pieces, fall when unsupported, and take point damage with 100 health. There is no character controller, no circle or polygon shapes, and no general collision query for game entities. Games move their own entities with tile and `Physics::blocks` checks.
 - **One focus entity.** The camera always centres on it, streaming follows it, and `player.delta` saves only its position. Other game entities and components are not saved.
-- **Raw input and fixed keys.** Games read SDL scancodes directly. The engine reserves Escape (quit and save), F5 (checkpoint) and F12 (screenshot).
 - **Sound and effects.** `Audio` plays one synthesized impact sound, and `Particles` has one burst style. A game cannot define its own sounds or effects yet.
 - **Rendering.** Sprites come from one generated atlas of 32×32 procedural tiles, or from whole BC3 textures. There is no text or UI, at most 32 lights, and the clear colour, tone mapping and haze are fixed.
 - **Assets.** The pack format holds BC3 textures only, cooked from TGA. The root CMake file still cooks the demo's `demo.pak` (the flame sample), which the storage tests also use.

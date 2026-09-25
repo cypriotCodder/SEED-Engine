@@ -92,6 +92,10 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       audio(!options.smoke && !options.benchmark),
       measurements_(options.benchmark ? options.measured_frames : 0) {
     if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");
+    actions.add("quit", {Binding::key(SDL_SCANCODE_ESCAPE)});
+    actions.add("checkpoint", {Binding::key(SDL_SCANCODE_F5)});
+    actions.add("screenshot", {Binding::key(SDL_SCANCODE_F12)});
+    if (game.actions) game.actions(game.context, actions);
     world.observe(physics.hooks());
 }
 
@@ -141,10 +145,13 @@ void Engine::loop(const Game& game) {
                              : std::clamp(std::chrono::duration<float>(now - previous).count(), 0.0F, 0.1F);
         previous = now;
         window.poll(input);
+        actions.update(input);
         if (options.benchmark) {
-            const bool quit = input.quit || input.pressed[SDL_SCANCODE_ESCAPE];
+            // Benchmarks ignore every input except quitting.
+            const bool quit = input.quit || actions.pressed(engine_action::quit);
             input = {};
             input.quit = quit;
+            actions.update(input);
         }
         // Join the step left running during last frame's rendering before touching bodies.
         const auto physics_join_start = MeasurementClock::now();
@@ -153,7 +160,7 @@ void Engine::loop(const Game& game) {
         const auto physics_ns = physics.last_step_nanoseconds();
         const auto frame_bodies = physics.count();
         if (game.frame) game.frame(game.context, *this, dt);
-        if (input.pressed[SDL_SCANCODE_ESCAPE]) input.quit = true;
+        if (actions.pressed(engine_action::quit)) input.quit = true;
         auto& transform = *scene.transforms.find(focus);
         if (options.benchmark && options.stream_workload) {
             // A fixed route deliberately crosses the unload boundary and returns to the start.
@@ -201,7 +208,8 @@ void Engine::loop(const Game& game) {
         renderer.finish();
         gpu.end();
         const auto render_end = MeasurementClock::now();
-        if (options.screenshot && ((options.smoke && frames == 59) || input.pressed[SDL_SCANCODE_F12]))
+        if (options.screenshot &&
+            ((options.smoke && frames == 59) || actions.pressed(engine_action::screenshot)))
             renderer.screenshot(options.screenshot, view.width, view.height);
         window.present();
         const auto frame_end = MeasurementClock::now();
@@ -229,7 +237,7 @@ void Engine::loop(const Game& game) {
         if (options.smoke && frames >= 60) input.quit = true;
         if (options.benchmark && frames >= options.measured_frames + warmup_frames) input.quit = true;
         if (!automated && !checkpoint.saving() &&
-            (input.pressed[SDL_SCANCODE_F5] || milliseconds(last_save, frame_end) >= 60000)) {
+            (actions.pressed(engine_action::checkpoint) || milliseconds(last_save, frame_end) >= 60000)) {
             save_checkpoint(true);
             last_save = MeasurementClock::now();
         }

@@ -5,6 +5,7 @@
 #include "core/scene.hpp"
 #include "io/checkpoint.hpp"
 #include "physics/physics.hpp"
+#include "platform/actions.hpp"
 #include "platform/audio.hpp"
 #include "platform/window.hpp"
 #include "render/gpu_timer.hpp"
@@ -59,6 +60,8 @@ struct Game {
     WorldGenerator world{}; // How the game\'s world is generated and edited.
     // Register every material, in a fixed order, before the renderer or world generation start.
     void (*materials)(void*, Materials&){};
+    // Register the game's input actions with their default bindings. Optional.
+    void (*actions)(void*, Actions&){};
     // How building bodies look; see BodyVisuals. Optional.
     Visual (*body_visual)(void*, const BodyState&){};
     float body_lift_per_height{};                  // See BodyVisuals::lift_per_height.
@@ -108,7 +111,8 @@ public:
     Physics physics;
     Particles particles;
     Audio audio;
-    Input input;
+    Input input;     // Raw input; prefer actions.
+    Actions actions; // Engine actions (see engine_action), then the game's.
     Entity focus{};
     unsigned frames{};
 

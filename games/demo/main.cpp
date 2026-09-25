@@ -19,10 +19,26 @@ bool fell(seed::World& world, seed::WorldPosition position) {
 }
 
 struct Demo {
+    struct {
+        seed::ActionId left, right, up, down, map, damage, dig, build;
+    } action{};
     bool damage_demo{}, overview{}, verify_stream{};
     float damage_cooldown{};
     seed::WorldPosition spawn;
 };
+
+void register_actions(void* context, seed::Actions& actions) {
+    using seed::Binding;
+    auto& action = static_cast<Demo*>(context)->action;
+    action.left = actions.add("move_left", {Binding::key(SDL_SCANCODE_A)});
+    action.right = actions.add("move_right", {Binding::key(SDL_SCANCODE_D)});
+    action.up = actions.add("move_up", {Binding::key(SDL_SCANCODE_W)});
+    action.down = actions.add("move_down", {Binding::key(SDL_SCANCODE_S)});
+    action.map = actions.add("toggle_map", {Binding::key(SDL_SCANCODE_TAB)});
+    action.damage = actions.add("damage", {Binding::mouse(SDL_BUTTON_LEFT)});
+    action.dig = actions.add("dig", {Binding::mouse(SDL_BUTTON_RIGHT)});
+    action.build = actions.add("build", {Binding::key(SDL_SCANCODE_B)});
+}
 
 bool option(void* context, std::string_view arg) {
     auto& demo = *static_cast<Demo*>(context);
@@ -85,7 +101,7 @@ void loaded(void* context, seed::Engine& engine) {
 void frame(void* context, seed::Engine& engine, float dt) {
     auto& demo = *static_cast<Demo*>(context);
     demo.damage_cooldown = std::max(0.0F, demo.damage_cooldown - dt);
-    if (engine.input.pressed[SDL_SCANCODE_TAB]) demo.overview = !demo.overview;
+    if (engine.actions.pressed(demo.action.map)) demo.overview = !demo.overview;
     if (demo.damage_demo && engine.frames == 10) {
         for (std::uint16_t pier = 0; pier < demo::platform_piers; ++pier)
             engine.physics.destroy({}, pier);
@@ -95,13 +111,12 @@ void frame(void* context, seed::Engine& engine, float dt) {
 }
 
 // Walk with WASD; water, trees and building pieces block movement.
-void step(void*, seed::Engine& engine, float dt) {
-    auto& input = engine.input;
+void step(void* context, seed::Engine& engine, float dt) {
+    const auto& action = static_cast<Demo*>(context)->action;
+    const auto& actions = engine.actions;
     auto& transform = *engine.scene.transforms.find(engine.focus);
     transform.previous = transform.position;
-    const seed::Vec2 movement{
-        static_cast<float>(input.held[SDL_SCANCODE_D]) - static_cast<float>(input.held[SDL_SCANCODE_A]),
-        static_cast<float>(input.held[SDL_SCANCODE_W]) - static_cast<float>(input.held[SDL_SCANCODE_S])};
+    const seed::Vec2 movement{actions.axis(action.left, action.right), actions.axis(action.down, action.up)};
     auto candidate = transform.position;
     candidate.move(seed::normalized(movement) * (6 * dt));
     const auto* ground = engine.world.tile(candidate);
@@ -117,22 +132,22 @@ float zoom(void* context, seed::Engine&) {
 // Left mouse damages, right mouse digs, B builds; all within four world units of the player.
 void act(void* context, seed::Engine& engine, const seed::View& view) {
     auto& demo = *static_cast<Demo*>(context);
-    auto& input = engine.input;
+    const auto& actions = engine.actions;
     auto& physics = engine.physics;
     auto& world = engine.world;
     const bool pointing =
-        (input.mouse_buttons & (SDL_BUTTON_LMASK | SDL_BUTTON_RMASK)) && demo.damage_cooldown == 0;
-    if (!pointing && !input.pressed[SDL_SCANCODE_B]) return;
+        (actions.held(demo.action.damage) || actions.held(demo.action.dig)) && demo.damage_cooldown == 0;
+    if (!pointing && !actions.pressed(demo.action.build)) return;
     physics.finish_step();
     const auto target = view.pointer;
     if (seed::length(seed::relative(target, engine.focus_position())) > 4) return;
-    if (input.pressed[SDL_SCANCODE_B]) {
+    if (actions.pressed(demo.action.build)) {
         const auto* ground = world.tile(target);
         if (ground && ground->elevation >= 0 && !(ground->flags & seed::tile_solid)) physics.build(target);
         return;
     }
     bool hit = false;
-    if (input.mouse_buttons & SDL_BUTTON_RMASK) {
+    if (actions.held(demo.action.dig)) {
         hit = dig(world, target);
         if (hit) physics.damage(target, 100);
     } else
@@ -217,6 +232,7 @@ int main(int argc, char** argv) {
     game.materials = demo::register_materials;
     game.body_visual = body_visual;
     game.body_lift_per_height = 0.35F; // Raised timbers draw slightly higher on screen.
+    game.actions = register_actions;
     game.option = option;
     game.validate = validate;
     game.setup = setup;
