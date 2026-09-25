@@ -11,3 +11,7 @@ Persistence and measurement changes:
 - **The asset pack is optional** (commit `3d9beb6`): `Pack()` is an empty pack, for games with no textures.
 
 Every step was checked against a baseline recorded before phase R: smoke output text, a screenshot hash, and the saved chunk bytes. The saved bytes changed only in step 8, as intended. Both benchmark workloads still produce complete reports.
+
+## G5: saved entities (chunk file version 4)
+
+The user chose per-chunk entity saving. `Engine::create_saved` adds an engine `Saved{owner}` component; `update_owners` moves ownership to the entity's current chunk only while that chunk is active, so an entity outside the active area stays with its last owner rather than being dropped. The engine chains its entity hooks around the physics `ChunkHooks`: release and store encode the owner's entities into `Chunk::entities` (and release destroys them), and activate recreates them and calls `Game::load_entity`. Records carry transform, visual and a game payload of at most 4 KiB; the chunk file appends u16 count, u32 length and the records. Decoding checks the record structure on the worker, and material IDs and payload consumption are checked on the main thread at activation. Dirty detection compares encoded bytes, so a reordering in the dense set can cause a harmless extra write. Please look at whether generated (recipe) entities are needed: today only runtime-created entities are saved, and a game that creates saved entities in `setup` would duplicate them on every load.

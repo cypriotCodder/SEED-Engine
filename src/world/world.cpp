@@ -185,6 +185,11 @@ const Tile* World::tile(WorldPosition position) const {
                                       static_cast<std::size_t>(position.local.x)];
     return nullptr;
 }
+bool World::active(ChunkCoord coord) const {
+    for (const auto& slot : slots_)
+        if (slot.state.load(std::memory_order_acquire) == State::active && slot.coord == coord) return true;
+    return false;
+}
 bool World::edit(WorldPosition position, std::uint8_t bits) {
     if (!bits || (bits & ~generator_.edit_bits)) throw std::invalid_argument("Unknown tile edit bits");
     position.move({});

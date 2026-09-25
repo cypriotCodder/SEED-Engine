@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace {
 void check(bool condition, const char* message) {
@@ -25,7 +26,7 @@ void rejects(F&& f, const char* message) {
 }
 
 constexpr std::uint64_t seed = 77;
-constexpr std::size_t header_only_size = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 2 + 2;
+constexpr std::size_t header_only_size = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 2 + 2 + 2 + 4;
 
 std::unique_ptr<seed::Chunk> generated(seed::ChunkCoord coord) {
     auto chunk = std::make_unique<seed::Chunk>();
@@ -103,8 +104,8 @@ void codec() {
         },
         "File for another coordinate accepted");
     auto old_version = bytes;
-    old_version[4] = 2;
-    rejects([&] { decode_into_fresh(old_version); }, "Version 2 chunk file accepted");
+    old_version[4] = 3;
+    rejects([&] { decode_into_fresh(old_version); }, "Version 3 chunk file accepted");
     auto other_generator = bytes;
     other_generator[8] ^= 1; // Low byte of the generator ID.
     rejects([&] { decode_into_fresh(other_generator); }, "Chunk file from another generator accepted");
@@ -119,6 +120,56 @@ void codec() {
     auto far_away = bytes;
     far_away[first_record + 3] = 9; // Position chunk x of the first record: 9 chunks from its owner.
     rejects([&] { decode_into_fresh(far_away); }, "Body outside owner reach accepted");
+}
+
+// Saved entities travel verbatim in the chunk file and are validated on load.
+void entity_codec() {
+    const seed::ChunkCoord origin{};
+    auto baseline = generated(origin);
+    auto edited = generated(origin);
+    const std::uint8_t payload[] = {7, 0, 42};
+    seed::append_entity(edited->entities, {{{}, {40.5F, 3.25F}}, 0.5F, 2, {0.4F, 0.6F}, payload});
+    seed::append_entity(edited->entities, {{{}, {1, 1}}, 0, 0, {1, 1}, {}});
+    check(!seed::chunk_matches_baseline(*edited, baseline->bodies), "Entities make a chunk differ");
+    const auto bytes = seed::encode_chunk(test_world::generator(), seed, origin, *edited, baseline->bodies);
+
+    auto loaded = generated(origin);
+    seed::decode_chunk(bytes, test_world::generator(), seed, origin, *loaded);
+    check(loaded->entities == edited->entities, "Entity records round trip");
+    std::vector<seed::EntityRecord> records;
+    std::vector<std::vector<std::uint8_t>> payloads;
+    seed::each_entity(loaded->entities, [&](const seed::EntityRecord& record) {
+        records.push_back(record);
+        payloads.emplace_back(record.payload.begin(), record.payload.end());
+    });
+    check(records.size() == 2, "Both entities decoded");
+    // The first record was stored canonically: 40.5 local x is 8.5 into the next chunk.
+    check(records[0].position.chunk == seed::ChunkCoord{1, 0} && records[0].position.local.x == 8.5F &&
+              records[0].angle == 0.5F && records[0].material == 2 && records[0].size.y == 0.6F,
+          "Entity transform and visual round trip");
+    check(payloads[0] == std::vector<std::uint8_t>{7, 0, 42} && payloads[1].empty(), "Entity payloads");
+
+    auto decode_into_fresh = [&](std::vector<std::uint8_t> data) {
+        auto target = generated(origin);
+        seed::decode_chunk(data, test_world::generator(), seed, origin, *target);
+    };
+    const std::size_t count_offset = header_only_size - 6;
+    auto extra = bytes;
+    extra[count_offset] = 3; // Claims a third record the section does not hold.
+    rejects([&] { decode_into_fresh(extra); }, "Entity count beyond the section accepted");
+    auto short_section = bytes;
+    short_section[count_offset + 2] -= 1; // Section length one byte short of its records.
+    rejects([&] { decode_into_fresh(short_section); }, "Truncated entity section accepted");
+    auto bad_float = bytes;
+    const std::size_t angle = count_offset + 6 + 24;
+    bad_float[angle + 2] = 0x80;
+    bad_float[angle + 3] = 0x7f; // +infinity in the first record's angle.
+    rejects([&] { decode_into_fresh(bad_float); }, "Non-finite entity angle accepted");
+
+    const std::vector<std::uint8_t> huge(seed::entity_payload_capacity + 1);
+    rejects<std::length_error>([&] { seed::append_entity(edited->entities, {{}, 0, 0, {1, 1}, huge}); },
+                               "Oversized entity payload accepted");
+    check(edited->entities.count == 2, "A rejected record leaves the section unchanged");
 }
 
 // world.seed binds a save to one game, generator, generator version and seed.
@@ -329,6 +380,7 @@ int main() {
     try {
         job_groups();
         codec();
+        entity_codec();
         residency();
         save_identity();
         built_slots_are_reclaimed();

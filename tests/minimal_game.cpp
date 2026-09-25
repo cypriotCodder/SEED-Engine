@@ -1,14 +1,22 @@
 // The smallest complete game, used to prove the engine is usable without the demo: it links only
-// seed_engine, ships no assets, and generates, edits, streams, saves and reloads a world.
+// seed_engine, ships no assets, and generates, edits, streams, saves and reloads a world, including
+// a saved entity with a game component.
 #include "app/app.hpp"
 #include "physics/character.hpp"
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 
 namespace {
 enum : seed::MaterialId { meadow, pond };
 constexpr std::uint8_t flood = 1;
+
+// A game component stored in a saved entity's payload.
+struct Beacon {
+    std::uint8_t level{};
+};
+constexpr seed::WorldPosition beacon_at{{}, {8.5F, 4.5F}};
 
 void materials(void*, seed::Materials& registry) {
     registry.add({"meadow", {90, 140, 70}});
@@ -32,20 +40,51 @@ void apply_edit(void*, seed::Tile& tile, std::uint8_t bits) {
     }
 }
 
+void save_entity(void*, seed::Engine& engine, seed::Entity entity, seed::Bytes& out) {
+    out.u8(engine.scene.components<Beacon>().find(entity)->level);
+}
+void load_entity(void*, seed::Engine& engine, seed::Entity entity, seed::Reader& in) {
+    engine.scene.components<Beacon>().add(entity, {in.u8()});
+}
+
+// The single beacon in the scene, or nullptr.
+const Beacon* beacon(seed::Engine& engine, seed::WorldPosition* position = nullptr) {
+    auto& beacons = engine.scene.components<Beacon>();
+    if (beacons.values().size() > 1) throw std::runtime_error("Saved beacon was duplicated");
+    if (beacons.values().empty()) return nullptr;
+    if (position) *position = engine.scene.transforms.find(beacons.owners()[0])->position;
+    return &beacons.values()[0];
+}
+
 seed::Entity setup(void*, seed::Engine& engine, seed::WorldPosition spawn) {
+    engine.scene.add_component<Beacon>();
     return engine.scene.create({spawn, spawn, 0}, {meadow, {0.5F, 0.5F}});
 }
 
-// Flood a tile, stream its chunk out (which saves it) and back in, and check the edit survived.
+// Flood a tile and place a beacon, stream their chunk out (which saves it) and back in, and check
+// both survived. A run on an existing save must find the beacon the first run left.
 void loaded(void*, seed::Engine& engine) {
+    const bool resumed = std::filesystem::exists(engine.checkpoint.read_path("player.delta"));
+    if (resumed && !beacon(engine)) throw std::runtime_error("Saved beacon did not survive a restart");
+    if (!resumed) {
+        if (beacon(engine)) throw std::runtime_error("A fresh save already has a beacon");
+        const auto entity = engine.create_saved({beacon_at, beacon_at, 0}, {pond, {0.4F, 0.4F}});
+        engine.scene.components<Beacon>().add(entity, {7});
+    }
     const seed::WorldPosition target{{}, {5.5F, 5.5F}};
     if (!engine.world.edit(target, flood)) throw std::runtime_error("Could not edit a resident tile");
     engine.world.settle({12, 12});
     if (engine.world.tile(target)) throw std::runtime_error("Chunk stayed resident after moving away");
+    if (beacon(engine)) throw std::runtime_error("Beacon stayed in the scene after its chunk unloaded");
     engine.world.settle({});
     const auto* tile = engine.world.tile(target);
     if (!tile || tile->material != pond || !(tile->flags & seed::tile_solid))
         throw std::runtime_error("Tile edit did not survive unload and reload");
+    seed::WorldPosition position;
+    const auto* restored = beacon(engine, &position);
+    if (!restored || restored->level != 7 || position.chunk != beacon_at.chunk ||
+        position.local.x != beacon_at.local.x || position.local.y != beacon_at.local.y)
+        throw std::runtime_error("Beacon did not survive unload and reload");
 }
 
 // Walk east; the engine's character mover stops at solid tiles.
@@ -79,8 +118,9 @@ void shutdown(void*, seed::Engine& engine) {
     engine.world.each([&](seed::ChunkCoord, const seed::Chunk&) { ++chunks; });
     const auto moved = engine.focus_position().local.x;
     if (!chunks || moved <= 0) throw std::runtime_error("Minimal game did not stream or move");
-    std::printf("Minimal game: %u frames, %u resident chunks, walked to x=%.2f.\n", engine.frames, chunks,
-                moved);
+    if (!beacon(engine)) throw std::runtime_error("Beacon was lost during play");
+    std::printf("Minimal game: %u frames, %u resident chunks, walked to x=%.2f, beacon kept.\n",
+                engine.frames, chunks, moved);
 }
 } // namespace
 
@@ -97,6 +137,8 @@ int main(int argc, char** argv) {
     game.world.edit_bits = flood;
     game.world.apply_edit = apply_edit;
     game.materials = materials;
+    game.save_entity = save_entity;
+    game.load_entity = load_entity;
     game.setup = setup;
     game.loaded = loaded;
     game.step = step;

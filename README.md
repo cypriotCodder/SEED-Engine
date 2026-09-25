@@ -30,7 +30,7 @@ A game is an executable that links `seed_engine` and hands `seed::run` a `seed::
 - `world`: a `WorldGenerator` with a stable name, a version and a `terrain` callback that fills a chunk's tiles (plus `structures` and edit rules if the game has them)
 - `setup`: creates the game's entities and returns the one the camera and streaming follow
 
-It then adds the callbacks it needs: `step` for movement, `act` for pointer input, `render` to draw, and `shutdown` for end-of-run checks. [tests/minimal_game.cpp](tests/minimal_game.cpp) is a complete game in about 100 lines, and `games/demo/` is a fuller one. [Architecture](docs/architecture.md) describes the engine/game boundary and lists what the engine still assumes about a game.
+It then adds the callbacks it needs: `step` for movement, `act` for pointer input, `render` to draw, and `shutdown` for end-of-run checks. Entities made with `Engine::create_saved` are stored in the file of the chunk they stand in; the engine keeps their transform and visual, and the game's `save_entity`/`load_entity` pair writes and reads its other components. [tests/minimal_game.cpp](tests/minimal_game.cpp) is a complete game in about 150 lines, and `games/demo/` is a fuller one. [Architecture](docs/architecture.md) describes the engine/game boundary and lists what the engine still assumes about a game.
 
 Add a game as a subdirectory with its own `CMakeLists.txt`, as `games/demo/` does. `-DSEED_BUILD_DEMO=OFF` builds the engine and its tests without the demo.
 

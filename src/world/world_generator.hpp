@@ -38,6 +38,8 @@ inline void fill_chunk(const WorldGenerator& generator, std::uint64_t seed, Chun
     // Reset in place: a Chunk is tens of kilobytes and this runs on worker-thread stacks.
     chunk.tiles.fill({});
     chunk.changes.fill(0);
+    chunk.entities.records.clear();
+    chunk.entities.count = 0;
     chunk.dirty = false;
     generate_structures(generator, seed, coord, chunk.bodies);
     generator.terrain(generator.context, seed, coord, chunk);

@@ -3,6 +3,7 @@
 #include "world/structures.hpp"
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace seed {
 // Engine-defined tile flag bits. Every other meaning belongs to the game.
@@ -16,11 +17,23 @@ struct Tile {
     std::array<std::uint8_t, 4> game{};
 };
 
+// Saved scene entities owned by a chunk, kept in their chunk-file encoding while the chunk is
+// loaded but not active. The engine turns them into scene entities on activation and back into
+// records on release; see chunk_file.hpp for the record layout.
+constexpr std::size_t chunk_entity_capacity = 1024;
+constexpr std::size_t entity_payload_capacity = 4096; // Game bytes per entity.
+struct ChunkEntities {
+    std::vector<std::uint8_t> records;
+    std::uint16_t count{};
+    bool operator==(const ChunkEntities&) const = default;
+};
+
 struct Chunk {
     std::array<Tile, chunk_side * chunk_side> tiles{};
     // Saved edit bits per tile. The game defines what each bit means and how it changes a tile.
     std::array<std::uint8_t, chunk_side * chunk_side> changes{};
     ChunkBodies bodies;
+    ChunkEntities entities;
     bool dirty{};
 };
 } // namespace seed

@@ -61,6 +61,44 @@ bool same_body(const BodyState& a, const BodyState& b) {
 }
 } // namespace
 
+void append_entity(ChunkEntities& entities, const EntityRecord& record) {
+    if (entities.count == chunk_entity_capacity) throw std::length_error("Chunk entity budget exhausted");
+    if (record.payload.size() > entity_payload_capacity) throw std::length_error("Entity payload too large");
+    auto position = record.position;
+    position.move({});
+    Bytes out;
+    put_position(out, position);
+    for (float value : {record.angle, record.size.x, record.size.y})
+        put_float(out, value);
+    out.u8(record.material);
+    out.u16(static_cast<std::uint16_t>(record.payload.size()));
+    // Validate before committing so a bad record leaves the section unchanged.
+    Reader check(out.data);
+    get_position(check);
+    for (int i = 0; i < 3; ++i)
+        get_float(check);
+    entities.records.insert(entities.records.end(), out.data.begin(), out.data.end());
+    entities.records.insert(entities.records.end(), record.payload.begin(), record.payload.end());
+    ++entities.count;
+}
+
+EntityRecord read_entity(Reader& in) {
+    EntityRecord record;
+    record.position = get_position(in);
+    record.angle = get_float(in);
+    record.size = {get_float(in), get_float(in)};
+    record.material = in.u8();
+    const auto length = in.u16();
+    if (length > entity_payload_capacity) throw std::runtime_error("Entity payload too large");
+    record.payload = in.take(length);
+    return record;
+}
+
+void check_entities(const ChunkEntities& entities) {
+    if (entities.count > chunk_entity_capacity) throw std::runtime_error("Invalid entity count");
+    each_entity(entities, [](const EntityRecord&) {});
+}
+
 std::array<std::uint8_t, body_record_size> encode_body(const BodyState& body) {
     Bytes out;
     out.data.reserve(body_record_size);
@@ -80,7 +118,7 @@ bool chunk_matches_baseline(const Chunk& chunk, const ChunkBodies& baseline) {
     const auto& bodies = chunk.bodies;
     if (std::any_of(chunk.changes.begin(), chunk.changes.end(), [](auto change) { return change != 0; }))
         return false;
-    if (bodies.count != baseline.count || bodies.broken.any()) return false;
+    if (bodies.count != baseline.count || bodies.broken.any() || chunk.entities.count) return false;
     for (std::size_t i = 0; i < bodies.count; ++i)
         if (!same_body(bodies.bodies[i], baseline.bodies[i])) return false;
     return true;
@@ -130,6 +168,11 @@ std::vector<std::uint8_t> encode_chunk(const WorldGenerator& generator, std::uin
     out.u16(static_cast<std::uint16_t>(bodies.broken.count()));
     for (std::uint16_t i = 0; i < bodies.joint_count; ++i)
         if (bodies.broken[i]) out.u16(i);
+
+    // Entities: the saved records verbatim.
+    out.u16(chunk.entities.count);
+    out.u32(static_cast<std::uint32_t>(chunk.entities.records.size()));
+    out.data.insert(out.data.end(), chunk.entities.records.begin(), chunk.entities.records.end());
     return out.data;
 }
 
@@ -182,6 +225,13 @@ void decode_chunk(std::span<const std::uint8_t> bytes, const WorldGenerator& gen
         if (id >= bodies.joint_count || bodies.broken[id]) throw std::runtime_error("Invalid broken joint");
         bodies.broken.set(id);
     }
+
+    ChunkEntities entities;
+    entities.count = in.u16();
+    const auto section = in.take(in.u32());
+    entities.records.assign(section.begin(), section.end());
+    check_entities(entities);
+    chunk.entities = std::move(entities);
     if (!in.done()) throw std::runtime_error("Trailing chunk data");
 }
 } // namespace seed

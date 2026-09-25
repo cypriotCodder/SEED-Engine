@@ -10,15 +10,17 @@ The 20-byte header contains five u32 values: magic `0x344c4453`, envelope versio
 
 `world.seed` version 2 contains u32 magic `0x444c5257`, u32 schema version 2, u64 game ID, u64 generator ID, u32 generator version, and u64 seed. The game ID and generator ID are 64-bit FNV-1a hashes of the stable names the game declares (`Game::id` and `WorldGenerator::name`). Opening a save with a different game, generator, generator version or seed is an error with a message naming which one differs; the save is not changed. Untouched generated chunks do not create files.
 
-## Chunk changes, version 3
+## Chunk changes, version 4
 
-`X_Y.chunk` contains u32 magic `0x4b4e4843`, u32 schema version 3, u64 generator ID, u32 generator version, u64 seed, two signed 64-bit chunk coordinates, and u16 terrain-record count. Each terrain record is u16 tile index (row-major 32×32) plus u8 change flags. The game defines what each change bit means (`WorldGenerator::edit_bits` and `apply_edit`); in the demo, bit 0 removes a tree and bit 1 excavates terrain into water. Bits outside the game's mask are rejected. Repeated edits compact into one record per tile.
+`X_Y.chunk` contains u32 magic `0x4b4e4843`, u32 schema version 4, u64 generator ID, u32 generator version, u64 seed, two signed 64-bit chunk coordinates, and u16 terrain-record count. Each terrain record is u16 tile index (row-major 32×32) plus u8 change flags. The game defines what each change bit means (`WorldGenerator::edit_bits` and `apply_edit`); in the demo, bit 0 removes a tree and bit 1 excavates terrain into water. Bits outside the game's mask are rejected. Repeated edits compact into one record per tile.
 
 Next are u16 body-record count and records containing u16 body ID plus an 81-byte body state: u8 existence flag; current and previous positions (each two i64 chunk coordinates and two f32 local offsets); then eight f32 values: half-width, half-height, angle, previous angle, height, previous height, inverse mass, health. Generated recipe IDs remain stable, and unchanged recipe bodies are omitted. Destroyed recipe bodies remain tombstones. Built bodies are stored densely after the recipe; destroyed built bodies are omitted. Built-body indices are not persistent external handles.
 
-Finally, u16 broken-joint count precedes u16 joint recipe IDs. Endpoints/rest lengths are regenerated. Bodies and joints belong to the chunk that generated or placed them. Unknown versions, duplicate IDs, invalid state, and trailing bytes are errors.
+Next, u16 broken-joint count precedes u16 joint recipe IDs. Endpoints/rest lengths are regenerated. Bodies and joints belong to the chunk that generated or placed them.
 
-Legacy migration is disabled by user decision. Terrain-only chunk version 1, standalone `0_0.bodies` files, flat pre-checkpoint saves, and mismatched generator versions are rejected with an explicit message. Choose a new save directory; old files are not deleted or rewritten. World metadata version 1 and chunk versions 1 and 2 from earlier builds are rejected the same way; the checkpoint container is still version 1.
+Finally, the saved-entity section: u16 entity count (at most 1,024), u32 section byte length, then that many records. Each record is a position (two i64 chunk coordinates and two canonical f32 local offsets), f32 angle, f32 visual width, f32 visual height, u8 material ID, u16 payload length (at most 4,096) and the game's payload bytes. The engine checks the record structure while loading; the game's `load_entity` must consume each payload exactly. Records keep scene order and are rewritten whole whenever a chunk's saved entities change. Unknown versions, duplicate IDs, invalid state, and trailing bytes are errors.
+
+Legacy migration is disabled by user decision. Terrain-only chunk version 1, standalone `0_0.bodies` files, flat pre-checkpoint saves, and mismatched generator versions are rejected with an explicit message. Choose a new save directory; old files are not deleted or rewritten. World metadata version 1 and chunk versions 1 to 3 from earlier builds are rejected the same way; the checkpoint container is still version 1.
 
 ## Player
 

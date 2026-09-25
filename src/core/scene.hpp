@@ -15,6 +15,13 @@ struct Visual {
     Vec2 size{0.7F, 0.7F};
 };
 
+// Marks an entity that is saved with the world. The owner is the chunk whose file stores it: the
+// engine moves ownership to the chunk the entity stands in whenever that chunk is active, and the
+// entity is saved and removed from the scene when its owner unloads.
+struct Saved {
+    ChunkCoord owner{};
+};
+
 // Entities with the engine's Transform and Visual components, plus any component types the game
 // registers. Every pool lives in one arena allocated up front, so no component storage touches the
 // general-purpose heap after startup.
@@ -24,7 +31,7 @@ public:
     static constexpr std::size_t component_capacity = 16; // Game component types.
 
     explicit Scene(std::size_t memory_bytes = default_memory)
-        : memory_(memory_bytes), entities_(memory_), transforms(memory_), visuals(memory_) {}
+        : memory_(memory_bytes), entities_(memory_), transforms(memory_), visuals(memory_), saved(memory_) {}
     Entity create(Transform transform, Visual visual) {
         const auto entity = entities_.create();
         transforms.add(entity, transform);
@@ -35,6 +42,7 @@ public:
         if (!entities_.alive(e)) throw std::out_of_range("Destroy stale scene entity");
         transforms.remove(e);
         visuals.remove(e);
+        saved.remove(e);
         for (std::size_t i = 0; i < pool_count_; ++i)
             pools_[i].remove(pools_[i].set, e);
         entities_.destroy(e);
@@ -88,5 +96,6 @@ private:
 public:
     SparseSet<Transform> transforms;
     SparseSet<Visual> visuals;
+    SparseSet<Saved> saved;
 };
 } // namespace seed

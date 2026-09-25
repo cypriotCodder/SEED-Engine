@@ -43,6 +43,7 @@ public:
     // changes. Returns false if the tile's chunk is not active.
     bool edit(WorldPosition position, std::uint8_t bits);
     const Tile* tile(WorldPosition position) const;
+    bool active(ChunkCoord coord) const;
     template<class F>
     void each(F&& visitor) const {
         for (const auto& slot : slots_)

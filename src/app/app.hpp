@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace seed {
 // Options every game accepts. The engine parses these; anything else goes to Game::option.
@@ -79,7 +80,12 @@ struct Game {
     void (*act)(void*, Engine&, const View&){};    // Input that needs the camera, e.g. pointing.
     void (*render)(void*, Engine&, const View&){}; // Draw between renderer begin and finish.
     void (*describe)(void*, BenchmarkMetadata&){}; // Game fields of the benchmark report.
-    void (*shutdown)(void*, Engine&){};            // After the final checkpoint.
+    // Saved entities (see Engine::create_saved) keep their Transform and Visual automatically.
+    // These write and read the game's other components for one entity, at most
+    // entity_payload_capacity bytes; load must read exactly what save wrote. Optional, as a pair.
+    void (*save_entity)(void*, Engine&, Entity, Bytes&){};
+    void (*load_entity)(void*, Engine&, Entity, Reader&){};
+    void (*shutdown)(void*, Engine&){}; // After the final checkpoint.
 };
 
 // The running engine. Games reach every subsystem through these members.
@@ -95,6 +101,9 @@ public:
     // Draws every entity with a Visual near the camera, interpolated between fixed steps.
     void draw_entities(const View& view);
     WorldPosition focus_position();
+    // Creates an entity that is saved with the world, in the chunk it stands in. It leaves the
+    // scene when that chunk unloads and returns when it loads again, as a new Entity handle.
+    Entity create_saved(Transform transform, Visual visual);
 
     const AppOptions options;
     Jobs jobs;
@@ -122,7 +131,15 @@ public:
 private:
     friend int run(const Game&, int, char**);
     void loop(const Game& game);
+    void update_owners();
+    void restore(ChunkCoord coord, Chunk& chunk);
+    bool capture(ChunkCoord coord, Chunk& chunk, bool remove);
     BenchmarkReport measurements_;
+    ChunkHooks physics_hooks_;
+    void* game_context_;
+    void (*save_entity_)(void*, Engine&, Entity, Bytes&);
+    void (*load_entity_)(void*, Engine&, Entity, Reader&);
+    std::vector<Entity> captured_;
 };
 
 // Parses the command line, runs the game until quit, and returns the process exit code. Errors

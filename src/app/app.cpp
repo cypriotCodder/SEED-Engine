@@ -1,4 +1,5 @@
 #include "app/app.hpp"
+#include "world/chunk_file.hpp"
 #include "world/player_save.hpp"
 #include <algorithm>
 #include <charconv>
@@ -97,13 +98,88 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
       sounds(register_effects(game, particles)),
       audio(!options.smoke && !options.benchmark, sounds),
-      measurements_(options.benchmark ? options.measured_frames : 0) {
+      measurements_(options.benchmark ? options.measured_frames : 0),
+      physics_hooks_(physics.hooks()),
+      game_context_(game.context),
+      save_entity_(game.save_entity),
+      load_entity_(game.load_entity) {
     if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");
     actions.add("quit", {Binding::key(SDL_SCANCODE_ESCAPE)});
     actions.add("checkpoint", {Binding::key(SDL_SCANCODE_F5)});
     actions.add("screenshot", {Binding::key(SDL_SCANCODE_F12)});
     if (game.actions) game.actions(game.context, actions);
-    world.observe(physics.hooks());
+    ChunkHooks hooks;
+    hooks.context = this;
+    hooks.activate = [](void* context, ChunkCoord coord, Chunk& chunk) {
+        auto& engine = *static_cast<Engine*>(context);
+        engine.physics_hooks_.activate(engine.physics_hooks_.context, coord, chunk);
+        engine.restore(coord, chunk);
+    };
+    hooks.release = [](void* context, ChunkCoord coord, Chunk& chunk) {
+        auto& engine = *static_cast<Engine*>(context);
+        if (engine.capture(coord, chunk, true)) chunk.dirty = true;
+        engine.physics_hooks_.release(engine.physics_hooks_.context, coord, chunk);
+    };
+    hooks.store = [](void* context, ChunkCoord coord, Chunk& chunk) {
+        auto& engine = *static_cast<Engine*>(context);
+        if (engine.capture(coord, chunk, false)) chunk.dirty = true;
+        engine.physics_hooks_.store(engine.physics_hooks_.context, coord, chunk);
+    };
+    world.observe(hooks);
+}
+
+Entity Engine::create_saved(Transform transform, Visual visual) {
+    transform.position.move({});
+    const auto entity = scene.create(transform, visual);
+    scene.saved.add(entity, {transform.position.chunk});
+    return entity;
+}
+
+void Engine::update_owners() {
+    const auto owners = scene.saved.owners();
+    const auto saved = scene.saved.values();
+    for (std::size_t i = 0; i < owners.size(); ++i) {
+        auto position = scene.transforms.find(owners[i])->position;
+        position.move({});
+        if (world.active(position.chunk)) saved[i].owner = position.chunk;
+    }
+}
+
+void Engine::restore(ChunkCoord coord, Chunk& chunk) {
+    each_entity(chunk.entities, [&](const EntityRecord& record) {
+        static_cast<void>(materials[record.material]); // Rejects unregistered materials.
+        const auto entity =
+            scene.create({record.position, record.position, record.angle}, {record.material, record.size});
+        scene.saved.add(entity, {coord});
+        Reader in(record.payload);
+        if (load_entity_) load_entity_(game_context_, *this, entity, in);
+        if (!in.done()) throw std::runtime_error("The game did not read a saved entity's whole payload");
+    });
+}
+
+bool Engine::capture(ChunkCoord coord, Chunk& chunk, bool remove) {
+    captured_.clear();
+    const auto owners = scene.saved.owners();
+    const auto saved = scene.saved.values();
+    for (std::size_t i = 0; i < owners.size(); ++i)
+        if (saved[i].owner == coord) captured_.push_back(owners[i]);
+    ChunkEntities records;
+    Bytes payload;
+    for (const auto entity : captured_) {
+        if (entity == focus) throw std::logic_error("The focus entity cannot be saved with a chunk");
+        const auto& transform = *scene.transforms.find(entity);
+        const auto* visual = scene.visuals.find(entity);
+        payload.data.clear();
+        if (save_entity_) save_entity_(game_context_, *this, entity, payload);
+        append_entity(records, {transform.position, transform.angle, visual ? visual->material : MaterialId{},
+                                visual ? visual->size : Vec2{}, payload.data});
+    }
+    if (remove)
+        for (const auto entity : captured_)
+            scene.destroy(entity);
+    if (records == chunk.entities) return false;
+    chunk.entities = std::move(records);
+    return true;
 }
 
 Engine::~Engine() = default;
@@ -114,6 +190,7 @@ WorldPosition Engine::focus_position() {
 
 void Engine::write_deltas(WorldPosition focus_at) {
     physics.finish_step();
+    update_owners();
     world.save();
     save_player(checkpoint.working_directory(), options.seed, world.generator().version, focus_at,
                 std::filesystem::exists(checkpoint.read_path("player.delta")));
@@ -177,6 +254,7 @@ void Engine::loop(const Game& game) {
             transform.previous = transform.position;
         }
         const auto stream_start = MeasurementClock::now();
+        update_owners();
         world.stream(transform.position.chunk);
         const auto stream_end = MeasurementClock::now();
         accumulator += dt;
@@ -286,6 +364,8 @@ int run(const Game& game, int argc, char** argv) {
         if (!game.setup || !game.materials || !game.id || !game.name || !game.default_save)
             throw std::invalid_argument(
                 "A game needs an id, a name, a default save, materials() and setup()");
+        if (!game.save_entity != !game.load_entity)
+            throw std::invalid_argument("save_entity() and load_entity() must be given together");
         const auto options = parse(game, argc, argv);
         Engine engine(game, options);
         const auto spawn = load_player(engine.checkpoint.read_path("player.delta").parent_path(),
@@ -293,6 +373,8 @@ int run(const Game& game, int argc, char** argv) {
         engine.focus = game.setup(game.context, engine, spawn);
         if (!engine.scene.transforms.find(engine.focus))
             throw std::logic_error("setup() must return an entity with a Transform");
+        if (engine.scene.saved.find(engine.focus))
+            throw std::logic_error("setup() must not return a saved entity; the focus is saved separately");
         engine.world.settle(spawn.chunk);
         if (game.loaded) game.loaded(game.context, engine);
         engine.loop(game);
