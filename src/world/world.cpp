@@ -12,7 +12,8 @@ World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, Re
             return path;
         };
     if (std::filesystem::exists(directory_ / "0_0.bodies"))
-        throw std::runtime_error("Legacy standalone building saves are unsupported; choose a new save directory");
+        throw std::runtime_error(
+            "Legacy standalone building saves are unsupported; choose a new save directory");
     std::filesystem::create_directories(directory_);
     const auto metadata = directory_ / "world.seed";
     if (std::filesystem::exists(read_path_(metadata))) {
@@ -20,7 +21,8 @@ World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, Re
         Reader input(bytes);
         if (input.u32() != 0x444c5257 || input.u32() != 1 || input.u32() != generator_version ||
             input.u64() != seed_ || !input.done())
-            throw std::runtime_error("Save seed or generator version mismatch; legacy migration is disabled. Choose a new save directory");
+            throw std::runtime_error("Save seed or generator version mismatch; legacy migration is disabled. "
+                                     "Choose a new save directory");
     } else {
         Bytes output;
         output.u32(0x444c5257);

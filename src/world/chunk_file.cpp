@@ -137,7 +137,8 @@ void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk
     if (in.u32() != chunk_file_magic) throw std::runtime_error("Invalid chunk file magic");
     const auto version = in.u32();
     if (version != chunk_file_version)
-        throw std::runtime_error("Unsupported chunk file version; legacy migration is disabled. Choose a new save directory");
+        throw std::runtime_error(
+            "Unsupported chunk file version; legacy migration is disabled. Choose a new save directory");
     if (in.u32() != generator_version || in.u64() != seed || in.u64() != std::uint64_t(coord.x) ||
         in.u64() != std::uint64_t(coord.y))
         throw std::runtime_error("Chunk file belongs to another seed, generator or coordinate");

@@ -45,7 +45,8 @@ function(seed_strict target)
     endif()
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
-    src/world/chunk_file.cpp src/io/checkpoint.cpp src/core/metrics.cpp)
+    src/world/chunk_file.cpp src/io/checkpoint.cpp src/core/metrics.cpp
+    src/app/app.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
 target_compile_definitions(seed_engine PUBLIC SDL_MAIN_HANDLED)
