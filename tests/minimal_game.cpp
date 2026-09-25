@@ -1,6 +1,7 @@
 // The smallest complete game, used to prove the engine is usable without the demo: it links only
 // seed_engine, ships no assets, and generates, edits, streams, saves and reloads a world.
 #include "app/app.hpp"
+#include "physics/character.hpp"
 #include <cstdio>
 #include <stdexcept>
 
@@ -46,14 +47,12 @@ void loaded(void*, seed::Engine& engine) {
         throw std::runtime_error("Tile edit did not survive unload and reload");
 }
 
-// Walk east, stopping at solid tiles.
+// Walk east; the engine's character mover stops at solid tiles.
 void step(void*, seed::Engine& engine, float dt) {
     auto& transform = *engine.scene.transforms.find(engine.focus);
     transform.previous = transform.position;
-    auto next = transform.position;
-    next.move({2 * dt, 0});
-    const auto* tile = engine.world.tile(next);
-    if (tile && !(tile->flags & seed::tile_solid)) transform.position = next;
+    transform.position =
+        seed::move_character(engine.world, engine.physics, transform.position, {2 * dt, 0}, {0.25F, 0.25F});
 }
 
 void render(void*, seed::Engine& engine, const seed::View& view) {

@@ -65,7 +65,9 @@ public:
 
     bool damage(WorldPosition target, float amount);
     bool build(WorldPosition target);
-    bool blocks(WorldPosition position) const;
+    // Whether an axis-aligned box with half-extents `half` centred at `position` overlaps any resident
+    // body, at any height.
+    bool blocks(WorldPosition position, Vec2 half = {0.25F, 0.25F}) const;
     // Destroys an existing resident recipe body outright, whatever its health. Returns false if it is
     // already destroyed or not resident.
     bool destroy(ChunkCoord owner, std::uint16_t recipe_id);

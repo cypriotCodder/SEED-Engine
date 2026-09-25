@@ -493,15 +493,14 @@ bool Physics::build(WorldPosition target) {
     return true;
 }
 
-bool Physics::blocks(WorldPosition position) const {
+bool Physics::blocks(WorldPosition position, Vec2 half) const {
     require_idle();
     for (std::size_t i = 0; i < body_end_; ++i) {
         const auto& body = storage_->bodies[i];
         const auto& b = body.state;
         if (!body.live || !b.exists || !nearby(position.chunk, b.position.chunk, 1)) continue;
         Contact c;
-        if (collide({relative(position, b.position), {0.25F, 0.25F}, 0}, {{}, b.half, b.angle}, c))
-            return true;
+        if (collide({relative(position, b.position), half, 0}, {{}, b.half, b.angle}, c)) return true;
     }
     return false;
 }

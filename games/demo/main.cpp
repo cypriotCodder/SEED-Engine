@@ -1,5 +1,6 @@
 // The demo game: explore a procedural island, damage a timber platform, dig and build.
 #include "app/app.hpp"
+#include "physics/character.hpp"
 #include "terrain.hpp"
 #include <algorithm>
 #include <cmath>
@@ -110,19 +111,21 @@ void frame(void* context, seed::Engine& engine, float dt) {
     }
 }
 
-// Walk with WASD; water, trees and building pieces block movement.
+// The player may not walk into water, trees or unloaded ground.
+bool blocked(void*, const seed::Tile* tile) {
+    return !tile || tile->elevation < 0 || (tile->flags & seed::tile_solid);
+}
+
+// Walk with WASD, sliding along water, trees and building pieces.
 void step(void* context, seed::Engine& engine, float dt) {
     const auto& action = static_cast<Demo*>(context)->action;
     const auto& actions = engine.actions;
     auto& transform = *engine.scene.transforms.find(engine.focus);
     transform.previous = transform.position;
     const seed::Vec2 movement{actions.axis(action.left, action.right), actions.axis(action.down, action.up)};
-    auto candidate = transform.position;
-    candidate.move(seed::normalized(movement) * (6 * dt));
-    const auto* ground = engine.world.tile(candidate);
-    if (ground && ground->elevation >= 0 && !(ground->flags & seed::tile_solid) &&
-        !engine.physics.blocks(candidate))
-        transform.position = candidate;
+    transform.position =
+        seed::move_character(engine.world, engine.physics, transform.position,
+                             seed::normalized(movement) * (6 * dt), {0.25F, 0.25F}, {nullptr, blocked});
 }
 
 float zoom(void* context, seed::Engine&) {
