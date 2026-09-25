@@ -60,7 +60,7 @@ A support graph floods from fixed piers. Unsupported components undergo vertical
 
 ## Audio
 
-Impact sounds are synthesized from damped oscillators and noise. A bounded SPSC queue feeds the SDL audio callback; the callback allocates no memory and takes no locks. If no audio device is available, startup logs that sound is disabled. Cosmetic particles and active sounds are transient and are not persisted.
+Games register sounds through `Game::effects`. Each is a pitch, pitch variation, volume, decay and tone/noise mix, synthesized when played by `Audio::play`; the demo registers its impact knock this way. Particle styles are registered in the same callback. A bounded SPSC queue feeds the SDL audio callback; the callback allocates no memory and takes no locks. If no audio device is available, startup logs that sound is disabled. Cosmetic particles and active sounds are transient and are not persisted.
 
 ## Input
 
@@ -74,7 +74,7 @@ These parts of the engine still assume a top-down game shaped like the demo. The
 - **Fixed chunk and tile geometry.** Chunks are always 32×32 one-unit tiles with one tile layer. The streamed region (5×5 requested, 7×7 retained, 49 slots) and the physics simulation radius are compile-time constants.
 - **Physics is for buildings.** Bodies are oriented boxes from per-chunk recipes or built blocks. They support one another from anchored pieces, fall when unsupported, and take point damage with 100 health. Game characters are kinematic boxes moved with `move_character` (sliding against blocking tiles and bodies, under a game-supplied `TileRule`); they do not push bodies, and there are no circle or polygon shapes, raycasts or entity-versus-entity queries.
 - **One focus entity.** The camera always centres on it, streaming follows it, and `player.delta` saves only its position. Other game entities and components are not saved.
-- **Sound and effects.** `Audio` plays one synthesized impact sound, and `Particles` has one burst style. A game cannot define its own sounds or effects yet.
+- **Sound and effects.** Sounds are synthesized (a decaying tone plus noise) from registered parameters: no sampled audio, music, looping, positional panning or volume control. Particles are radial bursts of registered styles drawn as sprites.
 - **Rendering.** Sprites come from one generated atlas of 32×32 procedural tiles, or from whole BC3 textures. UI is a screen-space layer of rectangles and text in one built-in 5×7 ASCII font. There are no widgets, layout, clipping or other fonts. Scenes have at most 32 lights, and tone mapping is fixed; clear colour, ambient light and edge haze are set through `Renderer::lighting`.
 - **Assets.** The pack format holds BC3 textures only, cooked from TGA. The root CMake file still cooks the demo's `demo.pak` (the flame sample), which the storage tests also use.
 - **Benchmark report.** Its schema keeps two demo-named fields (`damage_demo`, `overview`) that games fill through `describe`, and the stream workload follows a fixed route around the origin.

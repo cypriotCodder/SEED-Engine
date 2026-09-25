@@ -5,12 +5,55 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace seed {
-// A bounded SPSC event queue keeps locks and allocations out of the audio callback.
+using SoundId = std::uint8_t;
+
+// A synthesized sound: a decaying tone mixed with noise. Nothing is loaded from disk.
+struct SoundDesc {
+    const char* name{};
+    float frequency{140}; // Base pitch in Hz.
+    float variation{};    // Successive plays step through [frequency, frequency + variation) Hz.
+    float gain{0.2F};     // Starting volume, 0-1.
+    float decay{0.9991F}; // Volume multiplier per sample at 48 kHz (0.9991 fades in about 0.1 s).
+    float tone{0.75F};    // Share of the sine tone; the rest is noise.
+};
+
+// The game's sounds, registered before audio starts. IDs follow registration order.
+class Sounds final {
+public:
+    static constexpr std::size_t capacity = 32;
+    SoundId add(const SoundDesc& desc) {
+        if (!desc.name || !*desc.name) throw std::invalid_argument("A sound needs a name");
+        if (!(desc.frequency > 0 && desc.frequency < 20000) || desc.variation < 0 || desc.gain < 0 ||
+            desc.gain > 1 || !(desc.decay > 0 && desc.decay < 1) || desc.tone < 0 || desc.tone > 1)
+            throw std::invalid_argument(std::string("Sound out of range: ") + desc.name);
+        for (std::size_t i = 0; i < size_; ++i)
+            if (std::string_view(entries_[i].name) == desc.name)
+                throw std::invalid_argument(std::string("Duplicate sound: ") + desc.name);
+        if (size_ == capacity) throw std::length_error("Too many sounds");
+        entries_[size_] = desc;
+        return static_cast<SoundId>(size_++);
+    }
+    const SoundDesc& operator[](SoundId id) const {
+        if (id >= size_) throw std::out_of_range("Unregistered sound");
+        return entries_[id];
+    }
+    std::size_t size() const { return size_; }
+
+private:
+    std::array<SoundDesc, capacity> entries_{};
+    std::size_t size_{};
+};
+
+// Plays registered sounds. A bounded SPSC event queue keeps locks and allocations out of the audio
+// callback; when the queue is full, new sounds are dropped.
 class Audio final {
 public:
-    explicit Audio(bool enabled = true) {
+    explicit Audio(bool enabled, const Sounds& sounds) : sounds_(sounds) {
         if (!enabled) return;
         if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
             SDL_Log("Audio disabled: %s", SDL_GetError());
@@ -34,17 +77,24 @@ public:
     }
     Audio(const Audio&) = delete;
     Audio& operator=(const Audio&) = delete;
-    void impact() {
+    void play(SoundId id) {
+        const auto& sound = sounds_[id]; // Validates the ID even when audio is off.
         if (!device_) return;
         const auto write = write_.load(std::memory_order_relaxed), next = (write + 1) % queue_.size();
         if (next == read_.load(std::memory_order_acquire)) return;
-        queue_[write] = 140 + static_cast<float>((sequence_++ * 37) % 180);
+        const auto spread = static_cast<std::uint32_t>(sound.variation);
+        const float pitch =
+            sound.frequency + (spread ? static_cast<float>((sequence_++ * 37) % spread) : 0.0F);
+        queue_[write] = {pitch, sound.gain, sound.decay, sound.tone};
         write_.store(next, std::memory_order_release);
     }
 
 private:
+    struct Event {
+        float frequency{}, gain{}, decay{}, tone{};
+    };
     struct Voice {
-        float phase{}, gain{}, frequency{};
+        float phase{}, gain{}, frequency{}, decay{}, tone{};
     };
     static void callback(void* context, Uint8* stream, int bytes) noexcept {
         auto& self = *static_cast<Audio*>(context);
@@ -53,7 +103,8 @@ private:
         const auto write = self.write_.load(std::memory_order_acquire);
         while (read != write) {
             auto& voice = self.voices_[self.next_voice_++ % self.voices_.size()];
-            voice = {0, 0.2F, self.queue_[read]};
+            const auto& event = self.queue_[read];
+            voice = {0, event.gain, event.frequency, event.decay, event.tone};
             read = (read + 1) % self.queue_.size();
         }
         self.read_.store(read, std::memory_order_release);
@@ -63,16 +114,17 @@ private:
                 if (voice.gain > 0.00001F) {
                     self.noise_ = self.noise_ * 1664525U + 1013904223U;
                     const float noise = static_cast<float>(self.noise_ >> 8) / 8388608 - 1;
-                    value += voice.gain * (0.75F * std::sin(voice.phase) + 0.25F * noise);
+                    value += voice.gain * (voice.tone * std::sin(voice.phase) + (1 - voice.tone) * noise);
                     voice.phase += 6.2831853F * voice.frequency / 48000;
                     if (voice.phase > 6.2831853F) voice.phase -= 6.2831853F;
-                    voice.gain *= 0.9991F;
+                    voice.gain *= voice.decay;
                 }
             output[sample] = std::clamp(value, -0.8F, 0.8F);
         }
     }
+    Sounds sounds_;
     SDL_AudioDeviceID device_{};
-    std::array<float, 64> queue_{};
+    std::array<Event, 64> queue_{};
     std::array<Voice, 16> voices_{};
     std::atomic<std::size_t> read_{0}, write_{0};
     std::size_t next_voice_{};

@@ -24,6 +24,12 @@ Materials register_materials(const Game& game) {
     return materials;
 }
 
+Sounds register_effects(const Game& game, Particles& particles) {
+    Sounds sounds;
+    if (game.effects) game.effects(game.context, sounds, particles);
+    return sounds;
+}
+
 const Pack& no_assets() {
     static const Pack empty;
     return empty;
@@ -89,7 +95,8 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       world(jobs, stable_id(game.id), game.world, options.seed, checkpoint.working_directory(),
             [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
       physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
-      audio(!options.smoke && !options.benchmark),
+      sounds(register_effects(game, particles)),
+      audio(!options.smoke && !options.benchmark, sounds),
       measurements_(options.benchmark ? options.measured_frames : 0) {
     if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");
     actions.add("quit", {Binding::key(SDL_SCANCODE_ESCAPE)});

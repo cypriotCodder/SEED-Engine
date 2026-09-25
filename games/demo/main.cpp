@@ -23,6 +23,8 @@ struct Demo {
     struct {
         seed::ActionId left, right, up, down, map, damage, dig, build;
     } action{};
+    seed::SoundId impact{};
+    seed::ParticleStyleId chips{};
     bool damage_demo{}, overview{}, verify_stream{};
     float damage_cooldown{};
     seed::WorldPosition spawn;
@@ -39,6 +41,15 @@ void register_actions(void* context, seed::Actions& actions) {
     action.damage = actions.add("damage", {Binding::mouse(SDL_BUTTON_LEFT)});
     action.dig = actions.add("dig", {Binding::mouse(SDL_BUTTON_RIGHT)});
     action.build = actions.add("build", {Binding::key(SDL_SCANCODE_B)});
+}
+
+// A dull knock whose pitch steps through a range, and a spray of wood chips.
+void register_effects(void* context, seed::Sounds& sounds, seed::Particles& particles) {
+    auto& demo = *static_cast<Demo*>(context);
+    demo.impact = sounds.add({"impact", 140, 180, 0.2F, 0.9991F, 0.75F});
+    seed::ParticleStyle chips;
+    chips.material = demo::mat::wood;
+    demo.chips = particles.add_style(chips);
 }
 
 bool option(void* context, std::string_view arg) {
@@ -106,8 +117,8 @@ void frame(void* context, seed::Engine& engine, float dt) {
     if (demo.damage_demo && engine.frames == 10) {
         for (std::uint16_t pier = 0; pier < demo::platform_piers; ++pier)
             engine.physics.destroy({}, pier);
-        engine.particles.burst({{}, {0, 5}});
-        engine.audio.impact();
+        engine.particles.burst({{}, {0, 5}}, demo.chips);
+        engine.audio.play(demo.impact);
     }
 }
 
@@ -156,8 +167,8 @@ void act(void* context, seed::Engine& engine, const seed::View& view) {
     } else
         hit = physics.damage(target, 35) || fell(world, target);
     if (hit) {
-        engine.particles.burst(target);
-        engine.audio.impact();
+        engine.particles.burst(target, demo.chips);
+        engine.audio.play(demo.impact);
     }
     demo.damage_cooldown = 0.15F;
 }
@@ -189,7 +200,7 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
             }
     });
     engine.draw_entities(view);
-    engine.particles.draw(renderer, camera, demo::mat::wood);
+    engine.particles.draw(renderer, camera);
     if (seed::nearby({}, camera.chunk, 3)) {
         const auto fire = seed::relative({{}, {1, 1}}, camera);
         const float flicker = 1 + 0.08F * std::sin(static_cast<float>(engine.frames) * 0.7F);
@@ -236,6 +247,7 @@ int main(int argc, char** argv) {
     game.body_visual = body_visual;
     game.body_lift_per_height = 0.35F; // Raised timbers draw slightly higher on screen.
     game.actions = register_actions;
+    game.effects = register_effects;
     game.option = option;
     game.validate = validate;
     game.setup = setup;

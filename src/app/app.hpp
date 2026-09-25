@@ -62,6 +62,8 @@ struct Game {
     void (*materials)(void*, Materials&){};
     // Register the game's input actions with their default bindings. Optional.
     void (*actions)(void*, Actions&){};
+    // Register the game's sounds and particle styles. Optional.
+    void (*effects)(void*, Sounds&, Particles&){};
     // How building bodies look; see BodyVisuals. Optional.
     Visual (*body_visual)(void*, const BodyState&){};
     float body_lift_per_height{};                  // See BodyVisuals::lift_per_height.
@@ -110,6 +112,7 @@ public:
     World world;
     Physics physics;
     Particles particles;
+    Sounds sounds;
     Audio audio;
     Input input;     // Raw input; prefer actions.
     Actions actions; // Engine actions (see engine_action), then the game's.
