@@ -21,10 +21,11 @@ inline WorldPosition load_player(const std::filesystem::path& directory, std::ui
         throw std::runtime_error("Invalid player coordinates");
     return result;
 }
-inline void save_player(const std::filesystem::path& directory, std::uint64_t seed, WorldPosition position) {
+inline void save_player(const std::filesystem::path& directory, std::uint64_t seed, WorldPosition position,
+                        bool previously_saved = false) {
     position.move({});
     if (position.chunk == ChunkCoord{} && position.local.x == 0 && position.local.y == 0 &&
-        !std::filesystem::exists(directory / "player.delta"))
+        !previously_saved && !std::filesystem::exists(directory / "player.delta"))
         return;
     Bytes output;
     output.u32(0x52594c50);

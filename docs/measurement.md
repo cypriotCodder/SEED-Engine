@@ -50,3 +50,11 @@ Raw reports and the summary are under `build/benchmarks/final-baseline/` in this
 ## Review hardening — 2026-09-25
 
 Report serialization and sample ownership live in `BenchmarkReport` in the metrics module. Missing OpenGL description strings fall back to `unknown`; an entirely missing GPU sample set produces `null` in the aggregate summary. The Python runner regression is available as `python3 tests/benchmark_tests.py`.
+
+## Large-save checkpoint workload — 2026-09-25
+
+`./build/release/seed_checkpoint_bench NEW_DIRECTORY 1000` creates 1,000 synthetic chunk envelopes and a metadata envelope, each holding 4,096 deterministic bytes. These are container fixtures, not a playable world. It excludes fixture setup, changes one chunk before each of three commits, and prints JSON with main-thread capture latency, total completion time, worker publication time, link/copy/move counts, and validated startup time. The output directory must be new.
+
+On this Mac, the background implementation measured capture at 0.408, 0.158, and 0.185 ms. Corresponding complete save times were 111.469, 462.236, and 519.979 ms. The first capture moved 1,001 files through one directory rename; subsequent captures moved one changed file, and the worker linked 1,000 unchanged files. No raw-copy fallback was needed. Startup was 471.421 ms. Raw results are in `build/benchmarks/checkpoint-worker.json`.
+
+This measures snapshot capture and publication, **not** the preceding world serialization or job barrier. It demonstrates that full-save I/O is off the frame thread, not an overall save-throughput speedup. The first attempted implementation linked all files during capture and measured 336–405 ms of main-thread work; it was replaced before delivery. CRC validation, linking and pruning remain linear background work. The copy fallback and snapshot isolation during concurrent working-file replacement are covered by the checkpoint tests.

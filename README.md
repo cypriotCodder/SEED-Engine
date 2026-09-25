@@ -48,7 +48,7 @@ Smoke runs skip hardware audio and driver vsync. The macOS development build use
 
 ## Measurement and persistence
 
-Interactive play checkpoints every 60 seconds, on F5, and on exit. Terrain, chunk-owned buildings, and the player commit together. An exclusive writer lock prevents simultaneous saves; an interrupted commit leaves the prior checkpoint loadable. The previous complete checkpoint is retained for corruption recovery. Existing flat saves are imported into a private working directory without changing their original files. See [the save contract](docs/save-format.md) for recovery and migration details.
+Interactive play starts background checkpoints every 60 seconds or on F5, and completes a final checkpoint on exit. Terrain, chunk-owned buildings, and the player commit together. An exclusive writer lock prevents simultaneous saves; an interrupted commit leaves the prior checkpoint loadable. The previous complete checkpoint is retained for corruption recovery. Existing flat saves are imported into a private working directory without changing their original files. See [the save contract](docs/save-format.md) for recovery and migration details.
 
 Repeatable benchmarks disable audio, frame pacing, and player input, discard 60 warmup frames, and require a fresh save directory:
 

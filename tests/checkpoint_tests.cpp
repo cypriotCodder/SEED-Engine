@@ -2,6 +2,8 @@
 #include "io/binary.hpp"
 #include "io/checkpoint.hpp"
 #include "io/storage.hpp"
+#include "world/player_save.hpp"
+#include <atomic>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -28,6 +30,52 @@ void state(const std::filesystem::path& path, std::uint8_t value) {
 void verify(const std::filesystem::path& path, std::uint8_t value) {
     for (const auto* name : {"world.seed", "0_0.chunk", "player.delta"})
         check(seed::read_blob(path / name) == std::vector<std::uint8_t>{value}, "Mixed checkpoint ages");
+}
+std::filesystem::path latest(const std::filesystem::path& root);
+std::atomic<bool> frozen{false}, resume_publication{false};
+void pause_publication(seed::Checkpoint::Stage stage) {
+    if (stage != seed::Checkpoint::Stage::files_written) return;
+    frozen.store(true);
+    while (!resume_publication.load())
+        std::this_thread::yield();
+}
+void async_snapshot(const std::filesystem::path& root) {
+    seed::Jobs jobs(1);
+    {
+        seed::Checkpoint save(root);
+        state(save.working_directory(), 10);
+        save.commit();
+        state(save.working_directory(), 11);
+        struct Resume {
+            ~Resume() { resume_publication.store(true); }
+        } resume;
+        check(save.begin_commit(jobs, pause_publication), "Background commit did not start");
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!frozen.load()) {
+            if (std::chrono::steady_clock::now() > deadline)
+                throw std::runtime_error("Worker did not reach barrier");
+            std::this_thread::yield();
+        }
+        check(!save.begin_commit(jobs), "Overlapping publication was accepted");
+        rejects([&] { (void)save.metrics(); });
+        state(save.working_directory(), 12);
+        verify(latest(root), 10);
+        resume_publication.store(true);
+        save.finish_commit();
+        verify(latest(root), 11); // The new working state must not leak into the frozen checkpoint.
+        verify(save.working_directory(), 12);
+        const auto metrics = save.metrics();
+        check(metrics.linked_files + metrics.copied_files + metrics.moved_files == 3,
+              "Snapshot accounting mismatch");
+        save.commit();
+        verify(latest(root), 12);
+        const auto copied = root / "raw-copy";
+        check(!seed::snapshot_blob(save.read_path("world.seed"), copied, false), "Copy path linked");
+        check(!std::filesystem::equivalent(copied, save.read_path("world.seed")), "Copy shares inode");
+        check(seed::read_blob(copied) == std::vector<std::uint8_t>{12}, "Raw copy changed payload");
+    }
+    seed::Checkpoint reopened(root);
+    verify(reopened.working_directory(), 12);
 }
 seed::Checkpoint::Stage interruption{};
 void interrupt(seed::Checkpoint::Stage stage) {
@@ -114,6 +162,29 @@ int main(int argc, char** argv) {
         seed::write_blob(root / "CURRENT", data);
         rejects([&] { seed::Checkpoint save(root); });
         verify(root, 1);
+        async_snapshot(root / "async");
+        {
+            seed::Jobs jobs(1);
+            seed::Checkpoint save(root / "async");
+            state(save.working_directory(), 13);
+            interruption = seed::Checkpoint::Stage::manifest_written;
+            check(save.begin_commit(jobs, interrupt), "Error test job did not start");
+            rejects([&] { save.finish_commit(); });
+            verify(latest(root / "async"), 12);
+            rejects([&] { save.commit(); });
+        }
+        {
+            seed::Checkpoint save(root / "player-return");
+            state(save.working_directory(), 1);
+            seed::save_player(save.working_directory(), 123, {{}, {12, 12}});
+            save.commit();
+            seed::save_player(save.working_directory(), 123, {},
+                              std::filesystem::exists(save.read_path("player.delta")));
+            save.commit();
+            const auto position = seed::load_player(save.read_path("player.delta").parent_path(), 123);
+            check(position.local.x == 0 && position.local.y == 0,
+                  "Returning to spawn resurrected old player state");
+        }
         seed::Samples samples(100);
         for (unsigned i = 1; i <= 100; ++i)
             samples.add(i);

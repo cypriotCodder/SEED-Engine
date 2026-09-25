@@ -5,12 +5,16 @@
 #include <chrono>
 
 namespace seed {
-World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory)
-    : jobs_(jobs), seed_(seed), directory_(std::move(directory)) {
+World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, ReadPath read_path)
+    : jobs_(jobs), seed_(seed), directory_(std::move(directory)), read_path_(std::move(read_path)) {
+    if (!read_path_)
+        read_path_ = [](const std::filesystem::path& path) {
+            return path;
+        };
     std::filesystem::create_directories(directory_);
     const auto metadata = directory_ / "world.seed";
-    if (std::filesystem::exists(metadata)) {
-        const auto bytes = read_blob(metadata);
+    if (std::filesystem::exists(read_path_(metadata))) {
+        const auto bytes = read_blob(read_path_(metadata));
         Reader input(bytes);
         if (input.u32() != 0x444c5257 || input.u32() != 1 || input.u32() != generator_version ||
             input.u64() != seed_ || !input.done())
@@ -88,7 +92,7 @@ void World::save_job(void* context) noexcept {
     }
 }
 void World::load(Slot& slot) {
-    const auto file = path(slot.coord);
+    const auto file = read_path_(path(slot.coord));
     if (!std::filesystem::exists(file)) return;
     decode_chunk(read_blob(file), seed_, slot.coord, *slot.chunk);
 }
@@ -98,7 +102,7 @@ void World::write(Slot& slot) {
     ChunkBodies baseline;
     generate_structures(baseline, seed_, slot.coord);
     const auto file = path(slot.coord);
-    if (chunk_matches_baseline(*slot.chunk, baseline) && !std::filesystem::exists(file)) {
+    if (chunk_matches_baseline(*slot.chunk, baseline) && !std::filesystem::exists(read_path_(file))) {
         slot.chunk->dirty = false;
         return;
     }

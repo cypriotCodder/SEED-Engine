@@ -31,6 +31,20 @@ void sync_file(const std::filesystem::path& path) {
 #endif
 }
 } // namespace
+bool snapshot_blob(const std::filesystem::path& source, const std::filesystem::path& target,
+                   bool allow_link) {
+    if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(source)))
+        throw std::runtime_error("Snapshot source must be a regular file");
+    if (allow_link) {
+        std::error_code error;
+        std::filesystem::create_hard_link(source, target, error);
+        if (!error) return true;
+        // Some filesystems do not support hard links. Copy the compressed bytes unchanged.
+    }
+    std::filesystem::copy_file(source, target);
+    sync_file(target);
+    return false;
+}
 void sync_directory(const std::filesystem::path& path) {
 #ifndef _WIN32
     sync_file(path);

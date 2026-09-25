@@ -2,6 +2,12 @@
 
 Validation is intentionally limited to this Mac at the user's request. No Docker image was created, and no validation packages were installed system-wide. The prepared container recipe and cross-compilation script have not been run.
 
+## Background checkpoint validation — 2026-09-25
+
+The checkpoint suite now also freezes publication on a worker while working files change, checks rejection of overlapping publications, verifies asynchronous error propagation, exercises the raw-copy fallback, and confirms that returning a player to spawn overrides an earlier checkpoint position. Five CTest programs pass on the combined generator-version-2 tree. The Python benchmark regression handles an entirely absent GPU sample set and a long frame-count timeout.
+
+The Mac graphics demo passed terrain/building stream-out and reload through the frozen checkpoint layers during background publication, then reopened with 14 collapsed pieces still grounded. The separate 1,000-file container workload and its capture/publication timings are recorded in [measurement.md](measurement.md). These checks do not establish power-loss or Windows/Linux guarantees.
+
 ## Measurement and checkpoint validation — 2026-09-24
 
 Release and Debug builds use the strict warning settings. Four focused test executables cover core logic, storage, chunk/physics behavior and legacy record migration, and checkpoint recovery/statistics. Checkpoint tests exercise interruptions after file writes, manifest publication, recovery-pointer publication, and current-pointer publication. A child exits abruptly without destructors before publication, then the parent reopens the last complete save. Other checks cover writer exclusion, manifest/payload corruption, current-pointer corruption, bounded retention, unchanged original flat files, and unknown checkpoint versions.
@@ -56,4 +62,4 @@ All eight requested systems have implementations and a runnable integrated local
 
 ## Scope bounds relevant to shipping
 
-Buildings now stream with their owner chunks within bounded resident pools; ownership does not migrate when bodies move. The construction control places loose blocks, not a full snapping/stacking system. Saves publish a whole-world checkpoint with one previous checkpoint retained. Checkpoint creation copies all existing delta files and may pause on large saves; current timing covers only the small demo. These are explicit limits of the current delivery.
+Buildings now stream with their owner chunks within bounded resident pools; ownership does not migrate when bodies move. The construction control places loose blocks, not a full snapping/stacking system. Saves publish a whole-world checkpoint with one previous checkpoint retained. Snapshot capture rotates the working directory; unchanged-file merging and full validation run on a worker. Dirty-state serialization remains synchronous, and startup/background costs still scale with save size. These are explicit limits of the current delivery.

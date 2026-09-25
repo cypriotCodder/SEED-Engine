@@ -86,10 +86,11 @@ int main(int argc, char** argv) {
         seed::Checkpoint checkpoint(save);
         if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");
         const auto& working_save = checkpoint.working_directory();
-        seed::World world(jobs, seed, working_save);
+        seed::World world(jobs, seed, working_save,
+                          [&](const auto& path) { return checkpoint.read_path(path.filename().string()); });
         seed::Physics physics(scene, jobs);
         world.observe(physics.hooks());
-        const auto spawn = seed::load_player(working_save, seed);
+        const auto spawn = seed::load_player(checkpoint.read_path("player.delta").parent_path(), seed);
         const auto player = scene.create({spawn, spawn, 0}, {});
         world.settle(spawn.chunk);
         if (verify_stream) {
@@ -109,7 +110,17 @@ int main(int argc, char** argv) {
             if (physics.find({}, 4) || !physics.find({}, 5))
                 throw std::runtime_error("Building delta unload/reload check failed");
             world.settle(spawn.chunk);
-            std::puts("Terrain and building deltas survived generation, edit, unload and reload.");
+            world.save();
+            seed::save_player(working_save, seed, spawn,
+                              std::filesystem::exists(checkpoint.read_path("player.delta")));
+            checkpoint.begin_commit(jobs);
+            world.settle({8, 8});
+            world.settle({});
+            const auto* frozen_tile = world.tile({{}, {10.5F, 10.5F}});
+            if (!frozen_tile || frozen_tile->elevation >= 0 || physics.find({}, 4) || !physics.find({}, 5))
+                throw std::runtime_error("Reload through a background checkpoint lost chunk changes");
+            world.settle(spawn.chunk);
+            std::puts("Terrain and building deltas survived streaming and background checkpoint reload.");
         }
         seed::Particles particles;
         seed::Audio audio(!smoke && !benchmark);
@@ -120,13 +131,18 @@ int main(int argc, char** argv) {
         float damage_cooldown = 0;
         auto last_save = seed::MeasurementClock::now();
         int report_width = 0, report_height = 0;
-        const auto save_checkpoint = [&] {
+        const auto save_checkpoint = [&](bool background = false) {
             physics.finish_step();
             world.save();
-            seed::save_player(working_save, seed, scene.transforms.find(player)->position);
-            checkpoint.commit();
+            seed::save_player(working_save, seed, scene.transforms.find(player)->position,
+                              std::filesystem::exists(checkpoint.read_path("player.delta")));
+            if (background)
+                checkpoint.begin_commit(jobs);
+            else
+                checkpoint.commit();
         };
         while (!input.quit) {
+            if (checkpoint.finish_ready()) std::puts("Checkpoint saved.");
             const auto now = std::chrono::steady_clock::now();
             const float dt =
                 (smoke || benchmark)
@@ -293,11 +309,10 @@ int main(int argc, char** argv) {
             ++frames;
             if (smoke && frames >= 60) input.quit = true;
             if (benchmark && frames >= measured_frames + warmup_frames) input.quit = true;
-            if (!smoke && !benchmark &&
+            if (!smoke && !benchmark && !checkpoint.saving() &&
                 (input.pressed[SDL_SCANCODE_F5] || seed::milliseconds(last_save, frame_end) >= 60000)) {
-                save_checkpoint();
+                save_checkpoint(true);
                 last_save = seed::MeasurementClock::now();
-                std::puts("Checkpoint saved.");
             }
             if (!smoke && !benchmark)
                 std::this_thread::sleep_until(previous + std::chrono::microseconds(16667));
@@ -311,10 +326,11 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("Benchmark interrupted before all frames were measured");
             const auto generation = world.generation_metrics();
             measurements.write(benchmark,
-                {seed, seed::generator_version, warmup_frames, measured_frames, report_width, report_height,
-                 stream_workload, damage_demo, overview, SDL_GetPlatform(), gpu.renderer(), gpu.version(),
-                 generation.chunks, generation.nanoseconds, generation.maximum_nanoseconds, save_ms, save},
-                gpu.samples, gpu.skipped);
+                               {seed, seed::generator_version, warmup_frames, measured_frames, report_width,
+                                report_height, stream_workload, damage_demo, overview, SDL_GetPlatform(),
+                                gpu.renderer(), gpu.version(), generation.chunks, generation.nanoseconds,
+                                generation.maximum_nanoseconds, save_ms, save},
+                               gpu.samples, gpu.skipped);
         }
         if (damage_demo && physics.grounded_unsupported() == 0)
             throw std::runtime_error("Collapse check failed: no unsupported pieces reached the ground");

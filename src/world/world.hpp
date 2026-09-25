@@ -5,6 +5,7 @@
 #include <atomic>
 #include <exception>
 #include <filesystem>
+#include <functional>
 
 namespace seed {
 // Lets another system own per-chunk state while a chunk is active. All callbacks run on the main
@@ -19,7 +20,8 @@ struct ChunkHooks {
 
 class World final {
 public:
-    World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory);
+    using ReadPath = std::function<std::filesystem::path(const std::filesystem::path&)>;
+    World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, ReadPath read_path = {});
     ~World();
     World(const World&) = delete;
     World& operator=(const World&) = delete;
@@ -63,6 +65,7 @@ private:
     ChunkHooks hooks_;
     std::uint64_t seed_;
     std::filesystem::path directory_;
+    ReadPath read_path_;
     Pool<Chunk, 49> pool_;
     std::array<Slot, 49> slots_;
 };

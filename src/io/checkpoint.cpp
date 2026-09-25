@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
-#include <set>
+
 #include <string>
 #ifdef _WIN32
 #define NOMINMAX
@@ -163,32 +163,138 @@ Checkpoint::Checkpoint(std::filesystem::path root) : root_(std::move(root)), wor
         throw std::runtime_error("Working save directory cannot be a symlink");
     std::filesystem::remove_all(working_);
     std::filesystem::create_directories(working_);
-    for (const auto& name : files(source))
-        write_blob(working_ / name, read_blob(source / name));
+    for (const auto& name : files(source)) {
+        if (!current_) (void)read_blob(source / name); // Flat saves have no validated manifest.
+        // Never share inodes with original flat files owned by an older application.
+        snapshot_blob(source / name, working_ / name, current_ != 0);
+    }
+    sync_directory(working_);
+    set_read_view(current_ ? source : std::filesystem::path{}, {});
 }
-Checkpoint::~Checkpoint() = default;
+struct Checkpoint::Snapshot {
+    std::uint64_t id{};
+    std::filesystem::path target;
+    std::filesystem::path base;
+};
+Checkpoint::~Checkpoint() {
+    if (pending_) jobs_->wait(group_);
+}
+std::filesystem::path Checkpoint::read_path(const std::string& filename) const {
+    if (!delta_name(filename)) throw std::invalid_argument("Invalid save filename");
+    const auto working = working_ / filename;
+    if (std::filesystem::exists(working)) return working;
+    std::lock_guard lock(read_mutex_);
+    for (const auto& base : {read_view_.frozen, read_view_.previous}) {
+        if (!base.empty() && std::filesystem::exists(base / filename)) return base / filename;
+    }
+    return working;
+}
+void Checkpoint::set_read_view(std::filesystem::path frozen, std::filesystem::path previous) {
+    std::lock_guard lock(read_mutex_);
+    read_view_ = {std::move(frozen), std::move(previous)};
+}
+Checkpoint::Metrics Checkpoint::metrics() const {
+    if (pending_) throw std::logic_error("Checkpoint metrics requested before completion");
+    return metrics_;
+}
 void Checkpoint::commit(Observer observer) {
-    const auto names = files(working_);
-    if (!std::binary_search(names.begin(), names.end(), "world.seed"))
+    finish_commit();
+    try {
+        auto snapshot = prepare();
+        publish(*snapshot, observer);
+    } catch (...) {
+        error_ = std::current_exception();
+        throw;
+    }
+}
+bool Checkpoint::begin_commit(Jobs& jobs, Observer observer) {
+    if (pending_ && !finish_ready()) return false;
+    snapshot_ = prepare();
+    observer_ = observer;
+    error_ = nullptr;
+    jobs_ = &jobs;
+    pending_ = true;
+    try {
+        jobs.submit({publish_job, this, &group_});
+    } catch (...) {
+        pending_ = false;
+        snapshot_.reset();
+        throw;
+    }
+    return true;
+}
+void Checkpoint::publish_job(void* context) noexcept {
+    auto& checkpoint = *static_cast<Checkpoint*>(context);
+    try {
+        checkpoint.publish(*checkpoint.snapshot_, checkpoint.observer_);
+    } catch (...) {
+        checkpoint.error_ = std::current_exception();
+    }
+}
+bool Checkpoint::finish_ready() {
+    if (!pending_ || jobs_->busy(group_)) return false;
+    finish_commit();
+    return true;
+}
+void Checkpoint::finish_commit() {
+    if (!pending_) return;
+    jobs_->wait(group_);
+    pending_ = false;
+    snapshot_.reset();
+    if (error_) std::rethrow_exception(error_);
+}
+std::unique_ptr<Checkpoint::Snapshot> Checkpoint::prepare() {
+    if (error_) std::rethrow_exception(error_); // A failed session must reopen its last committed snapshot.
+    const auto start = std::chrono::steady_clock::now();
+    metrics_ = {};
+
+    if (!std::filesystem::exists(read_path("world.seed")))
         throw std::runtime_error("Cannot commit a save without world metadata");
     const auto parent = root_ / "checkpoints";
     if (std::filesystem::is_symlink(std::filesystem::symlink_status(parent)))
         throw std::runtime_error("Checkpoint directory cannot be a symlink");
     std::filesystem::create_directories(parent);
+    // IDs are unique names only. CURRENT/RECOVERY define ordering, never the system clock.
     auto id = static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
     if (!id) id = 1;
     while (std::filesystem::exists(directory(root_, id)))
         ++id;
     const auto target = directory(root_, id);
-    std::filesystem::create_directory(target);
+    if (!std::filesystem::is_directory(std::filesystem::symlink_status(working_)))
+        throw std::runtime_error("Working save path must be a directory, not a symlink");
+    // World/player writers have joined. Rename freezes all dirty files in constant filesystem
+    // operations; fresh writes atomically replace files in a new working directory.
+    std::filesystem::rename(working_, target);
+    std::filesystem::create_directory(working_);
+    const auto base = current_ ? directory(root_, current_) : std::filesystem::path{};
+    set_read_view(target, base);
+    metrics_.snapshot_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    return std::make_unique<Snapshot>(Snapshot{id, target, base});
+}
+void Checkpoint::publish(const Snapshot& snapshot, Observer observer) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto& [id, target, base] = snapshot;
+    metrics_.moved_files = files(target).size();
+    if (!base.empty()) {
+        for (const auto& name : files(base)) {
+            if (std::filesystem::exists(target / name)) continue;
+            if (snapshot_blob(base / name, target / name))
+                ++metrics_.linked_files;
+            else
+                ++metrics_.copied_files;
+        }
+    }
+    const auto names = files(target);
+    const auto parent = root_ / "checkpoints";
     Bytes manifest;
     manifest.u32(manifest_magic);
     manifest.u32(1);
     manifest.u64(id);
     manifest.u32(static_cast<std::uint32_t>(names.size()));
     for (const auto& name : names) {
-        const auto bytes = read_blob(working_ / name);
-        write_blob(target / name, bytes);
+        // Validate the frozen snapshot on the worker. No recompression or data rewrite.
+        const auto bytes = read_blob(target / name);
         manifest.u16(static_cast<std::uint16_t>(name.size()));
         for (const auto c : name)
             manifest.u8(static_cast<std::uint8_t>(c));
@@ -217,5 +323,7 @@ void Checkpoint::commit(Observer observer) {
             std::filesystem::remove_all(entry.path());
     }
     sync_directory(parent);
+    metrics_.publication_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
 } // namespace seed
