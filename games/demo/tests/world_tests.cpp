@@ -1,5 +1,7 @@
+#include "physics/character.hpp"
 #include "terrain.hpp"
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -88,6 +90,29 @@ void generation_time() {
     // Loose bound that holds even unoptimized; optimized builds measure about 0.4 ms.
     check(ms < 25, "Chunk generation is far over budget");
 }
+// The player spawns with a 0.5-unit box: it must start clear and be able to walk every way, under
+// the demo's rule (water, trees and unloaded ground block) and with the platform resident.
+void spawn_is_walkable() {
+    const auto dir = std::filesystem::temp_directory_path() / "seed-demo-spawn-test";
+    std::filesystem::remove_all(dir);
+    seed::Jobs jobs(2);
+    seed::Scene scene;
+    seed::Physics physics(scene, jobs);
+    seed::World world(jobs, seed::stable_id("seed-demo"), demo::world_generator(), 20260923, dir);
+    world.observe(physics.hooks());
+    world.settle({});
+    const seed::TileRule rule{nullptr, [](void*, const seed::Tile* tile) {
+                                  return !tile || tile->elevation < 0 || (tile->flags & seed::tile_solid);
+                              }};
+    const seed::Vec2 half{0.25F, 0.25F};
+    check(!seed::box_blocked(world, physics, {}, half, rule), "Spawn box starts blocked");
+    for (const seed::Vec2 direction :
+         {seed::Vec2{1, 0}, seed::Vec2{-1, 0}, seed::Vec2{0, 1}, seed::Vec2{0, -1}}) {
+        const auto moved = seed::move_character(world, physics, {}, direction * 0.1F, half, rule);
+        check(seed::length(seed::relative(moved, {})) > 0.09F, "Player cannot leave spawn");
+    }
+    std::filesystem::remove_all(dir);
+}
 } // namespace
 
 int main() {
@@ -96,6 +121,7 @@ int main() {
         seams();
         world_shape();
         generation_time();
+        spawn_is_walkable();
         std::cout << "World repeatability, seam, biome and ring checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

@@ -14,13 +14,13 @@ void materials(void*, seed::Materials& registry) {
     registry.add({"pond", {30, 80, 120}, seed::Pattern::water});
 }
 
-// Flat meadow with a pond stripe along every chunk's right edge; pond tiles block movement.
+// Flat meadow with a pond stripe two tiles wide at x = 20 in every chunk; pond tiles block movement.
 void terrain(void*, std::uint64_t, seed::ChunkCoord, seed::Chunk& chunk) {
     for (int y = 0; y < seed::chunk_side; ++y)
         for (int x = 0; x < seed::chunk_side; ++x) {
             auto& tile = chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)];
-            tile.material = x >= 30 ? pond : meadow;
-            tile.flags = x >= 30 ? seed::tile_solid : 0;
+            tile.material = (x == 20 || x == 21) ? pond : meadow;
+            tile.flags = (x == 20 || x == 21) ? seed::tile_solid : 0;
         }
 }
 
