@@ -21,6 +21,13 @@ namespace seed {
 //
 // A step runs on a worker between begin_step and finish_step. In that window the pools belong to
 // the worker: every other member function throws std::logic_error rather than race with it.
+// How a game draws its building bodies. Called when a body enters the scene; without it, bodies use
+// material 0 at their collision size.
+struct BodyVisuals {
+    void* context{};
+    Visual (*visual)(void*, const BodyState& body){};
+};
+
 class Physics final {
 public:
     static constexpr std::size_t body_capacity = 4096;
@@ -29,7 +36,7 @@ public:
     static constexpr std::size_t resident_capacity = 64;
     static constexpr std::uint64_t simulation_radius = 1;
 
-    Physics(Scene& scene, Jobs& jobs);
+    Physics(Scene& scene, Jobs& jobs, BodyVisuals visuals = {});
     ~Physics();
     Physics(const Physics&) = delete;
     Physics& operator=(const Physics&) = delete;
@@ -126,6 +133,7 @@ private:
     void sync_scene();
 
     Scene& scene_;
+    BodyVisuals visuals_;
     Jobs& jobs_;
     JobGroup group_;
     std::unique_ptr<Storage> storage_;

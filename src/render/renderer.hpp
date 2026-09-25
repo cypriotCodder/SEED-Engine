@@ -18,12 +18,13 @@ struct Sprite {
 class Renderer final {
 public:
     static constexpr std::size_t capacity = 32768;
-    explicit Renderer(const Pack& pack);
+    // Builds the atlas from every registered material; materials with a texture load it from `pack`.
+    Renderer(const Pack& pack, const Materials& materials);
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
     void begin(int width, int height, float camera_x, float camera_y, float pixels_per_unit);
-    void sprite(Material material, float x, float y, float width = 1, float height = 1, float angle = 0,
+    void sprite(MaterialId material, float x, float y, float width = 1, float height = 1, float angle = 0,
                 float shade = 1);
     void flush();
     void finish();
@@ -38,8 +39,11 @@ private:
     GLuint link_program(const char* vertex_source, const char* fragment_source);
     void resize_targets(int width, int height);
     Gl gl_;
-    GLuint vao_{}, buffer_{}, program_{}, atlas_{}, detail_{};
-    bool using_detail_{};
+    GLuint vao_{}, buffer_{}, program_{}, atlas_{};
+    std::array<GLuint, Materials::capacity> textures_{}; // Per material; 0 draws from the atlas.
+    GLuint bound_{};                                     // Texture currently bound for sprites.
+    std::size_t material_count_{};
+    float atlas_width_{};
     struct Light {
         float x{}, y{}, radius{}, red{}, green{}, blue{}, intensity{}, height{};
     };

@@ -7,33 +7,6 @@
 namespace seed {
 namespace {
 constexpr int tile = 32, pitch = tile + 2;
-constexpr int materials = static_cast<int>(Material::count);
-constexpr int atlas_width = pitch * materials;
-
-// How each generated material tile is drawn: flat noise, water bands, timber planks, or a round
-// sprite with a domed normal.
-enum class Pattern { speckle, water, planks, round };
-struct MaterialRecipe {
-    std::array<int, 3> color;
-    Pattern pattern;
-    int variation;
-};
-// Only this small recipe is shipped. Pixels and padding are derived at startup.
-constexpr std::array<MaterialRecipe, materials> recipes{{
-    {{29, 76, 104}, Pattern::water, 23},     // water
-    {{191, 172, 110}, Pattern::speckle, 23}, // sand
-    {{73, 111, 57}, Pattern::speckle, 23},   // grass
-    {{119, 126, 123}, Pattern::speckle, 23}, // stone
-    {{131, 85, 49}, Pattern::planks, 23},    // wood
-    {{42, 91, 44}, Pattern::round, 23},      // leaves
-    {{215, 167, 93}, Pattern::round, 23},    // player
-    {{255, 166, 45}, Pattern::round, 23},    // ember
-    {{17, 50, 79}, Pattern::water, 15},      // deep_water
-    {{47, 74, 38}, Pattern::speckle, 27},    // forest_floor
-    {{82, 71, 47}, Pattern::speckle, 19},    // mud
-    {{158, 148, 82}, Pattern::speckle, 25},  // dry_grass
-    {{226, 232, 238}, Pattern::speckle, 9},  // snow
-}};
 constexpr const char* vertex = R"GLSL(#version 410 core
 layout(location=0) in vec4 rectangle;
 layout(location=1) in vec4 region;
@@ -156,7 +129,12 @@ GLuint Renderer::link_program(const char* vertex_source, const char* fragment_so
         throw;
     }
 }
-Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capacity)) {
+Renderer::Renderer(const Pack& pack, const Materials& registry)
+    : material_count_(registry.size()), sprites_(std::make_unique<Sprite[]>(capacity)) {
+    if (!material_count_) throw std::invalid_argument("Register at least one material before rendering");
+    const int materials = static_cast<int>(material_count_);
+    const int atlas_width = pitch * materials;
+    atlas_width_ = static_cast<float>(atlas_width);
     GLuint vs{}, fs{};
     try {
         vs = shader(GL_VERTEX_SHADER, vertex);
@@ -196,7 +174,7 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
             for (int y = 0; y < pitch; ++y)
                 for (int x = 0; x < pitch; ++x) {
                     const int px = std::clamp(x - 1, 0, tile - 1), py = std::clamp(y - 1, 0, tile - 1);
-                    const auto& recipe = recipes[static_cast<std::size_t>(m)];
+                    const auto& recipe = registry[static_cast<MaterialId>(m)];
                     const auto noise = hash(static_cast<std::uint32_t>(m * 991 + py * tile + px));
                     int variation = static_cast<int>(noise % static_cast<std::uint32_t>(recipe.variation)) -
                                     recipe.variation / 2;
@@ -221,16 +199,20 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
         gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        const auto& flame = pack.texture("flame");
-        gl_.GenTextures(1, &detail_);
-        gl_.BindTexture(GL_TEXTURE_2D, detail_);
-        gl_.CompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
-                                 static_cast<GLsizei>(flame.width), static_cast<GLsizei>(flame.height), 0,
-                                 static_cast<GLsizei>(flame.blocks.size()), flame.blocks.data());
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        for (std::size_t m = 0; m < material_count_; ++m) {
+            const auto* name = registry[static_cast<MaterialId>(m)].texture;
+            if (!name) continue;
+            const auto& image = pack.texture(name);
+            gl_.GenTextures(1, &textures_[m]);
+            gl_.BindTexture(GL_TEXTURE_2D, textures_[m]);
+            gl_.CompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
+                                     static_cast<GLsizei>(image.width), static_cast<GLsizei>(image.height), 0,
+                                     static_cast<GLsizei>(image.blocks.size()), image.blocks.data());
+            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
         std::vector<std::uint8_t> normal_pixels(pixels.size());
         for (int m = 0; m < materials; ++m)
             for (int y = 0; y < pitch; ++y)
@@ -238,7 +220,7 @@ Renderer::Renderer(const Pack& pack) : sprites_(std::make_unique<Sprite[]>(capac
                     const float dx = (static_cast<float>(std::clamp(x - 1, 0, tile - 1)) - 15.5F) / 16;
                     const float dy = (static_cast<float>(std::clamp(y - 1, 0, tile - 1)) - 15.5F) / 16;
                     float nx = 0, ny = 0, nz = 1;
-                    const auto pattern = recipes[static_cast<std::size_t>(m)].pattern;
+                    const auto pattern = registry[static_cast<MaterialId>(m)].pattern;
                     if (pattern == Pattern::round) {
                         nx = dx * 0.7F;
                         ny = dy * 0.7F;
@@ -296,7 +278,8 @@ Renderer::~Renderer() {
 void Renderer::release() noexcept {
     gl_.DeleteTextures(1, &atlas_);
     gl_.DeleteBuffers(1, &buffer_);
-    gl_.DeleteTextures(1, &detail_);
+    for (auto& texture : textures_)
+        if (texture) gl_.DeleteTextures(1, &texture);
     gl_.DeleteTextures(1, &normals_);
     gl_.DeleteTextures(1, &albedo_target_);
     gl_.DeleteTextures(1, &normal_target_);
@@ -341,7 +324,7 @@ void Renderer::begin(int width, int height, float x, float y, float zoom) {
     if (width <= 0 || height <= 0 || zoom <= 0) throw std::invalid_argument("Invalid viewport");
     size_ = 0;
     calls_ = 0;
-    using_detail_ = false;
+    bound_ = atlas_;
     light_count_ = 0;
     resize_targets(width, height);
     view_width_ = static_cast<float>(width) / zoom;
@@ -363,15 +346,17 @@ void Renderer::begin(int width, int height, float x, float y, float zoom) {
     gl_.Uniform2f(scale_uniform_, 2 * zoom / static_cast<float>(width),
                   2 * zoom / static_cast<float>(height));
 }
-void Renderer::sprite(Material material, float x, float y, float width, float height, float angle,
+void Renderer::sprite(MaterialId material, float x, float y, float width, float height, float angle,
                       float shade) {
-    if (material >= Material::count) throw std::invalid_argument("Invalid material");
-    const bool detail = material == Material::ember;
-    if (detail != using_detail_) {
+    if (material >= material_count_) throw std::invalid_argument("Invalid material");
+    // Textured materials draw their whole texture without normals; switching texture flushes.
+    const bool detail = textures_[material] != 0;
+    const GLuint texture = detail ? textures_[material] : atlas_;
+    if (texture != bound_) {
         flush();
-        using_detail_ = detail;
+        bound_ = texture;
         gl_.ActiveTexture(GL_TEXTURE0);
-        gl_.BindTexture(GL_TEXTURE_2D, detail ? detail_ : atlas_);
+        gl_.BindTexture(GL_TEXTURE_2D, texture);
         gl_.Uniform1i(normal_enabled_, detail ? 0 : 1);
     }
     if (size_ == capacity) flush();
@@ -380,9 +365,9 @@ void Renderer::sprite(Material material, float x, float y, float width, float he
                          y,
                          width,
                          height,
-                         origin / atlas_width,
+                         origin / atlas_width_,
                          1.0F / pitch,
-                         (origin + tile) / atlas_width,
+                         (origin + tile) / atlas_width_,
                          static_cast<float>(tile + 1) / pitch,
                          shade,
                          shade,

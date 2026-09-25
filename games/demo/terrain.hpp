@@ -1,5 +1,5 @@
 #pragma once
-#include "core/material.hpp"
+#include "materials.hpp"
 #include "structures.hpp"
 #include "world/noise.hpp"
 #include "world/world_generator.hpp"
@@ -37,7 +37,7 @@ constexpr std::uint8_t edit_bits = edit_remove_tree | edit_excavate;
 inline void apply_tile_edit(Tile& tile, std::uint8_t bits) {
     if (bits & (edit_remove_tree | edit_excavate)) tile.flags &= static_cast<std::uint8_t>(~tile_solid);
     if (bits & edit_excavate) {
-        tile.material = static_cast<std::uint8_t>(Material::water);
+        tile.material = mat::water;
         tile.elevation = -0.1F;
     }
 }
@@ -65,7 +65,7 @@ inline float smoothstep(float edge0, float edge1, float x) {
 struct TerrainSample {
     float elevation{}, moisture{}, temperature{};
     Biome biome{Biome::ocean};
-    Material material{Material::deep_water};
+    MaterialId material{mat::deep_water};
 };
 
 // Pure function of seed and position. `local` may lie on the far chunk edge (32); positions are
@@ -117,31 +117,31 @@ inline TerrainSample sample_terrain(std::uint64_t seed, ChunkCoord chunk, Vec2 l
 
     if (out.elevation < 0) {
         out.biome = Biome::ocean;
-        out.material = out.elevation < -0.25F ? Material::deep_water : Material::water;
+        out.material = out.elevation < -0.25F ? mat::deep_water : mat::water;
     } else if (out.elevation < 0.06F) {
         out.biome = Biome::beach;
-        out.material = Material::sand;
+        out.material = mat::sand;
     } else if (out.temperature < -0.15F) {
         out.biome = Biome::snow;
-        out.material = Material::snow;
+        out.material = mat::snow;
     } else if (ring < terrain::meadow_ring) {
         out.biome = Biome::meadow;
-        out.material = Material::grass;
+        out.material = mat::grass;
     } else if (ring < terrain::forest_ring) {
         const bool wet_lowland = wetland > 0.12F && out.elevation < 0.45F;
         out.biome = wet_lowland ? Biome::swamp : Biome::forest;
-        out.material = wet_lowland ? Material::mud : Material::forest_floor;
+        out.material = wet_lowland ? mat::mud : mat::forest_floor;
         // Swamps are pocked with standing water.
         if (wet_lowland && out.moisture > 0.3F && wetland > 0.2F) {
             out.elevation = -0.01F;
-            out.material = Material::water;
+            out.material = mat::water;
         }
     } else if (out.elevation > (ring < terrain::plains_ring ? 0.55F : 0.38F)) {
         out.biome = Biome::mountain;
-        out.material = Material::stone;
+        out.material = mat::stone;
     } else {
         out.biome = Biome::plains;
-        out.material = Material::dry_grass;
+        out.material = mat::dry_grass;
     }
     return out;
 }

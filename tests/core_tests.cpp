@@ -1,5 +1,6 @@
 #include "assets/bc3.hpp"
 #include "core/ecs.hpp"
+#include "core/material.hpp"
 #include "io/binary.hpp"
 #include "physics/collision.hpp"
 #include "world/noise.hpp"
@@ -66,6 +67,21 @@ int main() {
                 {0.5F, 31.5F}, wave);
             check(std::isfinite(n) && std::abs(n) <= 1.5F, "Distant noise range");
         }
+        seed::Materials materials;
+        check(materials.add({"rock", {10, 20, 30}}) == 0 && materials.add({"moss", {1, 2, 3}}) == 1,
+              "Material IDs follow registration order");
+        check(materials.find("moss") == 1 && materials[0].color[2] == 30, "Material lookup");
+        throws<std::invalid_argument>([&] { materials.add({"rock", {0, 0, 0}}); });
+        throws<std::invalid_argument>([&] { materials.add({"bad", {0, 300, 0}}); });
+        throws<std::invalid_argument>([&] { materials.add({"flat", {0, 0, 0}, seed::Pattern::speckle, 0}); });
+        throws<std::out_of_range>([&] { (void)materials.find("missing"); });
+        throws<std::out_of_range>([&] { (void)materials[2]; });
+        static std::array<std::string, seed::Materials::capacity> names;
+        for (std::size_t i = materials.size(); i < seed::Materials::capacity; ++i) {
+            names[i] = "m" + std::to_string(i);
+            materials.add({names[i].c_str(), {0, 0, 0}});
+        }
+        throws<std::length_error>([&] { materials.add({"overflow", {0, 0, 0}}); });
         seed::Contact contact, reverse;
         const seed::Box box{{0, 0}, {1, 1}, 0}, overlap{{1.5F, 0}, {1, 1}, 0};
         check(seed::collide(box, overlap, contact) && std::abs(contact.depth - 0.5F) < 1e-5F &&

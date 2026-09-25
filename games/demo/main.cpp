@@ -74,7 +74,7 @@ void verify_stream(seed::Engine& engine, seed::WorldPosition spawn) {
 
 seed::Entity setup(void* context, seed::Engine& engine, seed::WorldPosition spawn) {
     static_cast<Demo*>(context)->spawn = spawn;
-    return engine.scene.create({spawn, spawn, 0}, {});
+    return engine.scene.create({spawn, spawn, 0}, {demo::mat::player, {0.7F, 0.7F}});
 }
 
 void loaded(void* context, seed::Engine& engine) {
@@ -152,8 +152,8 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
         for (int y = 0; y < seed::chunk_side; ++y)
             for (int x = 0; x < seed::chunk_side; ++x) {
                 const auto& tile = chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)];
-                renderer.sprite(static_cast<seed::Material>(tile.material), offset.x + x + 0.5F,
-                                offset.y + y + 0.5F, 1, 1, 0, 0.94F + demo::tile_moisture(tile) * 0.15F);
+                renderer.sprite(tile.material, offset.x + x + 0.5F, offset.y + y + 0.5F, 1, 1, 0,
+                                0.94F + demo::tile_moisture(tile) * 0.15F);
             }
     });
     engine.world.each([&](seed::ChunkCoord coord, const seed::Chunk& chunk) {
@@ -164,21 +164,26 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
                       seed::tile_solid))
                     continue;
                 const float px = offset.x + x + 0.5F, py = offset.y + y + 0.5F;
-                renderer.sprite(seed::Material::leaves, px + 0.4F, py - 0.3F, 2.0F, 1.3F, 0, 0.3F);
-                renderer.sprite(seed::Material::wood, px, py, 0.35F, 0.65F);
-                renderer.sprite(seed::Material::leaves, px, py + 0.5F, 1.8F, 1.8F);
-                renderer.sprite(seed::Material::leaves, px - 0.2F, py + 0.9F, 1.1F, 1.1F, 0, 1.3F);
+                renderer.sprite(demo::mat::leaves, px + 0.4F, py - 0.3F, 2.0F, 1.3F, 0, 0.3F);
+                renderer.sprite(demo::mat::wood, px, py, 0.35F, 0.65F);
+                renderer.sprite(demo::mat::leaves, px, py + 0.5F, 1.8F, 1.8F);
+                renderer.sprite(demo::mat::leaves, px - 0.2F, py + 0.9F, 1.1F, 1.1F, 0, 1.3F);
             }
     });
     engine.draw_entities(view);
-    engine.particles.draw(renderer, camera);
+    engine.particles.draw(renderer, camera, demo::mat::wood);
     if (seed::nearby({}, camera.chunk, 3)) {
         const auto fire = seed::relative({{}, {1, 1}}, camera);
         const float flicker = 1 + 0.08F * std::sin(static_cast<float>(engine.frames) * 0.7F);
-        renderer.sprite(seed::Material::ember, fire.x, fire.y, 0.7F * flicker, 1.2F * flicker);
+        renderer.sprite(demo::mat::ember, fire.x, fire.y, 0.7F * flicker, 1.2F * flicker);
         renderer.light(fire.x, fire.y, 9, 1, 0.53F, 0.19F, 5 * flicker, 2.5F);
     }
     renderer.light(0, 0, 6, 0.6F, 0.72F, 1, 1, 4);
+}
+
+// Anchored pieces are stone, everything else timber, drawn at collision size.
+seed::Visual body_visual(void*, const seed::BodyState& body) {
+    return {body.inverse_mass == 0 ? demo::mat::stone : demo::mat::wood, body.half * 2};
 }
 
 void describe(void* context, seed::BenchmarkMetadata& info) {
@@ -208,6 +213,8 @@ int main(int argc, char** argv) {
     game.default_save = "saves/island";
     game.usage = "[--damage-demo] [--overview] [--verify-stream] ";
     game.world = demo::world_generator();
+    game.materials = demo::register_materials;
+    game.body_visual = body_visual;
     game.option = option;
     game.validate = validate;
     game.setup = setup;

@@ -1,7 +1,7 @@
 #pragma once
 #include "core/ecs.hpp"
+#include "core/material.hpp"
 #include "core/math.hpp"
-#include "render/renderer.hpp"
 #include "world/coordinates.hpp"
 
 namespace seed {
@@ -10,7 +10,7 @@ struct Transform {
     float angle{};
 };
 struct Visual {
-    Material material{Material::player};
+    MaterialId material{};
     Vec2 size{0.7F, 0.7F};
 };
 class Scene final {

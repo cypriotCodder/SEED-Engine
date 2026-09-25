@@ -18,6 +18,12 @@ std::filesystem::path asset_path(const char* name) {
     return path;
 }
 
+Materials register_materials(const Game& game) {
+    Materials materials;
+    game.materials(game.context, materials);
+    return materials;
+}
+
 AppOptions parse(const Game& game, int argc, char** argv) {
     AppOptions options;
     options.seed = game.default_seed;
@@ -69,13 +75,14 @@ AppOptions parse(const Game& game, int argc, char** argv) {
 Engine::Engine(const Game& game, const AppOptions& opts)
     : options(opts),
       assets_(std::make_unique<PackStream>(jobs, asset_path(game.asset_pack))),
+      materials(register_materials(game)),
       window(!options.smoke && !options.benchmark),
-      renderer(assets_->get()),
+      renderer(assets_->get(), materials),
       gpu(options.benchmark ? options.measured_frames : 0),
       checkpoint(options.save),
       world(jobs, game.world, options.seed, checkpoint.working_directory(),
             [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
-      physics(scene, jobs),
+      physics(scene, jobs, {game.context, game.body_visual}),
       audio(!options.smoke && !options.benchmark),
       measurements_(options.benchmark ? options.measured_frames : 0) {
     if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");
@@ -254,8 +261,9 @@ void Engine::loop(const Game& game) {
 
 int run(const Game& game, int argc, char** argv) {
     try {
-        if (!game.setup || !game.name || !game.asset_pack || !game.default_save)
-            throw std::invalid_argument("A game needs a name, an asset pack, a default save and setup()");
+        if (!game.setup || !game.materials || !game.name || !game.asset_pack || !game.default_save)
+            throw std::invalid_argument(
+                "A game needs a name, an asset pack, a default save, materials() and setup()");
         const auto options = parse(game, argc, argv);
         Engine engine(game, options);
         const auto spawn = load_player(engine.checkpoint.read_path("player.delta").parent_path(),

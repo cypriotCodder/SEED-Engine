@@ -36,13 +36,13 @@ public:
             ++i;
         }
     }
-    void draw(Renderer& renderer, WorldPosition camera) {
+    void draw(Renderer& renderer, WorldPosition camera, MaterialId material) {
         for (std::size_t i = 0; i < count_; ++i) {
             const auto& p = pool_.get(ids_[i]);
             if (!nearby(p.position.chunk, camera.chunk, 3)) continue;
             const auto offset = relative(p.position, camera);
             const auto size = 0.13F * p.life / 0.7F;
-            renderer.sprite(Material::wood, offset.x, offset.y, size, size, p.angle, 1.5F);
+            renderer.sprite(material, offset.x, offset.y, size, size, p.angle, 1.5F);
         }
     }
 

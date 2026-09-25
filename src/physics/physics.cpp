@@ -10,13 +10,10 @@ constexpr float dt = 1.0F / 60.0F;
 constexpr float cell_size = 4;
 constexpr std::uint32_t hash_mask = 4095;
 
-Material material_of(const BodyState& state) {
-    return state.inverse_mass == 0 ? Material::stone : Material::wood;
-}
 } // namespace
 
-Physics::Physics(Scene& scene, Jobs& jobs)
-    : scene_(scene), jobs_(jobs), storage_(std::make_unique<Storage>()) {
+Physics::Physics(Scene& scene, Jobs& jobs, BodyVisuals visuals)
+    : scene_(scene), visuals_(visuals), jobs_(jobs), storage_(std::make_unique<Storage>()) {
     // Free lists pop ascending slots first, keeping pool order deterministic.
     for (std::size_t i = 0; i < body_capacity; ++i)
         storage_->free_bodies[i] = static_cast<std::uint16_t>(body_capacity - 1 - i);
@@ -65,7 +62,8 @@ std::uint16_t Physics::allocate_body(const BodyState& state, ChunkCoord owner, s
     if (!free_body_count_) throw std::runtime_error("Physics body budget exhausted");
     // Create the entity first: if the scene is full, no pool slot has been taken.
     const auto entity =
-        scene_.create({state.position, state.previous, state.angle}, {material_of(state), state.half * 2});
+        scene_.create({state.position, state.previous, state.angle},
+                      visuals_.visual ? visuals_.visual(visuals_.context, state) : Visual{0, state.half * 2});
     const auto index = storage_->free_bodies[--free_body_count_];
     auto& body = storage_->bodies[index];
     body = Body{};
