@@ -159,7 +159,9 @@ void residency() {
                               "Access during a running step must throw");
     physics.finish_step();
 
-    physics.collapse_demo();
+    for (std::uint16_t pier = 0; pier < 4; ++pier)
+        check(physics.destroy(origin, pier), "Destroy a pier");
+    check(!physics.destroy(origin, 0) && !physics.destroy(origin, 99), "Destroy rejects missing bodies");
     for (int i = 0; i < 60; ++i)
         physics.step({origin, {0, 5}});
     check(physics.unsupported() == 15 && physics.grounded_unsupported() == 15, "Collapse grounds 15 pieces");

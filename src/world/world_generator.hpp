@@ -13,11 +13,24 @@ struct WorldGenerator {
     std::uint32_t version{}; // Bump whenever the same seed would generate a different world.
     // Fill every tile of `chunk` for this coordinate. Tiles arrive zeroed.
     void (*terrain)(void*, std::uint64_t seed, ChunkCoord coord, Chunk& chunk){};
+    // Optional building recipe for a chunk, built with add_recipe_body and join_recipe_bodies.
+    // Runs on worker threads. Every body must stay within one chunk of `coord`.
+    void (*structures)(void*, std::uint64_t seed, ChunkCoord coord, ChunkBodies& out){};
     // Game-defined tile edits. `edit_bits` lists every bit the game uses; `apply_edit` applies bits
     // to a freshly generated or resident tile. The engine records and saves the bits.
     std::uint8_t edit_bits{};
     void (*apply_edit)(void*, Tile& tile, std::uint8_t bits){};
 };
+
+// Generates the building recipe of one chunk. Everything it adds is part of the recipe baseline
+// that saves are compared against.
+inline void generate_structures(const WorldGenerator& generator, std::uint64_t seed, ChunkCoord coord,
+                                ChunkBodies& out) {
+    out.count = out.recipe_count = out.joint_count = 0;
+    out.broken.reset();
+    if (generator.structures) generator.structures(generator.context, seed, coord, out);
+    out.recipe_count = out.count;
+}
 
 // Generates one chunk from scratch: tiles, building recipe and cleared edit state.
 inline void fill_chunk(const WorldGenerator& generator, std::uint64_t seed, ChunkCoord coord, Chunk& chunk) {
@@ -25,7 +38,7 @@ inline void fill_chunk(const WorldGenerator& generator, std::uint64_t seed, Chun
     chunk.tiles.fill({});
     chunk.changes.fill(0);
     chunk.dirty = false;
-    generate_structures(chunk.bodies, seed, coord);
+    generate_structures(generator, seed, coord, chunk.bodies);
     generator.terrain(generator.context, seed, coord, chunk);
 }
 

@@ -91,7 +91,7 @@ void World::write(Slot& slot) {
     if (!slot.chunk->dirty) return;
     // Regenerating the recipe is cheap and keeps a second copy of it out of every chunk slot.
     ChunkBodies baseline;
-    generate_structures(baseline, seed_, slot.coord);
+    generate_structures(generator_, seed_, slot.coord, baseline);
     const auto file = path(slot.coord);
     if (chunk_matches_baseline(*slot.chunk, baseline) && !std::filesystem::exists(read_path_(file))) {
         slot.chunk->dirty = false;

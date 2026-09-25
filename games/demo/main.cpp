@@ -87,7 +87,8 @@ void frame(void* context, seed::Engine& engine, float dt) {
     demo.damage_cooldown = std::max(0.0F, demo.damage_cooldown - dt);
     if (engine.input.pressed[SDL_SCANCODE_TAB]) demo.overview = !demo.overview;
     if (demo.damage_demo && engine.frames == 10) {
-        engine.physics.collapse_demo();
+        for (std::uint16_t pier = 0; pier < demo::platform_piers; ++pier)
+            engine.physics.destroy({}, pier);
         engine.particles.burst({{}, {0, 5}});
         engine.audio.impact();
     }

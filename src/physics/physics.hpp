@@ -57,7 +57,9 @@ public:
     bool damage(WorldPosition target, float amount);
     bool build(WorldPosition target);
     bool blocks(WorldPosition position) const;
-    void collapse_demo();
+    // Destroys an existing resident recipe body outright, whatever its health. Returns false if it is
+    // already destroyed or not resident.
+    bool destroy(ChunkCoord owner, std::uint16_t recipe_id);
     // Position of an existing resident recipe body, or nothing if it is destroyed or not resident.
     std::optional<WorldPosition> find(ChunkCoord owner, std::uint16_t recipe_id) const;
     std::size_t count() const;

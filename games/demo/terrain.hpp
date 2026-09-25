@@ -1,5 +1,6 @@
 #pragma once
 #include "core/material.hpp"
+#include "structures.hpp"
 #include "world/noise.hpp"
 #include "world/world_generator.hpp"
 #include <array>
@@ -193,6 +194,7 @@ inline WorldGenerator world_generator() {
     generator.name = "demo-disc";
     generator.version = generator_version;
     generator.terrain = generate_terrain;
+    generator.structures = generate_structures;
     generator.edit_bits = edit_bits;
     generator.apply_edit = apply_edit;
     return generator;

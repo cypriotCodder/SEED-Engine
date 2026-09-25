@@ -509,17 +509,20 @@ bool Physics::blocks(WorldPosition position) const {
     return false;
 }
 
-void Physics::collapse_demo() {
+bool Physics::destroy(ChunkCoord owner, std::uint16_t recipe_id) {
     require_idle();
-    // Recipe bodies 0-3 of chunk (0, 0) are the stone piers.
+    const auto* entry = resident(owner);
+    if (!entry || recipe_id >= entry->recipe_count) return false;
     for (std::size_t i = 0; i < body_end_; ++i) {
         auto& body = storage_->bodies[i];
-        if (!body.live || !body.state.exists || !(body.owner == ChunkCoord{}) || body.id >= 4) continue;
+        if (!body.live || !body.state.exists || !(body.owner == owner) || body.id != recipe_id) continue;
         body.state.health = 0;
         body.state.exists = false;
         scene_.destroy(body.entity);
         support_dirty_ = true;
+        return true;
     }
+    return false;
 }
 
 std::optional<WorldPosition> Physics::find(ChunkCoord owner, std::uint16_t recipe_id) const {
