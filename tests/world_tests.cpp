@@ -20,8 +20,8 @@ void repeatable_and_seed_dependent() {
         bool different = false;
         for (std::size_t i = 0; i < a->tiles.size(); ++i) {
             const auto &x = a->tiles[i], &y = b->tiles[i];
-            check(x.elevation == y.elevation && x.moisture == y.moisture && x.temperature == y.temperature &&
-                      x.material == y.material && x.biome == y.biome && x.tree == y.tree,
+            check(x.elevation == y.elevation && x.material == y.material && x.flags == y.flags &&
+                      x.game == y.game,
                   "Generation must be repeatable");
             different |= x.elevation != c->tiles[i].elevation;
         }

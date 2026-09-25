@@ -73,7 +73,7 @@ int main() {
         bool different = false;
         for (std::size_t i = 0; i < chunk_a.tiles.size(); ++i) {
             check(chunk_a.tiles[i].elevation == chunk_b.tiles[i].elevation &&
-                      chunk_a.tiles[i].tree == chunk_b.tiles[i].tree,
+                      chunk_a.tiles[i].flags == chunk_b.tiles[i].flags,
                   "Generator repeatability");
             different |= chunk_a.tiles[i].elevation != chunk_c.tiles[i].elevation;
         }

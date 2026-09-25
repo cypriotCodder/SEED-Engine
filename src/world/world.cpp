@@ -163,32 +163,15 @@ const Tile* World::tile(WorldPosition position) const {
                                       static_cast<std::size_t>(position.local.x)];
     return nullptr;
 }
-bool World::remove_tree(WorldPosition position) {
+bool World::edit(WorldPosition position, std::uint8_t bits) {
+    if (!bits || (bits & ~edit_bits)) throw std::invalid_argument("Unknown tile edit bits");
     position.move({});
     for (auto& slot : slots_)
         if (slot.state.load(std::memory_order_acquire) == State::active && slot.coord == position.chunk) {
             const auto index = static_cast<std::size_t>(position.local.y) * chunk_side +
                                static_cast<std::size_t>(position.local.x);
-            if (!slot.chunk->tiles[index].tree) return false;
-            slot.chunk->tiles[index].tree = false;
-            slot.chunk->changes[index] |= 1;
-            slot.chunk->dirty = true;
-            return true;
-        }
-    return false;
-}
-bool World::dig(WorldPosition position) {
-    position.move({});
-    for (auto& slot : slots_)
-        if (slot.state.load(std::memory_order_acquire) == State::active && slot.coord == position.chunk) {
-            const auto index = static_cast<std::size_t>(position.local.y) * chunk_side +
-                               static_cast<std::size_t>(position.local.x);
-            auto& tile = slot.chunk->tiles[index];
-            if (tile.elevation < 0) return false;
-            tile.tree = false;
-            tile.elevation = -0.1F;
-            tile.material = 0;
-            slot.chunk->changes[index] |= 3;
+            apply_tile_edit(slot.chunk->tiles[index], bits);
+            slot.chunk->changes[index] |= bits;
             slot.chunk->dirty = true;
             return true;
         }

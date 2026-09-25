@@ -8,6 +8,16 @@
 #include <string_view>
 
 namespace {
+// Digging turns dry ground into water; felling removes a tree. Both return false if nothing changed.
+bool dig(seed::World& world, seed::WorldPosition position) {
+    const auto* tile = world.tile(position);
+    return tile && tile->elevation >= 0 && world.edit(position, seed::edit_remove_tree | seed::edit_excavate);
+}
+bool fell(seed::World& world, seed::WorldPosition position) {
+    const auto* tile = world.tile(position);
+    return tile && (tile->flags & seed::tile_solid) && world.edit(position, seed::edit_remove_tree);
+}
+
 struct Demo {
     bool damage_demo{}, overview{}, verify_stream{};
     float damage_cooldown{};
@@ -38,7 +48,7 @@ void verify_stream(seed::Engine& engine, seed::WorldPosition spawn) {
     auto& world = engine.world;
     auto& physics = engine.physics;
     world.settle({});
-    world.dig({{}, {10.5F, 10.5F}});
+    dig(world, {{}, {10.5F, 10.5F}});
     const auto plank = physics.find({}, 4);
     if (!plank || !physics.damage(*plank, 100) || physics.find({}, 4))
         throw std::runtime_error("Could not destroy the test plank");
@@ -94,7 +104,8 @@ void step(void*, seed::Engine& engine, float dt) {
     auto candidate = transform.position;
     candidate.move(seed::normalized(movement) * (6 * dt));
     const auto* ground = engine.world.tile(candidate);
-    if (ground && ground->elevation >= 0 && !ground->tree && !engine.physics.blocks(candidate))
+    if (ground && ground->elevation >= 0 && !(ground->flags & seed::tile_solid) &&
+        !engine.physics.blocks(candidate))
         transform.position = candidate;
 }
 
@@ -116,15 +127,15 @@ void act(void* context, seed::Engine& engine, const seed::View& view) {
     if (seed::length(seed::relative(target, engine.focus_position())) > 4) return;
     if (input.pressed[SDL_SCANCODE_B]) {
         const auto* ground = world.tile(target);
-        if (ground && ground->elevation >= 0 && !ground->tree) physics.build(target);
+        if (ground && ground->elevation >= 0 && !(ground->flags & seed::tile_solid)) physics.build(target);
         return;
     }
     bool hit = false;
     if (input.mouse_buttons & SDL_BUTTON_RMASK) {
-        hit = world.dig(target);
+        hit = dig(world, target);
         if (hit) physics.damage(target, 100);
     } else
-        hit = physics.damage(target, 35) || world.remove_tree(target);
+        hit = physics.damage(target, 35) || fell(world, target);
     if (hit) {
         engine.particles.burst(target);
         engine.audio.impact();
@@ -141,14 +152,16 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
             for (int x = 0; x < seed::chunk_side; ++x) {
                 const auto& tile = chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)];
                 renderer.sprite(static_cast<seed::Material>(tile.material), offset.x + x + 0.5F,
-                                offset.y + y + 0.5F, 1, 1, 0, 0.94F + tile.moisture * 0.15F);
+                                offset.y + y + 0.5F, 1, 1, 0, 0.94F + seed::tile_moisture(tile) * 0.15F);
             }
     });
     engine.world.each([&](seed::ChunkCoord coord, const seed::Chunk& chunk) {
         const auto offset = seed::relative({coord, {}}, camera);
         for (int y = 0; y < seed::chunk_side; ++y)
             for (int x = 0; x < seed::chunk_side; ++x) {
-                if (!chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)].tree) continue;
+                if (!(chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)].flags &
+                      seed::tile_solid))
+                    continue;
                 const float px = offset.x + x + 0.5F, py = offset.y + y + 0.5F;
                 renderer.sprite(seed::Material::leaves, px + 0.4F, py - 0.3F, 2.0F, 1.3F, 0, 0.3F);
                 renderer.sprite(seed::Material::wood, px, py, 0.35F, 0.65F);

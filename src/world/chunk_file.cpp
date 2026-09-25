@@ -148,14 +148,10 @@ void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk
     for (unsigned i = 0; i < tile_changes; ++i) {
         const auto index = in.u16();
         const auto change = in.u8();
-        if (index >= chunk.tiles.size() || change < 1 || change > 3 || chunk.changes[index])
+        if (index >= chunk.tiles.size() || !change || (change & ~edit_bits) || chunk.changes[index])
             throw std::runtime_error("Invalid or duplicate tile change");
         chunk.changes[index] = change;
-        chunk.tiles[index].tree = false;
-        if (change & 2) {
-            chunk.tiles[index].material = 0;
-            chunk.tiles[index].elevation = -0.1F;
-        }
+        apply_tile_edit(chunk.tiles[index], change);
     }
 
     auto& bodies = chunk.bodies;

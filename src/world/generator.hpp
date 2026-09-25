@@ -1,8 +1,9 @@
 #pragma once
 #include "core/material.hpp"
+#include "world/chunk.hpp"
 #include "world/noise.hpp"
-#include "world/structures.hpp"
 #include <array>
+#include <cstring>
 
 namespace seed {
 // Version 2: finite disc world with biome rings. Saves from other versions are rejected.
@@ -14,17 +15,28 @@ constexpr double world_radius = static_cast<double>(world_radius_chunks) * chunk
 
 enum class Biome : std::uint8_t { ocean, beach, meadow, forest, swamp, plains, mountain, snow, count };
 
-struct Tile {
-    float elevation{}, moisture{}, temperature{};
-    std::uint8_t material{}, biome{};
-    bool tree{};
-};
-struct Chunk {
-    std::array<Tile, chunk_side * chunk_side> tiles{};
-    std::array<std::uint8_t, chunk_side * chunk_side> changes{};
-    ChunkBodies bodies;
-    bool dirty{};
-};
+// The demo keeps each tile's moisture, bit for bit, in the tile's four game bytes.
+inline float tile_moisture(const Tile& tile) {
+    float moisture;
+    std::memcpy(&moisture, tile.game.data(), sizeof moisture);
+    return moisture;
+}
+inline void set_tile_moisture(Tile& tile, float moisture) {
+    std::memcpy(tile.game.data(), &moisture, sizeof moisture);
+}
+
+// Demo edit bits. Trees are the demo's only solid tiles.
+constexpr std::uint8_t edit_remove_tree = 1, edit_excavate = 2;
+constexpr std::uint8_t edit_bits = edit_remove_tree | edit_excavate;
+// Applies saved or live edit bits to a freshly generated or resident tile. Excavating turns the
+// tile into shallow water and also clears any tree.
+inline void apply_tile_edit(Tile& tile, std::uint8_t bits) {
+    if (bits & (edit_remove_tree | edit_excavate)) tile.flags &= static_cast<std::uint8_t>(~tile_solid);
+    if (bits & edit_excavate) {
+        tile.material = static_cast<std::uint8_t>(Material::water);
+        tile.elevation = -0.1F;
+    }
+}
 
 namespace terrain {
 // Independent noise streams. Changing any of these changes every generated world.
@@ -158,19 +170,18 @@ inline void generate(Chunk& chunk, std::uint64_t seed, ChunkCoord coord) {
             const auto sample = sample_terrain(seed, coord, local);
             auto& tile = chunk.tiles[static_cast<std::size_t>(y * chunk_side + x)];
             tile.elevation = sample.elevation;
-            tile.moisture = sample.moisture;
-            tile.temperature = sample.temperature;
+            set_tile_moisture(tile, sample.moisture);
             tile.material = static_cast<std::uint8_t>(sample.material);
-            tile.biome = static_cast<std::uint8_t>(sample.biome);
             const auto rarity = tree_rarity(sample.biome);
             const auto h = world_hash(seed, std::uint64_t(coord.x) * chunk_side + static_cast<unsigned>(x),
                                       std::uint64_t(coord.y) * chunk_side + static_cast<unsigned>(y));
-            tile.tree = rarity && sample.elevation > 0.1F && h % rarity == 0;
+            if (rarity && sample.elevation > 0.1F && h % rarity == 0) tile.flags |= tile_solid;
             // Keep the spawn clearing and the demo platform free of trees.
             if (nearby(coord, {}, 1)) {
                 const float wx = static_cast<float>(coord.x) * chunk_side + local.x;
                 const float wy = static_cast<float>(coord.y) * chunk_side + local.y;
-                if (std::abs(wx) < 8 && std::abs(wy) < 8) tile.tree = false;
+                if (std::abs(wx) < 8 && std::abs(wy) < 8)
+                    tile.flags &= static_cast<std::uint8_t>(~tile_solid);
             }
         }
 }

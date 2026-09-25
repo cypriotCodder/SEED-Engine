@@ -35,8 +35,9 @@ public:
     GenerationMetrics generation_metrics() const {
         return {generated_.load(), generation_ns_.load(), generation_max_ns_.load()};
     }
-    bool remove_tree(WorldPosition position);
-    bool dig(WorldPosition position);
+    // Applies game-defined edit bits to a resident tile and records them in the chunk's saved
+    // changes. Returns false if the tile's chunk is not active.
+    bool edit(WorldPosition position, std::uint8_t bits);
     const Tile* tile(WorldPosition position) const;
     template<class F>
     void each(F&& visitor) const {
