@@ -104,16 +104,20 @@ int main(int argc, char** argv) {
         }
         std::filesystem::remove_all(root);
         std::filesystem::create_directories(root);
-        state(root, 1); // Legacy flat save must survive migration unchanged.
+        const auto legacy = root / "legacy-flat";
+        std::filesystem::create_directories(legacy);
+        state(legacy, 1);
+        rejects([&] { seed::Checkpoint old(legacy); });
+        verify(legacy, 1);
         {
             seed::Checkpoint save(root);
-            verify(save.working_directory(), 1);
+            state(save.working_directory(), 1);
             rejects([&] { seed::Checkpoint other(root); });
             save.commit();
             state(save.working_directory(), 2);
             save.commit();
         }
-        verify(root, 1);
+        verify(legacy, 1);
         for (const auto stage :
              {seed::Checkpoint::Stage::files_written, seed::Checkpoint::Stage::manifest_written,
               seed::Checkpoint::Stage::recovery_written, seed::Checkpoint::Stage::published}) {
@@ -161,7 +165,7 @@ int main(int argc, char** argv) {
         data[4] = 2;
         seed::write_blob(root / "CURRENT", data);
         rejects([&] { seed::Checkpoint save(root); });
-        verify(root, 1);
+        verify(legacy, 1);
         async_snapshot(root / "async");
         {
             seed::Jobs jobs(1);
@@ -197,7 +201,7 @@ int main(int argc, char** argv) {
         std::ostringstream json;
         seed::write_distribution(json, empty);
         check(json.str() == "null", "Missing samples reported as zero measurements");
-        std::cout << "Checkpoint recovery, interrupted commits, process crash, locking, migration and "
+        std::cout << "Checkpoint recovery, interrupted commits, process crash, locking, legacy rejection and "
                      "metrics passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

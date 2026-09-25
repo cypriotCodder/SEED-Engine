@@ -2,6 +2,12 @@
 
 Validation is intentionally limited to this Mac at the user's request. No Docker image was created, and no validation packages were installed system-wide. The prepared container recipe and cross-compilation script have not been run.
 
+## Compatibility policy — 2026-09-25
+
+Per the user's decision, legacy migration has been removed. Current checkpoint-container version 1 and chunk version 2 remain unchanged. Flat saves, old chunk schemas, standalone building files and incompatible generator versions are rejected, preserving original files. Earlier migration results below are historical.
+
+The AddressSanitizer + UBSan checkpoint run stalled before `main`, recursively entering AddressSanitizer's initialization mutex from the macOS allocator/dyld path. A one-second process sample confirmed that stack; the process was stopped. This run is not an AddressSanitizer pass. Its sample is `build/review/checkpoint-sanitized.sample.txt`.
+
 ## Background checkpoint validation — 2026-09-25
 
 The checkpoint suite now also freezes publication on a worker while working files change, checks rejection of overlapping publications, verifies asynchronous error propagation, exercises the raw-copy fallback, and confirms that returning a player to spawn overrides an earlier checkpoint position. Five CTest programs pass on the combined generator-version-2 tree. The Python benchmark regression handles an entirely absent GPU sample set and a long frame-count timeout.

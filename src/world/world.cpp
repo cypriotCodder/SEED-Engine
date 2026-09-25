@@ -11,6 +11,8 @@ World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, Re
         read_path_ = [](const std::filesystem::path& path) {
             return path;
         };
+    if (std::filesystem::exists(directory_ / "0_0.bodies"))
+        throw std::runtime_error("Legacy standalone building saves are unsupported; choose a new save directory");
     std::filesystem::create_directories(directory_);
     const auto metadata = directory_ / "world.seed";
     if (std::filesystem::exists(read_path_(metadata))) {
@@ -18,7 +20,7 @@ World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, Re
         Reader input(bytes);
         if (input.u32() != 0x444c5257 || input.u32() != 1 || input.u32() != generator_version ||
             input.u64() != seed_ || !input.done())
-            throw std::runtime_error("Save seed or generator version mismatch");
+            throw std::runtime_error("Save seed or generator version mismatch; legacy migration is disabled. Choose a new save directory");
     } else {
         Bytes output;
         output.u32(0x444c5257);
@@ -26,25 +28,6 @@ World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, Re
         output.u32(generator_version);
         output.u64(seed_);
         write_blob(metadata, output.data);
-    }
-    const auto legacy = directory_ / "0_0.bodies";
-    if (std::filesystem::exists(legacy)) {
-        // Only the private working copy is migrated. Original flat files remain untouched.
-        auto chunk = std::make_unique<Chunk>();
-        generate(*chunk, seed_, {});
-        const auto origin = path({});
-        if (std::filesystem::exists(origin)) {
-            const auto bytes = read_blob(origin);
-            Reader input(bytes);
-            input.u32();
-            if (input.u32() != 1) throw std::runtime_error("Ambiguous legacy and chunk-owned building saves");
-            decode_chunk(bytes, seed_, {}, *chunk);
-        }
-        decode_legacy_bodies(read_blob(legacy), seed_, *chunk);
-        ChunkBodies baseline;
-        generate_structures(baseline, seed_, {});
-        write_blob(origin, encode_chunk(seed_, {}, *chunk, baseline));
-        std::filesystem::remove(legacy);
     }
     for (auto& slot : slots_) {
         slot.world = this;

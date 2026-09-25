@@ -115,51 +115,6 @@ void codec() {
     rejects([&] { decode_into_fresh(far_away); }, "Body outside owner reach accepted");
 }
 
-void legacy_codec() {
-    auto chunk = generated({});
-    seed::Bytes old;
-    old.u32(0x59444f42);
-    old.u32(2);
-    old.u32(seed::generator_version);
-    old.u64(seed);
-    old.u16(21);
-    old.u16(3);
-    auto removed = chunk->bodies.bodies[0];
-    removed.exists = false;
-    removed.health = 0;
-    auto built = chunk->bodies.bodies[4];
-    built.position = built.previous = {{}, {12, 12}};
-    built.height = built.previous_height = 0;
-    for (const auto& item : {std::pair{std::uint16_t{0}, removed}, std::pair{std::uint16_t{19}, removed},
-                             std::pair{std::uint16_t{20}, built}}) {
-        old.u16(item.first);
-        const auto body = seed::encode_body(item.second);
-        old.data.insert(old.data.end(), body.begin(), body.end());
-    }
-    old.u16(1);
-    old.u16(0);
-    seed::decode_legacy_bodies(old.data, seed, *chunk);
-    check(!chunk->bodies.bodies[0].exists && chunk->bodies.count == 20 &&
-              chunk->bodies.bodies[19].position.local.x == 12 && chunk->bodies.broken[0],
-          "Legacy building migration lost destroyed, built or joint state");
-    auto fresh = generated({});
-    auto invalid = old.data;
-    invalid[4] = 99;
-    rejects([&] { seed::decode_legacy_bodies(invalid, seed, *fresh); }, "Unknown legacy version accepted");
-    seed::Bytes terrain;
-    terrain.u32(seed::chunk_file_magic);
-    terrain.u32(1);
-    terrain.u32(seed::generator_version);
-    terrain.u64(seed);
-    terrain.u64(0);
-    terrain.u64(0);
-    terrain.u16(1);
-    terrain.u16(0);
-    terrain.u8(3);
-    seed::decode_chunk(terrain.data, seed, {}, *fresh);
-    check(fresh->changes[0] == 3 && fresh->tiles[0].elevation < 0, "Legacy terrain migration lost edits");
-}
-
 // Attaches empty chunks around `center` (skipping chunks already resident via `skip`), so that
 // bodies owned by `center` are eligible for simulation.
 void attach_neighbours(seed::Physics& physics, seed::ChunkCoord center,
@@ -344,7 +299,6 @@ int main() {
     try {
         job_groups();
         codec();
-        legacy_codec();
         residency();
         built_slots_are_reclaimed();
         boundary_collisions();

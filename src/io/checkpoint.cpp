@@ -23,7 +23,7 @@ struct Unsupported : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 bool delta_name(const std::string& name) {
-    if (name == "world.seed" || name == "player.delta" || name == "0_0.bodies") return true;
+    if (name == "world.seed" || name == "player.delta") return true;
     if (!name.ends_with(".chunk")) return false;
     const auto split = name.find('_');
     if (split == std::string::npos) return false;
@@ -72,6 +72,8 @@ std::filesystem::path directory(const std::filesystem::path& root, std::uint64_t
     return root / "checkpoints" / std::to_string(id);
 }
 void validate(const std::filesystem::path& path, std::uint64_t id) {
+    if (std::filesystem::exists(path / "0_0.bodies"))
+        throw Unsupported("Legacy standalone building saves are unsupported; choose a new save directory");
     if (!std::filesystem::is_directory(std::filesystem::symlink_status(path)))
         throw std::runtime_error("Invalid checkpoint directory");
     if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(path / "manifest")))
@@ -135,6 +137,10 @@ Checkpoint::Checkpoint(std::filesystem::path root) : root_(std::move(root)), wor
     std::filesystem::path source = root_;
     const bool has_pointer = std::filesystem::exists(root_ / "CURRENT");
     const bool has_recovery = std::filesystem::exists(root_ / "RECOVERY");
+    if (!has_pointer && !has_recovery &&
+        (!files(root_).empty() || std::filesystem::exists(root_ / "0_0.bodies")))
+        throw Unsupported(
+            "Legacy flat saves are unsupported; choose a new save directory. Existing files were preserved");
     if (has_pointer || has_recovery) {
         for (const auto* name : {"CURRENT", "RECOVERY"}) {
             if (current_) break;
@@ -163,11 +169,9 @@ Checkpoint::Checkpoint(std::filesystem::path root) : root_(std::move(root)), wor
         throw std::runtime_error("Working save directory cannot be a symlink");
     std::filesystem::remove_all(working_);
     std::filesystem::create_directories(working_);
-    for (const auto& name : files(source)) {
-        if (!current_) (void)read_blob(source / name); // Flat saves have no validated manifest.
-        // Never share inodes with original flat files owned by an older application.
-        snapshot_blob(source / name, working_ / name, current_ != 0);
-    }
+    if (current_)
+        for (const auto& name : files(source))
+            snapshot_blob(source / name, working_ / name);
     sync_directory(working_);
     set_read_view(current_ ? source : std::filesystem::path{}, {});
 }

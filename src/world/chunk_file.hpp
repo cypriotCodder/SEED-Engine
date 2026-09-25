@@ -21,9 +21,6 @@ std::vector<std::uint8_t> encode_chunk(std::uint64_t seed, ChunkCoord coord, con
 // Throws on any malformed, duplicate, out-of-range or trailing data.
 void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, ChunkCoord coord, Chunk& chunk);
 
-// Imports the previous standalone version-2 building delta into the origin chunk.
-void decode_legacy_bodies(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk& chunk);
-
 // True when the chunk carries no terrain or building differences from its baseline.
 bool chunk_matches_baseline(const Chunk& chunk, const ChunkBodies& baseline);
 } // namespace seed

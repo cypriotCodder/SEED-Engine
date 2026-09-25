@@ -136,8 +136,8 @@ void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk
     Reader in(bytes);
     if (in.u32() != chunk_file_magic) throw std::runtime_error("Invalid chunk file magic");
     const auto version = in.u32();
-    if (version != 1 && version != chunk_file_version)
-        throw std::runtime_error("Unsupported chunk file version; save left unchanged");
+    if (version != chunk_file_version)
+        throw std::runtime_error("Unsupported chunk file version; legacy migration is disabled. Choose a new save directory");
     if (in.u32() != generator_version || in.u64() != seed || in.u64() != std::uint64_t(coord.x) ||
         in.u64() != std::uint64_t(coord.y))
         throw std::runtime_error("Chunk file belongs to another seed, generator or coordinate");
@@ -157,10 +157,6 @@ void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk
         }
     }
 
-    if (version == 1) {
-        if (!in.done()) throw std::runtime_error("Trailing legacy terrain bytes");
-        return;
-    }
     auto& bodies = chunk.bodies;
     const auto records = in.u16();
     if (records > chunk_body_capacity) throw std::runtime_error("Invalid body record count");
@@ -188,37 +184,5 @@ void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk
         bodies.broken.set(id);
     }
     if (!in.done()) throw std::runtime_error("Trailing chunk data");
-}
-void decode_legacy_bodies(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk& chunk) {
-    Reader in(bytes);
-    if (in.u32() != 0x59444f42 || in.u32() != 2)
-        throw std::runtime_error("Unsupported standalone building save version; originals left unchanged");
-    if (in.u32() != generator_version || in.u64() != seed)
-        throw std::runtime_error("Legacy building seed or generator mismatch");
-    auto& bodies = chunk.bodies;
-    const auto count = in.u16(), records = in.u16();
-    if (count < bodies.recipe_count || count > chunk_body_capacity || records > count)
-        throw std::runtime_error("Invalid legacy body count");
-    std::array<bool, chunk_body_capacity> seen{};
-    for (unsigned n = 0; n < records; ++n) {
-        const auto id = in.u16();
-        if (id >= count || seen[id]) throw std::runtime_error("Invalid legacy body ID");
-        seen[id] = true;
-        bodies.bodies[id] = decode_body(in, {});
-    }
-    bodies.count = bodies.recipe_count;
-    for (std::uint16_t id = bodies.recipe_count; id < count; ++id) {
-        if (!seen[id]) throw std::runtime_error("Missing legacy built body");
-        if (bodies.bodies[id].exists) bodies.bodies[bodies.count++] = bodies.bodies[id];
-    }
-    const auto broken = in.u16();
-    if (broken > bodies.joint_count) throw std::runtime_error("Invalid legacy joint count");
-    for (unsigned n = 0; n < broken; ++n) {
-        const auto id = in.u16();
-        if (id >= bodies.joint_count || bodies.broken[id])
-            throw std::runtime_error("Invalid legacy joint ID");
-        bodies.broken[id] = true;
-    }
-    if (!in.done()) throw std::runtime_error("Trailing legacy building bytes");
 }
 } // namespace seed
