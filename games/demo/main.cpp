@@ -1,6 +1,6 @@
 // The demo game: explore a procedural island, damage a timber platform, dig and build.
 #include "app/app.hpp"
-#include "world/generator.hpp"
+#include "terrain.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -11,11 +11,11 @@ namespace {
 // Digging turns dry ground into water; felling removes a tree. Both return false if nothing changed.
 bool dig(seed::World& world, seed::WorldPosition position) {
     const auto* tile = world.tile(position);
-    return tile && tile->elevation >= 0 && world.edit(position, seed::edit_remove_tree | seed::edit_excavate);
+    return tile && tile->elevation >= 0 && world.edit(position, demo::edit_remove_tree | demo::edit_excavate);
 }
 bool fell(seed::World& world, seed::WorldPosition position) {
     const auto* tile = world.tile(position);
-    return tile && (tile->flags & seed::tile_solid) && world.edit(position, seed::edit_remove_tree);
+    return tile && (tile->flags & seed::tile_solid) && world.edit(position, demo::edit_remove_tree);
 }
 
 struct Demo {
@@ -152,7 +152,7 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
             for (int x = 0; x < seed::chunk_side; ++x) {
                 const auto& tile = chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)];
                 renderer.sprite(static_cast<seed::Material>(tile.material), offset.x + x + 0.5F,
-                                offset.y + y + 0.5F, 1, 1, 0, 0.94F + seed::tile_moisture(tile) * 0.15F);
+                                offset.y + y + 0.5F, 1, 1, 0, 0.94F + demo::tile_moisture(tile) * 0.15F);
             }
     });
     engine.world.each([&](seed::ChunkCoord coord, const seed::Chunk& chunk) {
@@ -182,7 +182,6 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
 
 void describe(void* context, seed::BenchmarkMetadata& info) {
     const auto& demo = *static_cast<Demo*>(context);
-    info.generator_version = seed::generator_version;
     info.damage_demo = demo.damage_demo;
     info.overview = demo.overview;
 }
@@ -207,6 +206,7 @@ int main(int argc, char** argv) {
     game.default_seed = 20260923;
     game.default_save = "saves/island";
     game.usage = "[--damage-demo] [--overview] [--verify-stream] ";
+    game.world = demo::world_generator();
     game.option = option;
     game.validate = validate;
     game.setup = setup;

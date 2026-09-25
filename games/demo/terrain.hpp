@@ -1,11 +1,14 @@
 #pragma once
 #include "core/material.hpp"
-#include "world/chunk.hpp"
 #include "world/noise.hpp"
+#include "world/world_generator.hpp"
 #include <array>
 #include <cstring>
 
-namespace seed {
+// The demo's world: a finite disc of land with biome rings, surrounded by ocean.
+namespace demo {
+using namespace seed;
+
 // Version 2: finite disc world with biome rings. Saves from other versions are rejected.
 constexpr std::uint32_t generator_version = 2;
 
@@ -158,12 +161,7 @@ inline std::uint64_t tree_rarity(Biome biome) {
     }
 }
 
-inline void generate(Chunk& chunk, std::uint64_t seed, ChunkCoord coord) {
-    // Reset in place: a Chunk is tens of kilobytes and this runs on worker-thread stacks.
-    chunk.tiles.fill({});
-    chunk.changes.fill(0);
-    chunk.dirty = false;
-    generate_structures(chunk.bodies, seed, coord);
+inline void generate_terrain(void*, std::uint64_t seed, ChunkCoord coord, Chunk& chunk) {
     for (int y = 0; y < chunk_side; ++y)
         for (int x = 0; x < chunk_side; ++x) {
             const Vec2 local{static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F};
@@ -185,4 +183,18 @@ inline void generate(Chunk& chunk, std::uint64_t seed, ChunkCoord coord) {
             }
         }
 }
-} // namespace seed
+
+inline void apply_edit(void*, Tile& tile, std::uint8_t bits) {
+    apply_tile_edit(tile, bits);
+}
+
+inline WorldGenerator world_generator() {
+    WorldGenerator generator;
+    generator.name = "demo-disc";
+    generator.version = generator_version;
+    generator.terrain = generate_terrain;
+    generator.edit_bits = edit_bits;
+    generator.apply_edit = apply_edit;
+    return generator;
+}
+} // namespace demo

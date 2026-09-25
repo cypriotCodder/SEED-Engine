@@ -1,4 +1,5 @@
 #include "physics/physics.hpp"
+#include "test_world.hpp"
 #include "world/chunk_file.hpp"
 #include <atomic>
 #include <chrono>
@@ -26,7 +27,7 @@ constexpr std::size_t header_only_size = 4 + 4 + 4 + 8 + 8 + 8 + 2 + 2 + 2;
 
 std::unique_ptr<seed::Chunk> generated(seed::ChunkCoord coord) {
     auto chunk = std::make_unique<seed::Chunk>();
-    seed::generate(*chunk, seed, coord);
+    seed::fill_chunk(test_world::generator(), seed, coord, *chunk);
     return chunk;
 }
 
@@ -57,7 +58,7 @@ void codec() {
     auto baseline = generated(origin);
     check(baseline->bodies.recipe_count == 19 && baseline->bodies.joint_count > 0, "Demo platform recipe");
     check(seed::chunk_matches_baseline(*baseline, baseline->bodies), "Fresh chunk matches its baseline");
-    const auto empty = seed::encode_chunk(seed, origin, *baseline, baseline->bodies);
+    const auto empty = seed::encode_chunk(test_world::generator(), seed, origin, *baseline, baseline->bodies);
     check(empty.size() == header_only_size, "Untouched chunk encodes no records");
 
     // Change terrain, move one recipe body, destroy another, break a joint and add a built body.
@@ -74,10 +75,10 @@ void codec() {
     built.half = {0.45F, 0.45F};
     bodies.bodies[bodies.count++] = built;
     check(!seed::chunk_matches_baseline(*edited, baseline->bodies), "Edited chunk differs from baseline");
-    const auto bytes = seed::encode_chunk(seed, origin, *edited, baseline->bodies);
+    const auto bytes = seed::encode_chunk(test_world::generator(), seed, origin, *edited, baseline->bodies);
 
     auto loaded = generated(origin);
-    seed::decode_chunk(bytes, seed, origin, *loaded);
+    seed::decode_chunk(bytes, test_world::generator(), seed, origin, *loaded);
     check(loaded->changes[33] == 3 && loaded->tiles[33].elevation < 0, "Tile delta round trip");
     check(loaded->bodies.count == bodies.count && loaded->bodies.broken == bodies.broken,
           "Body counts round trip");
@@ -87,7 +88,7 @@ void codec() {
 
     auto decode_into_fresh = [&](std::vector<std::uint8_t> data) {
         auto target = generated(origin);
-        seed::decode_chunk(data, seed, origin, *target);
+        seed::decode_chunk(data, test_world::generator(), seed, origin, *target);
     };
     auto trailing = bytes;
     trailing.push_back(0);
@@ -96,7 +97,7 @@ void codec() {
     rejects(
         [&] {
             auto target = generated({1, 0});
-            seed::decode_chunk(bytes, seed, {1, 0}, *target);
+            seed::decode_chunk(bytes, test_world::generator(), seed, {1, 0}, *target);
         },
         "File for another coordinate accepted");
     auto old_version = bytes;
@@ -171,9 +172,9 @@ void residency() {
           "Released state holds destroyed piers and the built block");
 
     // Persist, reload into a fresh chunk, and resume.
-    const auto bytes = seed::encode_chunk(seed, origin, *chunk, baseline->bodies);
+    const auto bytes = seed::encode_chunk(test_world::generator(), seed, origin, *chunk, baseline->bodies);
     auto reloaded = generated(origin);
-    seed::decode_chunk(bytes, seed, origin, *reloaded);
+    seed::decode_chunk(bytes, test_world::generator(), seed, origin, *reloaded);
     physics.attach(origin, reloaded->bodies);
     check(physics.count() == 16, "Reattached 15 fallen pieces and one built block");
     physics.step({origin, {0, 5}});

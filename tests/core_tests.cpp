@@ -2,7 +2,7 @@
 #include "core/ecs.hpp"
 #include "io/binary.hpp"
 #include "physics/collision.hpp"
-#include "world/generator.hpp"
+#include "world/noise.hpp"
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
@@ -66,18 +66,6 @@ int main() {
                 {0.5F, 31.5F}, wave);
             check(std::isfinite(n) && std::abs(n) <= 1.5F, "Distant noise range");
         }
-        seed::Chunk chunk_a, chunk_b, chunk_c;
-        seed::generate(chunk_a, 123, {0, 0});
-        seed::generate(chunk_b, 123, {0, 0});
-        seed::generate(chunk_c, 124, {0, 0});
-        bool different = false;
-        for (std::size_t i = 0; i < chunk_a.tiles.size(); ++i) {
-            check(chunk_a.tiles[i].elevation == chunk_b.tiles[i].elevation &&
-                      chunk_a.tiles[i].flags == chunk_b.tiles[i].flags,
-                  "Generator repeatability");
-            different |= chunk_a.tiles[i].elevation != chunk_c.tiles[i].elevation;
-        }
-        check(different, "Seed must affect generated world");
         seed::Contact contact, reverse;
         const seed::Box box{{0, 0}, {1, 1}, 0}, overlap{{1.5F, 0}, {1, 1}, 0};
         check(seed::collide(box, overlap, contact) && std::abs(contact.depth - 0.5F) < 1e-5F &&

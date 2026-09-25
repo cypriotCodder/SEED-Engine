@@ -86,8 +86,8 @@ bool chunk_matches_baseline(const Chunk& chunk, const ChunkBodies& baseline) {
     return true;
 }
 
-std::vector<std::uint8_t> encode_chunk(std::uint64_t seed, ChunkCoord coord, const Chunk& chunk,
-                                       const ChunkBodies& baseline) {
+std::vector<std::uint8_t> encode_chunk(const WorldGenerator& generator, std::uint64_t seed, ChunkCoord coord,
+                                       const Chunk& chunk, const ChunkBodies& baseline) {
     const auto& bodies = chunk.bodies;
     if (bodies.recipe_count != baseline.recipe_count || bodies.joint_count != baseline.joint_count)
         throw std::logic_error("Chunk bodies do not match their generated recipe");
@@ -95,7 +95,7 @@ std::vector<std::uint8_t> encode_chunk(std::uint64_t seed, ChunkCoord coord, con
     Bytes out;
     out.u32(chunk_file_magic);
     out.u32(chunk_file_version);
-    out.u32(generator_version);
+    out.u32(generator.version);
     out.u64(seed);
     out.u64(std::uint64_t(coord.x));
     out.u64(std::uint64_t(coord.y));
@@ -132,14 +132,15 @@ std::vector<std::uint8_t> encode_chunk(std::uint64_t seed, ChunkCoord coord, con
     return out.data;
 }
 
-void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, ChunkCoord coord, Chunk& chunk) {
+void decode_chunk(std::span<const std::uint8_t> bytes, const WorldGenerator& generator, std::uint64_t seed,
+                  ChunkCoord coord, Chunk& chunk) {
     Reader in(bytes);
     if (in.u32() != chunk_file_magic) throw std::runtime_error("Invalid chunk file magic");
     const auto version = in.u32();
     if (version != chunk_file_version)
         throw std::runtime_error(
             "Unsupported chunk file version; legacy migration is disabled. Choose a new save directory");
-    if (in.u32() != generator_version || in.u64() != seed || in.u64() != std::uint64_t(coord.x) ||
+    if (in.u32() != generator.version || in.u64() != seed || in.u64() != std::uint64_t(coord.x) ||
         in.u64() != std::uint64_t(coord.y))
         throw std::runtime_error("Chunk file belongs to another seed, generator or coordinate");
 
@@ -148,10 +149,10 @@ void decode_chunk(std::span<const std::uint8_t> bytes, std::uint64_t seed, Chunk
     for (unsigned i = 0; i < tile_changes; ++i) {
         const auto index = in.u16();
         const auto change = in.u8();
-        if (index >= chunk.tiles.size() || !change || (change & ~edit_bits) || chunk.changes[index])
+        if (index >= chunk.tiles.size() || !change || (change & ~generator.edit_bits) || chunk.changes[index])
             throw std::runtime_error("Invalid or duplicate tile change");
         chunk.changes[index] = change;
-        apply_tile_edit(chunk.tiles[index], change);
+        generator.apply_edit(generator.context, chunk.tiles[index], change);
     }
 
     auto& bodies = chunk.bodies;

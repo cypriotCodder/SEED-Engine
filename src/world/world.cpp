@@ -5,8 +5,14 @@
 #include <chrono>
 
 namespace seed {
-World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, ReadPath read_path)
-    : jobs_(jobs), seed_(seed), directory_(std::move(directory)), read_path_(std::move(read_path)) {
+World::World(Jobs& jobs, const WorldGenerator& generator, std::uint64_t seed, std::filesystem::path directory,
+             ReadPath read_path)
+    : jobs_(jobs),
+      generator_(generator),
+      seed_(seed),
+      directory_(std::move(directory)),
+      read_path_(std::move(read_path)) {
+    validate(generator_);
     if (!read_path_)
         read_path_ = [](const std::filesystem::path& path) {
             return path;
@@ -19,7 +25,7 @@ World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, Re
     if (std::filesystem::exists(read_path_(metadata))) {
         const auto bytes = read_blob(read_path_(metadata));
         Reader input(bytes);
-        if (input.u32() != 0x444c5257 || input.u32() != 1 || input.u32() != generator_version ||
+        if (input.u32() != 0x444c5257 || input.u32() != 1 || input.u32() != generator_.version ||
             input.u64() != seed_ || !input.done())
             throw std::runtime_error("Save seed or generator version mismatch; legacy migration is disabled. "
                                      "Choose a new save directory");
@@ -27,7 +33,7 @@ World::World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, Re
         Bytes output;
         output.u32(0x444c5257);
         output.u32(1);
-        output.u32(generator_version);
+        output.u32(generator_.version);
         output.u64(seed_);
         write_blob(metadata, output.data);
     }
@@ -50,7 +56,7 @@ void World::generate_job(void* context) noexcept {
     auto& slot = *static_cast<Slot*>(context);
     try {
         const auto start = std::chrono::steady_clock::now();
-        generate(*slot.chunk, slot.world->seed_, slot.coord);
+        fill_chunk(slot.world->generator_, slot.world->seed_, slot.coord, *slot.chunk);
         const auto ns = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
                 .count());
@@ -79,7 +85,7 @@ void World::save_job(void* context) noexcept {
 void World::load(Slot& slot) {
     const auto file = read_path_(path(slot.coord));
     if (!std::filesystem::exists(file)) return;
-    decode_chunk(read_blob(file), seed_, slot.coord, *slot.chunk);
+    decode_chunk(read_blob(file), generator_, seed_, slot.coord, *slot.chunk);
 }
 void World::write(Slot& slot) {
     if (!slot.chunk->dirty) return;
@@ -91,7 +97,7 @@ void World::write(Slot& slot) {
         slot.chunk->dirty = false;
         return;
     }
-    write_blob(file, encode_chunk(seed_, slot.coord, *slot.chunk, baseline));
+    write_blob(file, encode_chunk(generator_, seed_, slot.coord, *slot.chunk, baseline));
     slot.chunk->dirty = false;
 }
 void World::stream(ChunkCoord center) {
@@ -164,13 +170,13 @@ const Tile* World::tile(WorldPosition position) const {
     return nullptr;
 }
 bool World::edit(WorldPosition position, std::uint8_t bits) {
-    if (!bits || (bits & ~edit_bits)) throw std::invalid_argument("Unknown tile edit bits");
+    if (!bits || (bits & ~generator_.edit_bits)) throw std::invalid_argument("Unknown tile edit bits");
     position.move({});
     for (auto& slot : slots_)
         if (slot.state.load(std::memory_order_acquire) == State::active && slot.coord == position.chunk) {
             const auto index = static_cast<std::size_t>(position.local.y) * chunk_side +
                                static_cast<std::size_t>(position.local.x);
-            apply_tile_edit(slot.chunk->tiles[index], bits);
+            generator_.apply_edit(generator_.context, slot.chunk->tiles[index], bits);
             slot.chunk->changes[index] |= bits;
             slot.chunk->dirty = true;
             return true;

@@ -1,7 +1,7 @@
 #pragma once
 #include "core/jobs.hpp"
 #include "core/memory.hpp"
-#include "world/generator.hpp"
+#include "world/world_generator.hpp"
 #include <atomic>
 #include <exception>
 #include <filesystem>
@@ -21,7 +21,9 @@ struct ChunkHooks {
 class World final {
 public:
     using ReadPath = std::function<std::filesystem::path(const std::filesystem::path&)>;
-    World(Jobs& jobs, std::uint64_t seed, std::filesystem::path directory, ReadPath read_path = {});
+    World(Jobs& jobs, const WorldGenerator& generator, std::uint64_t seed, std::filesystem::path directory,
+          ReadPath read_path = {});
+    const WorldGenerator& generator() const { return generator_; }
     ~World();
     World(const World&) = delete;
     World& operator=(const World&) = delete;
@@ -64,6 +66,7 @@ private:
     Jobs& jobs_;
     JobGroup group_;
     ChunkHooks hooks_;
+    WorldGenerator generator_;
     std::uint64_t seed_;
     std::filesystem::path directory_;
     ReadPath read_path_;

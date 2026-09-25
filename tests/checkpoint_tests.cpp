@@ -180,12 +180,12 @@ int main(int argc, char** argv) {
         {
             seed::Checkpoint save(root / "player-return");
             state(save.working_directory(), 1);
-            seed::save_player(save.working_directory(), 123, {{}, {12, 12}});
+            seed::save_player(save.working_directory(), 123, 1, {{}, {12, 12}});
             save.commit();
-            seed::save_player(save.working_directory(), 123, {},
+            seed::save_player(save.working_directory(), 123, 1, {},
                               std::filesystem::exists(save.read_path("player.delta")));
             save.commit();
-            const auto position = seed::load_player(save.read_path("player.delta").parent_path(), 123);
+            const auto position = seed::load_player(save.read_path("player.delta").parent_path(), 123, 1);
             check(position.local.x == 0 && position.local.y == 0,
                   "Returning to spawn resurrected old player state");
         }

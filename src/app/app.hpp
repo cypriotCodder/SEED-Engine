@@ -55,6 +55,7 @@ struct Game {
     std::uint64_t default_seed{};
     const char* default_save{};
     const char* usage{};                           // Game options, appended to the usage message.
+    WorldGenerator world{};                        // How the game\'s world is generated and edited.
     bool (*option)(void*, std::string_view arg){}; // Return true if the game consumed arg.
     void (*validate)(void*, const AppOptions&){};  // Reject incompatible option combinations.
     // Create the game's entities at the saved focus position; return the entity to follow.

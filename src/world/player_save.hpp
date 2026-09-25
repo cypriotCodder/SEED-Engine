@@ -1,11 +1,12 @@
 #pragma once
 #include "io/binary.hpp"
 #include "io/storage.hpp"
-#include "world/generator.hpp"
+#include "world/coordinates.hpp"
 #include <bit>
 
 namespace seed {
-inline WorldPosition load_player(const std::filesystem::path& directory, std::uint64_t seed) {
+inline WorldPosition load_player(const std::filesystem::path& directory, std::uint64_t seed,
+                                 std::uint32_t generator_version) {
     const auto file = directory / "player.delta";
     if (!std::filesystem::exists(file)) return {};
     const auto bytes = read_blob(file);
@@ -21,7 +22,8 @@ inline WorldPosition load_player(const std::filesystem::path& directory, std::ui
         throw std::runtime_error("Invalid player coordinates");
     return result;
 }
-inline void save_player(const std::filesystem::path& directory, std::uint64_t seed, WorldPosition position,
+inline void save_player(const std::filesystem::path& directory, std::uint64_t seed,
+                        std::uint32_t generator_version, WorldPosition position,
                         bool previously_saved = false) {
     position.move({});
     if (position.chunk == ChunkCoord{} && position.local.x == 0 && position.local.y == 0 &&

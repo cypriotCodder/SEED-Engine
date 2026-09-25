@@ -73,7 +73,7 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       renderer(assets_->get()),
       gpu(options.benchmark ? options.measured_frames : 0),
       checkpoint(options.save),
-      world(jobs, options.seed, checkpoint.working_directory(),
+      world(jobs, game.world, options.seed, checkpoint.working_directory(),
             [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
       physics(scene, jobs),
       audio(!options.smoke && !options.benchmark),
@@ -91,7 +91,7 @@ WorldPosition Engine::focus_position() {
 void Engine::write_deltas(WorldPosition focus_at) {
     physics.finish_step();
     world.save();
-    save_player(checkpoint.working_directory(), options.seed, focus_at,
+    save_player(checkpoint.working_directory(), options.seed, world.generator().version, focus_at,
                 std::filesystem::exists(checkpoint.read_path("player.delta")));
 }
 
@@ -231,7 +231,7 @@ void Engine::loop(const Game& game) {
             throw std::runtime_error("Benchmark interrupted before all frames were measured");
         const auto generation = world.generation_metrics();
         BenchmarkMetadata info{options.seed,
-                               0,
+                               world.generator().version,
                                warmup_frames,
                                options.measured_frames,
                                report_width,
@@ -258,8 +258,8 @@ int run(const Game& game, int argc, char** argv) {
             throw std::invalid_argument("A game needs a name, an asset pack, a default save and setup()");
         const auto options = parse(game, argc, argv);
         Engine engine(game, options);
-        const auto spawn =
-            load_player(engine.checkpoint.read_path("player.delta").parent_path(), options.seed);
+        const auto spawn = load_player(engine.checkpoint.read_path("player.delta").parent_path(),
+                                       options.seed, engine.world.generator().version);
         engine.focus = game.setup(game.context, engine, spawn);
         if (!engine.scene.transforms.find(engine.focus))
             throw std::logic_error("setup() must return an entity with a Transform");
