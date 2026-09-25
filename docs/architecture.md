@@ -1,16 +1,32 @@
 # Architecture
 
-## Approved world model
+## Engine and game boundary
 
-The view is top-down. X/Y describe the ground plane. Elevation and structural support are separate simulation quantities. A world position is a pair of signed 64-bit chunk coordinates plus a local float offset in [0,32). Camera-relative subtraction only operates within a bounded neighborhood, avoiding conversion of enormous global coordinates to floats. Overflow is reported.
+`seed_engine` (everything under `src/`) is a library for top-down, chunk-streamed 2D games. A game is a separate executable under `games/` that links the library and describes itself to `seed::run` with a `seed::Game`: a struct of function pointers plus a context pointer, in the same style as `Jobs::Job`. Nothing in `src/` includes anything from `games/`. Building with `-DSEED_BUILD_DEMO=OFF` proves it, and `tests/minimal_game.cpp` is a second, complete game that uses only the engine.
 
-Gradient Perlin noise hashes integer lattice coordinates with a 64-bit seed. Five octave layers produce elevation; an independent layer produces moisture. Elevation/moisture thresholds choose water, beach, meadow, and rock. The current generator intentionally produces one island surrounded by ocean. Version 1 uses strict floating-point contraction settings; cross-architecture bit identity still needs measured validation before extending the compatibility promise.
+The engine owns the frame: startup order, the common command-line options, the fixed 60 Hz step with interpolation, running the last physics step on a worker while the frame renders, streaming chunks around the game's focus entity, the camera and pointer, screenshots, benchmark measurement, autosave and the final checkpoint. Each frame it calls the game's `frame`, then `step` once per fixed step (physics idle), then `zoom`, `act` and `render`. Physics may still be running during `act` and `render`, so `act` joins it before touching bodies.
+
+The game owns everything that makes it that game:
+
+- **World generation.** A `WorldGenerator` supplies a stable name and version, a `terrain` callback that fills a chunk's tiles, an optional `structures` callback that builds the chunk's physics recipe, and the meaning of tile edit bits (`edit_bits`, `apply_edit`). Callbacks run on worker threads and must be pure functions of seed and coordinate, because saves store only differences from what they produce. Noise helpers stay in the engine.
+- **Tiles.** An engine `Tile` is 12 bytes: `elevation`, a registered `material`, engine `flags` (`tile_solid` blocks movement and building), and four bytes the game defines; the demo keeps its moisture there. `World::edit` records game-defined edit bits and applies the game's rule.
+- **Materials.** The game registers every material (name, colour, pattern, optional packed texture) before the renderer or world generation start. IDs follow registration order and index the generated atlas.
+- **Components.** Beyond the engine's `Transform` and `Visual`, a game registers its own trivially copyable component types with `Scene::add_component<T>()`. They are stored densely in the same up-front arena.
+- **Building visuals.** `body_visual` and `body_lift_per_height` decide how physics bodies look; physics itself names no materials.
+
+Saves are bound to a game: `world.seed` records the game ID, the generator ID and version, and the seed, and the engine refuses a save from anything else.
+
+## World model
+
+The view is top-down. X/Y describe the ground plane. Elevation and structural support are separate simulation quantities. A world position is a pair of signed 64-bit chunk coordinates plus a local float offset in [0,32). Camera-relative subtraction only operates within a bounded neighbourhood, avoiding conversion of enormous global coordinates to floats. Overflow is reported.
+
+Gradient Perlin noise hashes integer lattice coordinates with a 64-bit seed. The demo's generator (`games/demo/terrain.hpp`) builds a finite disc world with biome rings from it. Strict floating-point contraction settings are used; cross-architecture bit identity still needs measured validation before extending the compatibility promise.
 
 ## Ownership and memory
 
-`seed_engine` owns platform, rendering, streaming, persistence, and physics code. The demo drives their lifetime explicitly. There are no inheritance hierarchies. `Scene` provides generational entity handles and dense sparse-set transform/visual components. Systems may retain handles, never component addresses across structural edits. Packed components are required to be trivially copyable.
+`seed_engine` owns platform, rendering, streaming, persistence, and physics code, and drives their lifetime from `seed::run`. There are no inheritance hierarchies. `Scene` provides generational entity handles and dense sparse-set transform/visual components. Systems may retain handles, never component addresses across structural edits. Packed components are required to be trivially copyable.
 
-A 2 MiB arena backs entity/component storage. A fixed pool holds 49 terrain chunks. The particle pool contains 512 slots. Physics uses fixed pools for 4,096 bodies, 16,384 center-distance joints, and spatial-hash entries. Each chunk stores at most 256 bodies and 1,024 recipe joints. The renderer allocates its 32,768-instance CPU store once and orphans the GPU stream buffer on each flush. Ordinary frame iteration does not grow STL containers. Allocation is allowed during initialization, loading, serialization, and failure reporting.
+A 2 MiB arena (configurable per game) backs entity/component storage for up to 8,192 entities. A fixed pool holds 49 terrain chunks. The particle pool contains 512 slots. Physics uses fixed pools for 4,096 bodies, 16,384 center-distance joints, and spatial-hash entries. Each chunk stores at most 256 bodies and 1,024 recipe joints. The renderer allocates its 32,768-instance CPU store once and orphans the GPU stream buffer on each flush. Ordinary frame iteration does not grow STL containers. Allocation is allowed during initialization, loading, serialization, and failure reporting.
 
 These are explicit current limits, not estimates of unlimited capacity. Buildings enter and leave the physics pools with their owner chunks. The global pool bounds resident work; owner identity stays fixed while a body moves within its neighboring chunks.
 
@@ -34,10 +50,24 @@ The geometry pass writes full-resolution color and normals. Local lights add int
 
 ## Physics and destruction
 
-Ground-plane bodies use Verlet position/orientation integration. A fixed spatial hash emits candidates; SAT rejects non-contacting oriented boxes. Position corrections include angular response using rectangle inertia. Connected timber pieces exclude mutual contact to avoid fighting their joint constraints.
+Ground-plane bodies use Verlet position/orientation integration. A chunk's bodies simulate only while the chunk is within one chunk of the focus and all eight neighbours are resident; bodies one ring further out collide as immovable obstacles. A fixed spatial hash emits candidates; SAT rejects non-contacting oriented boxes. Position corrections include angular response using rectangle inertia. Connected timber pieces exclude mutual contact to avoid fighting their joint constraints.
 
 A support graph floods from fixed piers. Unsupported components undergo vertical Verlet gravity and settle at ground height. Distance constraints can break under excess stretch. Direct damage removes pieces; terrain excavation can remove a support. The model is deliberately narrow: no continuous collision detection, general joint editor, multilevel construction tools, or fluid simulation. The current fixed time step and movement bounds avoid high-speed gameplay in the demo.
 
 ## Audio
 
 Impact sounds are synthesized from damped oscillators and noise. A bounded SPSC queue feeds the SDL audio callback; the callback allocates no memory and takes no locks. If no audio device is available, startup logs that sound is disabled. Cosmetic particles and active sounds are transient and are not persisted.
+
+## Engine assumptions a new game inherits
+
+These parts of the engine still assume a top-down game shaped like the demo. They are real limits, not stubs, and each needs engine work before a game that differs there.
+
+- **Top-down only.** The ground plane is X/Y. Height exists only for building physics (support and falling) and is shown as an upward screen offset. There is no side-view gravity and no layered terrain.
+- **Fixed chunk and tile geometry.** Chunks are always 32×32 one-unit tiles with one tile layer. The streamed region (5×5 requested, 7×7 retained, 49 slots) and the physics simulation radius are compile-time constants.
+- **Physics is for buildings.** Bodies are oriented boxes from per-chunk recipes or built blocks. They support one another from anchored pieces, fall when unsupported, and take point damage with 100 health. There is no character controller, no circle or polygon shapes, and no general collision query for game entities. Games move their own entities with tile and `Physics::blocks` checks.
+- **One focus entity.** The camera always centres on it, streaming follows it, and `player.delta` saves only its position. Other game entities and components are not saved.
+- **Raw input and fixed keys.** Games read SDL scancodes directly. The engine reserves Escape (quit and save), F5 (checkpoint) and F12 (screenshot).
+- **Sound and effects.** `Audio` plays one synthesized impact sound, and `Particles` has one burst style. A game cannot define its own sounds or effects yet.
+- **Rendering.** Sprites come from one generated atlas of 32×32 procedural tiles, or from whole BC3 textures. There is no text or UI, at most 32 lights, and the clear colour, tone mapping and haze are fixed.
+- **Assets.** The pack format holds BC3 textures only, cooked from TGA. The root CMake file still cooks the demo's `demo.pak` (the flame sample), which the storage tests also use.
+- **Benchmark report.** Its schema keeps two demo-named fields (`damage_demo`, `overview`) that games fill through `describe`, and the stream workload follows a fixed route around the origin.
