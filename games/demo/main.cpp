@@ -215,6 +215,7 @@ int main(int argc, char** argv) {
     game.world = demo::world_generator();
     game.materials = demo::register_materials;
     game.body_visual = body_visual;
+    game.body_lift_per_height = 0.35F; // Raised timbers draw slightly higher on screen.
     game.option = option;
     game.validate = validate;
     game.setup = setup;

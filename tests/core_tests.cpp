@@ -1,6 +1,7 @@
 #include "assets/bc3.hpp"
 #include "core/ecs.hpp"
 #include "core/material.hpp"
+#include "core/scene.hpp"
 #include "io/binary.hpp"
 #include "physics/collision.hpp"
 #include "world/noise.hpp"
@@ -66,6 +67,27 @@ int main() {
                 42, {std::numeric_limits<std::int64_t>::max(), std::numeric_limits<std::int64_t>::min()},
                 {0.5F, 31.5F}, wave);
             check(std::isfinite(n) && std::abs(n) <= 1.5F, "Distant noise range");
+        }
+        {
+            // Game components: registered once, stored densely, removed with their entity.
+            struct Health {
+                float points;
+            };
+            seed::Scene scene;
+            auto& health = scene.add_component<Health>();
+            throws<std::logic_error>([&] { scene.add_component<Health>(); });
+            const auto hero = scene.create({}, {}), rock = scene.create({}, {});
+            health.add(hero, {10});
+            health.add(rock, {99});
+            check(&scene.components<Health>() == &health && health.find(hero)->points == 10,
+                  "Component lookup");
+            scene.destroy(hero);
+            check(!health.find(hero) && health.values().size() == 1 && health.find(rock)->points == 99,
+                  "Destroying an entity removes its game components");
+            struct Unregistered {
+                int value;
+            };
+            throws<std::logic_error>([&] { (void)scene.components<Unregistered>(); });
         }
         seed::Materials materials;
         check(materials.add({"rock", {10, 20, 30}}) == 0 && materials.add({"moss", {1, 2, 3}}) == 1,

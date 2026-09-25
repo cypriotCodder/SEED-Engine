@@ -429,9 +429,8 @@ void Physics::sync_scene() {
         t.position = b.position;
         t.previous = b.previous;
         t.angle = b.angle;
-        // Height is drawn as a small upward screen offset.
-        t.position.move({0, b.height * 0.35F});
-        t.previous.move({0, b.previous_height * 0.35F});
+        t.position.move({0, b.height * visuals_.lift_per_height});
+        t.previous.move({0, b.previous_height * visuals_.lift_per_height});
     }
 }
 

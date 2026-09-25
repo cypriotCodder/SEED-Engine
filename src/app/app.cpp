@@ -79,10 +79,11 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       window(!options.smoke && !options.benchmark),
       renderer(assets_->get(), materials),
       gpu(options.benchmark ? options.measured_frames : 0),
+      scene(game.scene_memory ? game.scene_memory : Scene::default_memory),
       checkpoint(options.save),
       world(jobs, game.world, options.seed, checkpoint.working_directory(),
             [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
-      physics(scene, jobs, {game.context, game.body_visual}),
+      physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
       audio(!options.smoke && !options.benchmark),
       measurements_(options.benchmark ? options.measured_frames : 0) {
     if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");

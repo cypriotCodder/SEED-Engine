@@ -60,6 +60,8 @@ struct Game {
     void (*materials)(void*, Materials&){};
     // How building bodies look; see BodyVisuals. Optional.
     Visual (*body_visual)(void*, const BodyState&){};
+    float body_lift_per_height{};                  // See BodyVisuals::lift_per_height.
+    std::size_t scene_memory{};                    // Scene arena bytes; 0 uses Scene::default_memory.
     bool (*option)(void*, std::string_view arg){}; // Return true if the game consumed arg.
     void (*validate)(void*, const AppOptions&){};  // Reject incompatible option combinations.
     // Create the game's entities at the saved focus position; return the entity to follow.

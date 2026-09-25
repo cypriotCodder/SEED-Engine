@@ -21,11 +21,13 @@ namespace seed {
 //
 // A step runs on a worker between begin_step and finish_step. In that window the pools belong to
 // the worker: every other member function throws std::logic_error rather than race with it.
-// How a game draws its building bodies. Called when a body enters the scene; without it, bodies use
-// material 0 at their collision size.
+// How a game draws its building bodies. `visual` is called when a body enters the scene; without it,
+// bodies use material 0 at their collision size. A body's height above the ground is shown by
+// lifting its sprite `lift_per_height` world units up the screen per unit of height (0: not shown).
 struct BodyVisuals {
     void* context{};
     Visual (*visual)(void*, const BodyState& body){};
+    float lift_per_height{};
 };
 
 class Physics final {
