@@ -2,9 +2,9 @@
 
 ## Reproduce
 
-Build Release, then run `python3 tools/benchmark.py build/release/seed_demo build/benchmark-new-run`. The destination must be new. Each workload gets three runs, a fresh save per run, 60 discarded warmup frames, and 600 measured frames. The script has a 60-second timeout for each process. Change `--runs` or `--frames` when needed. Direct demo benchmarking accepts `--benchmark REPORT.json --frames N --workload static|stream --save EMPTY_DIRECTORY` (up to 10,000 measured frames).
+Build Release, then run `python3 tools/benchmark.py build/release/seed_demo build/benchmark-new-run`. The destination must be new. Each workload gets three runs, a fresh save per run, 60 discarded warmup frames, and 600 measured frames. The script allows at least 60 seconds per process and scales that allowance with frame count (10 frames per second plus startup margin). Change `--runs` or `--frames` when needed. Direct demo benchmarking accepts `--benchmark REPORT.json --frames N --workload static|stream --save EMPTY_DIRECTORY` (up to 10,000 measured frames).
 
-Both workloads use seed 20260923 and fixed 60 Hz simulation, with audio, input actions, driver vsync, and artificial frame pacing disabled. Escape/window close aborts the run; incomplete runs do not produce a successful report. Resizing during measurement is rejected. Native drawable resolution is recorded, so compare reports at the same resolution and view mode.
+Reports now include the generator version; results from different generator versions are different workloads. Both workloads use seed 20260923 and fixed 60 Hz simulation, with audio, input actions, driver vsync, and artificial frame pacing disabled. Escape/window close aborts the run; incomplete runs do not produce a successful report. Resizing during measurement is rejected. Native drawable resolution is recorded, so compare reports at the same resolution and view mode.
 
 The static workload keeps the camera at spawn. Streaming follows chunk coordinates `(0,0) → (4,0) → (4,4) → (0,4) → (-4,4) → (-4,0) → (0,0)`, advancing every 60 measured frames and repeating. This deliberately crosses unload boundaries. It measures the existing island/ocean generator, not a densely populated world or a large construction stress scene. Chunk activation timing remains subject to normal worker scheduling.
 
@@ -46,3 +46,7 @@ Release, Apple Clang 17, Apple M2 Pro, OpenGL 4.1 Metal, drawable 2560×1440, no
 Peak process resident memory ranged from 108,314,624 to 109,772,800 bytes across all six runs. All runs collected 600 GPU samples with zero skips. The static scene had 19 resident bodies and five draws per frame; the streaming route visits empty ocean chunks and has fewer simulated bodies at times.
 
 Raw reports and the summary are under `build/benchmarks/final-baseline/` in this workspace (build artifacts, not distributable assets). Earlier reports under `build/benchmarks/baseline/` predate the physics timing fields and must not be used to claim an optimization: repeated timing varies with system load. This establishes a local baseline; no Windows/Linux or target-hardware results are implied.
+
+## Review hardening — 2026-09-25
+
+Report serialization and sample ownership live in `BenchmarkReport` in the metrics module. Missing OpenGL description strings fall back to `unknown`; an entirely missing GPU sample set produces `null` in the aggregate summary. The Python runner regression is available as `python3 tests/benchmark_tests.py`.

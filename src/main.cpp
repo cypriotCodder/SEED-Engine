@@ -15,8 +15,6 @@
 #include <cstdio>
 #include <exception>
 #include <filesystem>
-#include <fstream>
-#include <iomanip>
 #include <string_view>
 
 int main(int argc, char** argv) {
@@ -74,10 +72,7 @@ int main(int argc, char** argv) {
         if (benchmark && std::filesystem::exists(save) && !std::filesystem::is_empty(save))
             throw std::invalid_argument(
                 "Benchmark requires an empty save directory for repeatable initial state");
-        seed::Samples frame_times(measured_frames), update_times(measured_frames),
-            stream_times(measured_frames), render_times(measured_frames), present_times(measured_frames),
-            draws(measured_frames), bodies(measured_frames), physics_times(measured_frames),
-            physics_join_times(measured_frames);
+        seed::BenchmarkReport measurements(benchmark ? measured_frames : 0);
         seed::Jobs jobs;
         char* base = SDL_GetBasePath();
         if (!base) throw std::runtime_error("Cannot determine executable asset directory");
@@ -274,15 +269,15 @@ int main(int argc, char** argv) {
             window.present();
             const auto frame_end = seed::MeasurementClock::now();
             if (record) {
-                frame_times.add(seed::milliseconds(now, frame_end));
-                update_times.add(seed::milliseconds(now, render_start));
-                stream_times.add(seed::milliseconds(stream_start, stream_end));
-                render_times.add(seed::milliseconds(render_start, render_end));
-                present_times.add(seed::milliseconds(render_end, frame_end));
-                physics_times.add(physics_ns / 1000000.0);
-                physics_join_times.add(seed::milliseconds(physics_join_start, physics_join_end));
-                draws.add(renderer.draw_calls());
-                bodies.add(static_cast<double>(frame_bodies));
+                measurements.frame_times.add(seed::milliseconds(now, frame_end));
+                measurements.update_times.add(seed::milliseconds(now, render_start));
+                measurements.stream_times.add(seed::milliseconds(stream_start, stream_end));
+                measurements.render_times.add(seed::milliseconds(render_start, render_end));
+                measurements.present_times.add(seed::milliseconds(render_end, frame_end));
+                measurements.physics_times.add(physics_ns / 1000000.0);
+                measurements.physics_join_times.add(seed::milliseconds(physics_join_start, physics_join_end));
+                measurements.draws.add(renderer.draw_calls());
+                measurements.bodies.add(static_cast<double>(frame_bodies));
                 // The worker owns body state until the next frame; capture counts only after joining.
                 report_width = width;
                 report_height = height;
@@ -314,63 +309,12 @@ int main(int argc, char** argv) {
         if (benchmark) {
             if (frames != measured_frames + warmup_frames)
                 throw std::runtime_error("Benchmark interrupted before all frames were measured");
-            std::ofstream report(benchmark);
-            report << std::setprecision(9);
-            report << "{\n\"schema\":1,\"seed\":\"" << seed << "\",\"workload\":\""
-                   << (stream_workload ? "stream" : "static") << "\",\"warmup_frames\":" << warmup_frames
-                   << ",\"measured_frames\":" << measured_frames << ",\"width\":" << report_width
-                   << ",\"height\":" << report_height
-                   << ",\"damage_demo\":" << (damage_demo ? "true" : "false")
-                   << ",\"overview\":" << (overview ? "true" : "false") << ",\"platform\":";
-            seed::json_string(report, SDL_GetPlatform());
-            report << ",\"compiler\":";
-#ifdef _MSC_VER
-            seed::json_string(report, "MSVC " + std::to_string(_MSC_VER));
-#else
-            seed::json_string(report, __VERSION__);
-#endif
-            report << ",\"gpu\":";
-            seed::json_string(report, gpu.renderer());
-            report << ",\"opengl\":";
-            seed::json_string(report, gpu.version());
-#ifdef NDEBUG
-            report << ",\"build\":\"release\"";
-#else
-            report << ",\"build\":\"debug\"";
-#endif
-            report << ",\n\"milliseconds\":{\"frame_cpu\":";
-            seed::write_distribution(report, frame_times);
-            report << ",\"update_cpu\":";
-            seed::write_distribution(report, update_times);
-            report << ",\"stream_cpu_subset_of_update\":";
-            seed::write_distribution(report, stream_times);
-            report << ",\"render_cpu\":";
-            seed::write_distribution(report, render_times);
-            report << ",\"present_cpu\":";
-            seed::write_distribution(report, present_times);
-            report << ",\"render_gpu\":";
-            seed::write_distribution(report, gpu.samples);
-            report << ",\"previous_physics_step_worker\":";
-            seed::write_distribution(report, physics_times);
-            report << ",\"physics_join_and_scene_sync_cpu_subset_of_update\":";
-            seed::write_distribution(report, physics_join_times);
             const auto generation = world.generation_metrics();
-            report << "},\n\"draw_calls\":";
-            seed::write_distribution(report, draws);
-            report << ",\"resident_bodies_at_frame_start\":";
-            seed::write_distribution(report, bodies);
-            report << ",\"gpu_samples_skipped\":" << gpu.skipped
-                   << ",\"session_generated_chunks\":" << generation.chunks
-                   << ",\"session_generation_total_ms\":" << generation.nanoseconds / 1000000.0
-                   << ",\"session_generation_max_ms\":" << generation.maximum_nanoseconds / 1000000.0
-                   << ",\"shutdown_checkpoint_ms\":" << save_ms
-                   << ",\"process_peak_resident_bytes\":" << seed::peak_resident_bytes();
-            std::uintmax_t save_bytes = 0;
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(save))
-                if (entry.is_regular_file()) save_bytes += entry.file_size();
-            report << ",\"save_directory_bytes\":" << save_bytes << "}\n";
-            report.close();
-            if (!report) throw std::runtime_error("Cannot write benchmark report");
+            measurements.write(benchmark,
+                {seed, seed::generator_version, warmup_frames, measured_frames, report_width, report_height,
+                 stream_workload, damage_demo, overview, SDL_GetPlatform(), gpu.renderer(), gpu.version(),
+                 generation.chunks, generation.nanoseconds, generation.maximum_nanoseconds, save_ms, save},
+                gpu.samples, gpu.skipped);
         }
         if (damage_demo && physics.grounded_unsupported() == 0)
             throw std::runtime_error("Collapse check failed: no unsupported pieces reached the ground");

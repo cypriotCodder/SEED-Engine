@@ -37,12 +37,16 @@ public:
         collect(true);
         gl_.check();
     }
-    const char* renderer() const { return reinterpret_cast<const char*>(gl_.GetString(GL_RENDERER)); }
-    const char* version() const { return reinterpret_cast<const char*>(gl_.GetString(GL_VERSION)); }
+    const char* renderer() const { return description(GL_RENDERER); }
+    const char* version() const { return description(GL_VERSION); }
     Samples samples;
     unsigned skipped{};
 
 private:
+    const char* description(GLenum name) const {
+        const auto* value = gl_.GetString(name);
+        return value ? reinterpret_cast<const char*>(value) : "unknown";
+    }
     void collect(bool wait) {
         if (!enabled_) return;
         for (std::size_t i = 0; i < ids_.size(); ++i) {

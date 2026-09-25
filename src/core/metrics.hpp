@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
@@ -68,5 +69,32 @@ inline void write_distribution(std::ostream& out, const Samples& samples) {
         << ",\"p50\":" << s.p50 << ",\"p95\":" << s.p95 << ",\"p99\":" << s.p99 << ",\"max\":" << s.maximum
         << '}';
 }
+struct BenchmarkMetadata {
+    std::uint64_t seed{};
+    unsigned generator_version{}, warmup_frames{}, measured_frames{};
+    int width{}, height{};
+    bool stream_workload{}, damage_demo{}, overview{};
+    std::string_view platform, gpu, opengl;
+    std::uint64_t generated_chunks{}, generation_ns{}, generation_max_ns{};
+    double save_ms{};
+    std::filesystem::path save_directory;
+};
+class BenchmarkReport final {
+public:
+    explicit BenchmarkReport(std::size_t frames)
+        : frame_times(frames),
+          update_times(frames),
+          stream_times(frames),
+          render_times(frames),
+          present_times(frames),
+          physics_times(frames),
+          physics_join_times(frames),
+          draws(frames),
+          bodies(frames) {}
+    void write(const std::filesystem::path& path, const BenchmarkMetadata& info, const Samples& gpu_samples,
+               unsigned gpu_skipped) const;
+    Samples frame_times, update_times, stream_times, render_times, present_times, physics_times,
+        physics_join_times, draws, bodies;
+};
 std::uint64_t peak_resident_bytes();
 } // namespace seed
