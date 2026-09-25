@@ -11,6 +11,7 @@ target_include_directories(seed_lz4 SYSTEM PUBLIC ${lz4_SOURCE_DIR}/lib)
 find_package(Threads REQUIRED)
 
 option(SEED_FETCH_SDL "Download the pinned SDL2 dependency" ON)
+option(SEED_BUILD_DEMO "Build the demo game in games/demo" ON)
 option(SEED_WARNINGS_AS_ERRORS "Treat engine warnings as errors" ON)
 
 if(SEED_FETCH_SDL)
@@ -52,16 +53,9 @@ target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads)
 if(WIN32)
     target_link_libraries(seed_engine PUBLIC psapi)
 endif()
-add_executable(seed_demo src/main.cpp)
-seed_strict(seed_demo)
-target_link_libraries(seed_demo PRIVATE seed_engine)
-if(MINGW)
-    target_link_options(seed_demo PRIVATE -static -static-libgcc -static-libstdc++)
-endif()
 add_executable(seed_checkpoint_bench tools/checkpoint_benchmark.cpp)
 seed_strict(seed_checkpoint_bench)
 target_link_libraries(seed_checkpoint_bench PRIVATE seed_engine)
-install(TARGETS seed_demo RUNTIME DESTINATION bin)
 install(FILES licenses/SDL2.txt licenses/LZ4.txt DESTINATION share/licenses/seed_engine)
 
 add_executable(seed_cook tools/cook.cpp src/io/storage.cpp)
@@ -81,10 +75,11 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/demo.pak"
     COMMAND ${seed_cooker} "${CMAKE_CURRENT_BINARY_DIR}/demo.pak" --builtin
     DEPENDS ${seed_cooker} VERBATIM)
 add_custom_target(seed_assets ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/demo.pak")
-add_dependencies(seed_demo seed_assets)
-add_custom_command(TARGET seed_demo POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_BINARY_DIR}/demo.pak" "$<TARGET_FILE_DIR:seed_demo>/demo.pak")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/demo.pak" DESTINATION bin)
+
+if(SEED_BUILD_DEMO)
+    add_subdirectory(games/demo)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
