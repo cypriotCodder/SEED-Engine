@@ -1,4 +1,5 @@
 #include "render/renderer.hpp"
+#include "render/font.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -73,14 +74,42 @@ constexpr const char* composite_fragment = R"GLSL(#version 410 core
 in vec2 uv;
 uniform sampler2D albedo;
 uniform sampler2D illumination;
+uniform vec4 haze;
 out vec4 pixel;
 void main() {
     vec3 base=pow(texture(albedo,uv).rgb,vec3(2.2));
     vec3 lit=base*texture(illumination,uv).rgb;
     lit=1.0-exp(-lit);
-    float fog=smoothstep(0.2,0.8,length(uv-0.5))*0.2;
-    pixel=vec4(mix(pow(lit,vec3(1.0/2.2)),vec3(0.085,0.13,0.17),fog),1);
+    float fog=smoothstep(0.2,0.8,length(uv-0.5))*haze.a;
+    pixel=vec4(mix(pow(lit,vec3(1.0/2.2)),haze.rgb,fog),1);
 })GLSL";
+// Screen-space UI: rectangles in pixels from the top-left, sampling the font texture.
+constexpr const char* ui_vertex = R"GLSL(#version 410 core
+layout(location=0) in vec4 rectangle;
+layout(location=1) in vec4 region;
+layout(location=2) in vec4 tint;
+uniform vec2 screen;
+out vec2 uv;
+out vec4 color;
+void main() {
+    const vec2 corner[6] = vec2[6](vec2(0,0),vec2(1,0),vec2(1,1),vec2(0,0),vec2(1,1),vec2(0,1));
+    vec2 q = corner[gl_VertexID];
+    vec2 p = rectangle.xy + q * rectangle.zw;
+    gl_Position = vec4(p.x / screen.x * 2.0 - 1.0, 1.0 - p.y / screen.y * 2.0, 0, 1);
+    uv = mix(region.xy, region.zw, q);
+    color = tint;
+})GLSL";
+constexpr const char* ui_fragment = R"GLSL(#version 410 core
+in vec2 uv;
+in vec4 color;
+uniform sampler2D font;
+out vec4 pixel;
+void main() {
+    pixel = vec4(color.rgb, color.a * texture(font, uv).a);
+    if (pixel.a < 0.01) discard;
+})GLSL";
+// The font texture holds the 95 glyph cells followed by one solid cell used for rectangles.
+constexpr int font_width = (font_glyphs + 1) * font_cell_width;
 std::uint32_t hash(std::uint32_t n) {
     n ^= n >> 16;
     n *= 0x7feb352dU;
@@ -130,7 +159,9 @@ GLuint Renderer::link_program(const char* vertex_source, const char* fragment_so
     }
 }
 Renderer::Renderer(const Pack& pack, const Materials& registry)
-    : material_count_(registry.size()), sprites_(std::make_unique<Sprite[]>(capacity)) {
+    : material_count_(registry.size()),
+      ui_sprites_(std::make_unique<Sprite[]>(ui_capacity)),
+      sprites_(std::make_unique<Sprite[]>(capacity)) {
     if (!material_count_) throw std::invalid_argument("Register at least one material before rendering");
     const int materials = static_cast<int>(material_count_);
     const int atlas_width = pitch * materials;
@@ -259,6 +290,32 @@ Renderer::Renderer(const Pack& pack, const Materials& registry)
         gl_.Uniform1i(gl_.GetUniformLocation(composite_program_, "albedo"), 0);
         gl_.Uniform1i(gl_.GetUniformLocation(composite_program_, "illumination"), 1);
         gl_.Uniform4f(gl_.GetUniformLocation(composite_program_, "rectangle"), 0, 0, 1, 1);
+        haze_uniform_ = gl_.GetUniformLocation(composite_program_, "haze");
+        ui_program_ = link_program(ui_vertex, ui_fragment);
+        gl_.UseProgram(ui_program_);
+        gl_.Uniform1i(gl_.GetUniformLocation(ui_program_, "font"), 0);
+        ui_screen_uniform_ = gl_.GetUniformLocation(ui_program_, "screen");
+        // Expand the font table into an alpha texture; the last cell is solid for rectangles.
+        std::vector<std::uint8_t> font_pixels(static_cast<std::size_t>(font_width) * font_cell_height * 4,
+                                              255);
+        for (int glyph = 0; glyph <= font_glyphs; ++glyph)
+            for (int y = 0; y < font_cell_height; ++y)
+                for (int x = 0; x < font_cell_width; ++x) {
+                    bool on = glyph == font_glyphs;
+                    if (!on && x < 5 && y < 7)
+                        on = (font_5x7[static_cast<std::size_t>(glyph * 5 + x)] >> y) & 1;
+                    const auto i =
+                        static_cast<std::size_t>((y * font_width + glyph * font_cell_width + x) * 4);
+                    font_pixels[i + 3] = on ? 255 : 0;
+                }
+        gl_.GenTextures(1, &font_);
+        gl_.BindTexture(GL_TEXTURE_2D, font_);
+        gl_.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, font_width, font_cell_height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                       font_pixels.data());
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         gl_.GenFramebuffers(1, &geometry_fbo_);
         gl_.GenFramebuffers(1, &light_fbo_);
         gl_.GenTextures(1, &albedo_target_);
@@ -288,6 +345,8 @@ void Renderer::release() noexcept {
     gl_.DeleteFramebuffers(1, &light_fbo_);
     if (light_program_) gl_.DeleteProgram(light_program_);
     if (composite_program_) gl_.DeleteProgram(composite_program_);
+    if (ui_program_) gl_.DeleteProgram(ui_program_);
+    if (font_) gl_.DeleteTextures(1, &font_);
     gl_.DeleteVertexArrays(1, &vao_);
     if (program_) gl_.DeleteProgram(program_);
 }
@@ -331,7 +390,8 @@ void Renderer::begin(int width, int height, float x, float y, float zoom) {
     view_height_ = static_cast<float>(height) / zoom;
     gl_.BindFramebuffer(GL_FRAMEBUFFER, geometry_fbo_);
     gl_.Viewport(0, 0, width, height);
-    gl_.ClearColor(0.035F, 0.065F, 0.085F, 1);
+    gl_.ClearColor(lighting.clear[0], lighting.clear[1], lighting.clear[2], 1);
+    ui_size_ = 0;
     gl_.Clear(GL_COLOR_BUFFER_BIT);
     gl_.Enable(GL_BLEND);
     gl_.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -400,7 +460,7 @@ void Renderer::finish() {
     flush();
     gl_.BindFramebuffer(GL_FRAMEBUFFER, light_fbo_);
     gl_.Viewport(0, 0, std::max(1, width_ / 2), std::max(1, height_ / 2));
-    gl_.ClearColor(0.34F, 0.43F, 0.56F, 1);
+    gl_.ClearColor(lighting.ambient[0], lighting.ambient[1], lighting.ambient[2], 1);
     gl_.Clear(GL_COLOR_BUFFER_BIT);
     gl_.UseProgram(light_program_);
     gl_.BlendFunc(GL_ONE, GL_ONE);
@@ -421,13 +481,76 @@ void Renderer::finish() {
     gl_.Viewport(0, 0, width_, height_);
     gl_.Disable(GL_BLEND);
     gl_.UseProgram(composite_program_);
+    gl_.Uniform4f(haze_uniform_, lighting.haze[0], lighting.haze[1], lighting.haze[2], lighting.haze_amount);
     gl_.ActiveTexture(GL_TEXTURE0);
     gl_.BindTexture(GL_TEXTURE_2D, albedo_target_);
     gl_.ActiveTexture(GL_TEXTURE1);
     gl_.BindTexture(GL_TEXTURE_2D, light_target_);
     gl_.DrawArraysInstanced(GL_TRIANGLES, 0, 6, 1);
     ++calls_;
+    if (ui_size_) {
+        gl_.Enable(GL_BLEND);
+        gl_.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        gl_.UseProgram(ui_program_);
+        gl_.Uniform2f(ui_screen_uniform_, static_cast<float>(width_), static_cast<float>(height_));
+        gl_.ActiveTexture(GL_TEXTURE0);
+        gl_.BindTexture(GL_TEXTURE_2D, font_);
+        gl_.BindVertexArray(vao_);
+        gl_.BindBuffer(GL_ARRAY_BUFFER, buffer_);
+        gl_.BufferData(GL_ARRAY_BUFFER, capacity * sizeof(Sprite), nullptr, GL_STREAM_DRAW);
+        gl_.BufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(ui_size_ * sizeof(Sprite)),
+                          ui_sprites_.get());
+        gl_.DrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(ui_size_));
+        gl_.Disable(GL_BLEND);
+        ++calls_;
+        ui_size_ = 0;
+    }
     gl_.check();
+}
+
+void Renderer::ui_quad(float x, float y, float width, float height, float u0, float v0, float u1, float v1,
+                       Color color) {
+    if (ui_size_ == ui_capacity) throw std::runtime_error("UI quad budget exhausted");
+    const float s = ui_scale_;
+    ui_sprites_[ui_size_++] = {x * s, y * s,     width * s,   height * s, u0,          v0, u1,
+                               v1,    color.red, color.green, color.blue, color.alpha, 0};
+}
+
+void Renderer::ui_rect(float x, float y, float width, float height, Color color) {
+    // Sample the middle of the solid cell so filtering never reaches a glyph.
+    const float u = (static_cast<float>(font_glyphs * font_cell_width) + 3) / font_width;
+    ui_quad(x, y, width, height, u, 0.5F, u, 0.5F, color);
+}
+
+float Renderer::text(float x, float y, std::string_view value, float scale, Color color) {
+    const float cell_w = font_cell_width * scale, cell_h = font_cell_height * scale;
+    float cx = x, cy = y, widest = 0;
+    for (const char c : value) {
+        if (c == '\n') {
+            widest = std::max(widest, cx - x);
+            cx = x;
+            cy += cell_h;
+            continue;
+        }
+        int glyph = static_cast<unsigned char>(c) - font_first;
+        if (glyph < 0 || glyph >= font_glyphs) glyph = '?' - font_first;
+        if (glyph) { // Spaces advance without drawing.
+            const float u0 = static_cast<float>(glyph * font_cell_width) / font_width;
+            const float u1 = static_cast<float>((glyph + 1) * font_cell_width) / font_width;
+            ui_quad(cx, cy, cell_w, cell_h, u0, 0, u1, 1, color);
+        }
+        cx += cell_w;
+    }
+    return std::max(widest, cx - x);
+}
+
+float Renderer::text_width(std::string_view value, float scale) {
+    std::size_t line = 0, widest = 0;
+    for (const char c : value) {
+        line = c == '\n' ? 0 : line + 1;
+        widest = std::max(widest, line);
+    }
+    return static_cast<float>(widest) * font_cell_width * scale;
 }
 void Renderer::screenshot(const char* path, int width, int height) {
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 4);

@@ -48,6 +48,10 @@ A padded runtime atlas supplies generated materials. A second generated atlas su
 
 The geometry pass writes full-resolution color and normals. Local lights add into a half-resolution RGBA16F target using bounded light quads. The final pass applies illumination, tone mapping, and a mild edge haze. Both normal maps and light locations change the actual shading. There is no geometric shadow map; tree shadows are cheap sprites.
 
+## UI
+
+After the lit scene is composited, the renderer draws a screen-space UI layer, unlit and in submission order: `ui_rect` and `text`, in logical pixels from the top-left, scaled for high-DPI displays. Text uses a 5×7 ASCII bitmap font stored as a 475-byte table in code and expanded into a texture at startup, so no font file ships. The UI costs one extra draw call per frame, and none when a game draws no UI.
+
 ## Physics and destruction
 
 Ground-plane bodies use Verlet position/orientation integration. A chunk's bodies simulate only while the chunk is within one chunk of the focus and all eight neighbours are resident; bodies one ring further out collide as immovable obstacles. A fixed spatial hash emits candidates; SAT rejects non-contacting oriented boxes. Position corrections include angular response using rectangle inertia. Connected timber pieces exclude mutual contact to avoid fighting their joint constraints.
@@ -71,6 +75,6 @@ These parts of the engine still assume a top-down game shaped like the demo. The
 - **Physics is for buildings.** Bodies are oriented boxes from per-chunk recipes or built blocks. They support one another from anchored pieces, fall when unsupported, and take point damage with 100 health. Game characters are kinematic boxes moved with `move_character` (sliding against blocking tiles and bodies, under a game-supplied `TileRule`); they do not push bodies, and there are no circle or polygon shapes, raycasts or entity-versus-entity queries.
 - **One focus entity.** The camera always centres on it, streaming follows it, and `player.delta` saves only its position. Other game entities and components are not saved.
 - **Sound and effects.** `Audio` plays one synthesized impact sound, and `Particles` has one burst style. A game cannot define its own sounds or effects yet.
-- **Rendering.** Sprites come from one generated atlas of 32×32 procedural tiles, or from whole BC3 textures. There is no text or UI, at most 32 lights, and the clear colour, tone mapping and haze are fixed.
+- **Rendering.** Sprites come from one generated atlas of 32×32 procedural tiles, or from whole BC3 textures. UI is a screen-space layer of rectangles and text in one built-in 5×7 ASCII font. There are no widgets, layout, clipping or other fonts. Scenes have at most 32 lights, and tone mapping is fixed; clear colour, ambient light and edge haze are set through `Renderer::lighting`.
 - **Assets.** The pack format holds BC3 textures only, cooked from TGA. The root CMake file still cooks the demo's `demo.pak` (the flame sample), which the storage tests also use.
 - **Benchmark report.** Its schema keeps two demo-named fields (`damage_demo`, `overview`) that games fill through `describe`, and the stream workload follows a fixed route around the origin.

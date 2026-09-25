@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 namespace seed {
 struct Sprite {
@@ -13,6 +14,18 @@ struct Sprite {
     float u0{}, v0{}, u1{}, v1{};
     float red{1}, green{1}, blue{1}, alpha{1};
     float angle{};
+};
+
+struct Color {
+    float red{1}, green{1}, blue{1}, alpha{1};
+};
+
+// Scene-wide lighting. Games may change it at any time; it applies from the next frame.
+struct Lighting {
+    std::array<float, 3> clear{0.035F, 0.065F, 0.085F}; // Background where nothing is drawn.
+    std::array<float, 3> ambient{0.34F, 0.43F, 0.56F};  // Light present everywhere.
+    std::array<float, 3> haze{0.085F, 0.13F, 0.17F};    // Colour blended in towards the edges.
+    float haze_amount{0.2F};                            // 0 disables the edge haze.
 };
 
 class Renderer final {
@@ -33,6 +46,19 @@ public:
     void screenshot(const char* path, int width, int height);
     [[nodiscard]] unsigned draw_calls() const { return calls_; }
 
+    // Screen-space UI, drawn unlit on top of the lit scene in the order submitted. Coordinates are
+    // logical pixels from the top-left corner (see set_ui_scale).
+    static constexpr std::size_t ui_capacity = 8192;
+    void ui_rect(float x, float y, float width, float height, Color color);
+    // Draws ASCII text with the built-in 5x7 font, 6x8 logical pixels per character at scale 1;
+    // '\n' starts a new line. Returns the width of the widest line. Non-ASCII bytes draw as '?'.
+    float text(float x, float y, std::string_view value, float scale = 2, Color color = {});
+    static float text_width(std::string_view value, float scale = 2);
+    // Drawable pixels per logical pixel; the engine sets it each frame for high-DPI displays.
+    void set_ui_scale(float scale) { ui_scale_ = scale; }
+
+    Lighting lighting;
+
 private:
     void release() noexcept;
     GLuint shader(GLenum type, const char* source);
@@ -50,7 +76,13 @@ private:
     std::array<Light, 32> lights_{};
     std::size_t light_count_{};
     GLuint normals_{}, geometry_fbo_{}, light_fbo_{}, albedo_target_{}, normal_target_{}, light_target_{};
-    GLuint light_program_{}, composite_program_{};
+    GLuint light_program_{}, composite_program_{}, ui_program_{}, font_{};
+    GLint haze_uniform_{}, ui_screen_uniform_{};
+    std::unique_ptr<Sprite[]> ui_sprites_;
+    std::size_t ui_size_{};
+    float ui_scale_{1};
+    void ui_quad(float x, float y, float width, float height, float u0, float v0, float u1, float v1,
+                 Color color);
     GLint normal_enabled_{}, light_rect_{}, light_position_{}, light_view_{}, light_color_{};
     int width_{}, height_{};
     float view_width_{}, view_height_{};

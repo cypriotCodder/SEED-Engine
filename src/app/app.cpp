@@ -204,6 +204,7 @@ void Engine::loop(const Game& game) {
         const bool record = options.benchmark && frames >= warmup_frames;
         gpu.begin(record);
         renderer.begin(view.width, view.height, 0, 0, view.zoom);
+        renderer.set_ui_scale(static_cast<float>(view.width) / static_cast<float>(view.logical_width));
         if (game.render) game.render(game.context, *this, view);
         renderer.finish();
         gpu.end();

@@ -4,6 +4,7 @@
 #include "physics/character.hpp"
 #include <cstdio>
 #include <stdexcept>
+#include <string>
 
 namespace {
 enum : seed::MaterialId { meadow, pond };
@@ -66,6 +67,11 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
     });
     engine.draw_entities(view);
     engine.renderer.light(0, 0, 20, 1, 1, 1, 1, 4);
+    // A small HUD: a translucent panel with the walked distance.
+    const auto label = "Walked " + std::to_string(static_cast<int>(engine.focus_position().local.x * 100)) +
+                       " cm\nSeed Engine UI";
+    engine.renderer.ui_rect(12, 12, seed::Renderer::text_width(label) + 16, 44, {0, 0, 0, 0.55F});
+    engine.renderer.text(20, 18, label, 2, {1, 0.95F, 0.7F, 1});
 }
 
 void shutdown(void*, seed::Engine& engine) {
