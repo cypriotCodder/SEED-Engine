@@ -95,6 +95,7 @@ std::vector<std::uint8_t> encode_chunk(const WorldGenerator& generator, std::uin
     Bytes out;
     out.u32(chunk_file_magic);
     out.u32(chunk_file_version);
+    out.u64(generator_id(generator));
     out.u32(generator.version);
     out.u64(seed);
     out.u64(std::uint64_t(coord.x));
@@ -140,9 +141,9 @@ void decode_chunk(std::span<const std::uint8_t> bytes, const WorldGenerator& gen
     if (version != chunk_file_version)
         throw std::runtime_error(
             "Unsupported chunk file version; legacy migration is disabled. Choose a new save directory");
-    if (in.u32() != generator.version || in.u64() != seed || in.u64() != std::uint64_t(coord.x) ||
-        in.u64() != std::uint64_t(coord.y))
-        throw std::runtime_error("Chunk file belongs to another seed, generator or coordinate");
+    if (in.u64() != generator_id(generator) || in.u32() != generator.version || in.u64() != seed ||
+        in.u64() != std::uint64_t(coord.x) || in.u64() != std::uint64_t(coord.y))
+        throw std::runtime_error("Chunk file belongs to another generator, seed or coordinate");
 
     const auto tile_changes = in.u16();
     if (tile_changes > chunk.tiles.size()) throw std::runtime_error("Invalid tile change count");

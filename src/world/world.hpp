@@ -21,8 +21,10 @@ struct ChunkHooks {
 class World final {
 public:
     using ReadPath = std::function<std::filesystem::path(const std::filesystem::path&)>;
-    World(Jobs& jobs, const WorldGenerator& generator, std::uint64_t seed, std::filesystem::path directory,
-          ReadPath read_path = {});
+    // Opens or creates the save in `directory`. world.seed binds it to one game, one generator
+    // version and one seed; opening it with anything else throws without changing it.
+    World(Jobs& jobs, std::uint64_t game_id, const WorldGenerator& generator, std::uint64_t seed,
+          std::filesystem::path directory, ReadPath read_path = {});
     const WorldGenerator& generator() const { return generator_; }
     ~World();
     World(const World&) = delete;
@@ -67,7 +69,7 @@ private:
     JobGroup group_;
     ChunkHooks hooks_;
     WorldGenerator generator_;
-    std::uint64_t seed_;
+    std::uint64_t game_id_, seed_;
     std::filesystem::path directory_;
     ReadPath read_path_;
     Pool<Chunk, 49> pool_;

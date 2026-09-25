@@ -81,7 +81,7 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       gpu(options.benchmark ? options.measured_frames : 0),
       scene(game.scene_memory ? game.scene_memory : Scene::default_memory),
       checkpoint(options.save),
-      world(jobs, game.world, options.seed, checkpoint.working_directory(),
+      world(jobs, stable_id(game.id), game.world, options.seed, checkpoint.working_directory(),
             [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
       physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
       audio(!options.smoke && !options.benchmark),
@@ -262,9 +262,10 @@ void Engine::loop(const Game& game) {
 
 int run(const Game& game, int argc, char** argv) {
     try {
-        if (!game.setup || !game.materials || !game.name || !game.asset_pack || !game.default_save)
+        if (!game.setup || !game.materials || !game.id || !game.name || !game.asset_pack ||
+            !game.default_save)
             throw std::invalid_argument(
-                "A game needs a name, an asset pack, a default save, materials() and setup()");
+                "A game needs an id, a name, an asset pack, a default save, materials() and setup()");
         const auto options = parse(game, argc, argv);
         Engine engine(game, options);
         const auto spawn = load_player(engine.checkpoint.read_path("player.delta").parent_path(),

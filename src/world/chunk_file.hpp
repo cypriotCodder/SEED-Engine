@@ -6,7 +6,7 @@
 
 namespace seed {
 constexpr std::uint32_t chunk_file_magic = 0x4b4e4843;
-constexpr std::uint32_t chunk_file_version = 2;
+constexpr std::uint32_t chunk_file_version = 3;
 constexpr std::size_t body_record_size = 81;
 
 // Fixed-size little-endian encoding of one body, used both for saving and for change detection.

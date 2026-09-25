@@ -1,8 +1,10 @@
 #include "physics/physics.hpp"
 #include "test_world.hpp"
 #include "world/chunk_file.hpp"
+#include "world/world.hpp"
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -23,7 +25,7 @@ void rejects(F&& f, const char* message) {
 }
 
 constexpr std::uint64_t seed = 77;
-constexpr std::size_t header_only_size = 4 + 4 + 4 + 8 + 8 + 8 + 2 + 2 + 2;
+constexpr std::size_t header_only_size = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 2 + 2;
 
 std::unique_ptr<seed::Chunk> generated(seed::ChunkCoord coord) {
     auto chunk = std::make_unique<seed::Chunk>();
@@ -101,11 +103,14 @@ void codec() {
         },
         "File for another coordinate accepted");
     auto old_version = bytes;
-    old_version[4] = 1;
-    rejects([&] { decode_into_fresh(old_version); }, "Version 1 chunk file accepted");
+    old_version[4] = 2;
+    rejects([&] { decode_into_fresh(old_version); }, "Version 2 chunk file accepted");
+    auto other_generator = bytes;
+    other_generator[8] ^= 1; // Low byte of the generator ID.
+    rejects([&] { decode_into_fresh(other_generator); }, "Chunk file from another generator accepted");
 
     // Offsets: 42-byte header prefix up to the tile count, then 3 bytes per tile record.
-    const std::size_t body_count_offset = 4 + 4 + 4 + 8 + 8 + 8 + 2 + 3;
+    const std::size_t body_count_offset = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 3;
     const std::size_t first_record = body_count_offset + 2;
     auto duplicate = bytes;
     duplicate[first_record + 2 + seed::body_record_size] = duplicate[first_record]; // Second ID = first ID.
@@ -114,6 +119,28 @@ void codec() {
     auto far_away = bytes;
     far_away[first_record + 3] = 9; // Position chunk x of the first record: 9 chunks from its owner.
     rejects([&] { decode_into_fresh(far_away); }, "Body outside owner reach accepted");
+}
+
+// world.seed binds a save to one game, generator, generator version and seed.
+void save_identity() {
+    seed::Jobs jobs(1);
+    const auto dir = std::filesystem::temp_directory_path() / "seed-engine-identity-test";
+    std::filesystem::remove_all(dir);
+    const auto game = seed::stable_id("test-game");
+    auto generator = test_world::generator();
+    { seed::World created(jobs, game, generator, 7, dir); }
+    { seed::World reopened(jobs, game, generator, 7, dir); }
+    rejects([&] { seed::World w(jobs, seed::stable_id("other-game"), generator, 7, dir); },
+            "Other game accepted");
+    rejects([&] { seed::World w(jobs, game, generator, 8, dir); }, "Other seed accepted");
+    auto newer = generator;
+    newer.version = 2;
+    rejects([&] { seed::World w(jobs, game, newer, 7, dir); }, "Other generator version accepted");
+    auto renamed = generator;
+    renamed.name = "another-generator";
+    rejects([&] { seed::World w(jobs, game, renamed, 7, dir); }, "Other generator accepted");
+    std::filesystem::remove_all(dir);
+    check(seed::stable_id("seed-demo") != seed::stable_id("seed-demp"), "Stable IDs distinguish names");
 }
 
 // Attaches empty chunks around `center` (skipping chunks already resident via `skip`), so that
@@ -303,6 +330,7 @@ int main() {
         job_groups();
         codec();
         residency();
+        save_identity();
         built_slots_are_reclaimed();
         boundary_collisions();
         readers_reject_pending_step();

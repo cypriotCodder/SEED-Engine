@@ -5,10 +5,14 @@
 #include <chrono>
 
 namespace seed {
-World::World(Jobs& jobs, const WorldGenerator& generator, std::uint64_t seed, std::filesystem::path directory,
-             ReadPath read_path)
+namespace {
+constexpr std::uint32_t world_file_magic = 0x444c5257, world_file_version = 2;
+}
+World::World(Jobs& jobs, std::uint64_t game_id, const WorldGenerator& generator, std::uint64_t seed,
+             std::filesystem::path directory, ReadPath read_path)
     : jobs_(jobs),
       generator_(generator),
+      game_id_(game_id),
       seed_(seed),
       directory_(std::move(directory)),
       read_path_(std::move(read_path)) {
@@ -25,14 +29,26 @@ World::World(Jobs& jobs, const WorldGenerator& generator, std::uint64_t seed, st
     if (std::filesystem::exists(read_path_(metadata))) {
         const auto bytes = read_blob(read_path_(metadata));
         Reader input(bytes);
-        if (input.u32() != 0x444c5257 || input.u32() != 1 || input.u32() != generator_.version ||
-            input.u64() != seed_ || !input.done())
-            throw std::runtime_error("Save seed or generator version mismatch; legacy migration is disabled. "
-                                     "Choose a new save directory");
+        if (input.u32() != world_file_magic) throw std::runtime_error("Invalid world.seed file");
+        if (input.u32() != world_file_version)
+            throw std::runtime_error(
+                "Unsupported save format from an older build; choose a new save directory");
+        const auto game = input.u64(), generator_hash = input.u64();
+        const auto version = input.u32();
+        const auto seed = input.u64();
+        if (!input.done()) throw std::runtime_error("Invalid world.seed file");
+        if (game != game_id_) throw std::runtime_error("This save belongs to another game");
+        if (generator_hash != generator_id(generator_))
+            throw std::runtime_error("This save was made by another world generator");
+        if (version != generator_.version)
+            throw std::runtime_error("This save was made by another version of the world generator");
+        if (seed != seed_) throw std::runtime_error("This save uses a different seed");
     } else {
         Bytes output;
-        output.u32(0x444c5257);
-        output.u32(1);
+        output.u32(world_file_magic);
+        output.u32(world_file_version);
+        output.u64(game_id_);
+        output.u64(generator_id(generator_));
         output.u32(generator_.version);
         output.u64(seed_);
         write_blob(metadata, output.data);

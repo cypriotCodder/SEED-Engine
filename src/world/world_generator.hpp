@@ -1,6 +1,7 @@
 #pragma once
 #include "world/chunk.hpp"
 #include <cstdint>
+#include <string_view>
 
 namespace seed {
 // How a game builds its world. All callbacks must be pure functions of their arguments (the same
@@ -40,6 +41,20 @@ inline void fill_chunk(const WorldGenerator& generator, std::uint64_t seed, Chun
     chunk.dirty = false;
     generate_structures(generator, seed, coord, chunk.bodies);
     generator.terrain(generator.context, seed, coord, chunk);
+}
+
+// 64-bit FNV-1a hash of a stable name. Saves record these IDs, so a name must never change once
+// saves exist; bump the generator version instead.
+constexpr std::uint64_t stable_id(std::string_view name) {
+    std::uint64_t hash = 0xcbf29ce484222325ULL;
+    for (const char c : name) {
+        hash ^= static_cast<unsigned char>(c);
+        hash *= 0x100000001b3ULL;
+    }
+    return hash;
+}
+inline std::uint64_t generator_id(const WorldGenerator& generator) {
+    return stable_id(generator.name);
 }
 
 inline void validate(const WorldGenerator& generator) {

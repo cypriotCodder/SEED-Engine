@@ -206,6 +206,7 @@ int main(int argc, char** argv) {
     Demo demo;
     seed::Game game;
     game.context = &demo;
+    game.id = "seed-demo";
     game.name = "seed_demo";
     game.title = "Seed Engine | WASD | Left damage / Right dig | B build | F5 save | Tab map | Esc save";
     game.asset_pack = "demo.pak";
