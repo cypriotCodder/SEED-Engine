@@ -24,6 +24,11 @@ Materials register_materials(const Game& game) {
     return materials;
 }
 
+const Pack& no_assets() {
+    static const Pack empty;
+    return empty;
+}
+
 AppOptions parse(const Game& game, int argc, char** argv) {
     AppOptions options;
     options.seed = game.default_seed;
@@ -74,10 +79,10 @@ AppOptions parse(const Game& game, int argc, char** argv) {
 
 Engine::Engine(const Game& game, const AppOptions& opts)
     : options(opts),
-      assets_(std::make_unique<PackStream>(jobs, asset_path(game.asset_pack))),
+      assets_(game.asset_pack ? std::make_unique<PackStream>(jobs, asset_path(game.asset_pack)) : nullptr),
       materials(register_materials(game)),
       window(!options.smoke && !options.benchmark),
-      renderer(assets_->get(), materials),
+      renderer(assets_ ? assets_->get() : no_assets(), materials),
       gpu(options.benchmark ? options.measured_frames : 0),
       scene(game.scene_memory ? game.scene_memory : Scene::default_memory),
       checkpoint(options.save),
@@ -262,10 +267,9 @@ void Engine::loop(const Game& game) {
 
 int run(const Game& game, int argc, char** argv) {
     try {
-        if (!game.setup || !game.materials || !game.id || !game.name || !game.asset_pack ||
-            !game.default_save)
+        if (!game.setup || !game.materials || !game.id || !game.name || !game.default_save)
             throw std::invalid_argument(
-                "A game needs an id, a name, an asset pack, a default save, materials() and setup()");
+                "A game needs an id, a name, a default save, materials() and setup()");
         const auto options = parse(game, argc, argv);
         Engine engine(game, options);
         const auto spawn = load_player(engine.checkpoint.read_path("player.delta").parent_path(),

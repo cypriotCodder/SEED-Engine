@@ -14,6 +14,7 @@ struct TextureAsset {
 };
 class Pack final {
 public:
+    Pack() = default; // An empty pack, for games that ship no textures.
     explicit Pack(const std::filesystem::path& file) : bytes_(read_blob(file)) {
         Reader input(bytes_);
         if (input.u32() != 0x4b504453 || input.u32() != 1) throw std::runtime_error("Unknown asset pack");

@@ -52,7 +52,7 @@ struct Game {
     const char* name{};       // Executable name, used in the usage message.
     const char* id{};         // Stable game identifier recorded in saves; never change it once saves exist.
     const char* title{};      // Window title prefix; the draw-call count is appended.
-    const char* asset_pack{}; // Archive file name beside the executable.
+    const char* asset_pack{}; // Archive file name beside the executable; optional.
     std::uint64_t default_seed{};
     const char* default_save{};
     const char* usage{};    // Game options, appended to the usage message.

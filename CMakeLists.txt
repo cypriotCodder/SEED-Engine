@@ -98,6 +98,11 @@ if(BUILD_TESTING)
     seed_strict(seed_physics_tests)
     target_link_libraries(seed_physics_tests PRIVATE seed_engine)
     add_test(NAME physics_logic COMMAND seed_physics_tests)
+    # A second, minimal game proves the engine works without the demo. It opens a real window.
+    add_executable(seed_minimal_game tests/minimal_game.cpp)
+    seed_strict(seed_minimal_game)
+    target_link_libraries(seed_minimal_game PRIVATE seed_engine)
+    add_test(NAME minimal_game COMMAND seed_minimal_game --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
     add_test(NAME storage_logic COMMAND seed_storage_tests "${CMAKE_CURRENT_BINARY_DIR}/storage-test-data" "${CMAKE_CURRENT_BINARY_DIR}/demo.pak")
 endif()
 
