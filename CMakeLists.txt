@@ -29,6 +29,19 @@ else()
     find_package(SDL2 2.0.18 CONFIG REQUIRED)
 endif()
 
+# Dear ImGui drives the in-engine editor. Built as its own library without the engine's strict warnings.
+FetchContent_Declare(imgui
+    URL https://github.com/ocornut/imgui/archive/refs/tags/v1.92.9b.tar.gz
+    URL_HASH SHA256=21d8a0a565e85dce943e375db00812c2f3f0ab21f3f0f7964e364a63422d7f99
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(imgui)
+add_library(seed_imgui STATIC ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+target_include_directories(seed_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_compile_features(seed_imgui PUBLIC cxx_std_20)
+target_link_libraries(seed_imgui PUBLIC SDL2::SDL2)
+
 function(seed_strict target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
@@ -46,18 +59,18 @@ function(seed_strict target)
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
     src/world/chunk_file.cpp src/io/checkpoint.cpp src/core/metrics.cpp
-    src/app/app.cpp)
+    src/app/app.cpp src/editor/editor.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
 target_compile_definitions(seed_engine PUBLIC SDL_MAIN_HANDLED)
-target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads)
+target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads PRIVATE seed_imgui)
 if(WIN32)
     target_link_libraries(seed_engine PUBLIC psapi)
 endif()
 add_executable(seed_checkpoint_bench tools/checkpoint_benchmark.cpp)
 seed_strict(seed_checkpoint_bench)
 target_link_libraries(seed_checkpoint_bench PRIVATE seed_engine)
-install(FILES licenses/SDL2.txt licenses/LZ4.txt DESTINATION share/licenses/seed_engine)
+install(FILES licenses/SDL2.txt licenses/LZ4.txt licenses/ImGui.txt DESTINATION share/licenses/seed_engine)
 
 add_executable(seed_cook tools/cook.cpp src/io/storage.cpp)
 target_include_directories(seed_cook PRIVATE src)
@@ -118,6 +131,8 @@ if(BUILD_TESTING)
     add_test(NAME minimal_game COMMAND seed_minimal_game --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
     set_tests_properties(minimal_game PROPERTIES DEPENDS minimal_game_fresh_save)
     add_test(NAME minimal_game_reload COMMAND seed_minimal_game --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
+    add_test(NAME minimal_game_editor COMMAND seed_minimal_game --smoke --editor --save "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
+    set_tests_properties(minimal_game_editor PROPERTIES DEPENDS minimal_game_reload)
     set_tests_properties(minimal_game_reload PROPERTIES DEPENDS minimal_game)
     add_test(NAME storage_logic COMMAND seed_storage_tests "${CMAKE_CURRENT_BINARY_DIR}/storage-test-data" "${CMAKE_CURRENT_BINARY_DIR}/demo.pak")
 endif()

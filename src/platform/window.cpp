@@ -70,6 +70,7 @@ void Window::poll(Input& input) {
     input.released.fill(false);
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (observer_) observer_(observer_context_, event);
         if (event.type == SDL_QUIT) input.quit = true;
         if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
             const auto key = static_cast<std::size_t>(event.key.keysym.scancode);

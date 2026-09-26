@@ -118,5 +118,6 @@ namespace engine_action {
 constexpr ActionId quit = 0;       // Escape: checkpoint and quit.
 constexpr ActionId checkpoint = 1; // F5: start a background checkpoint.
 constexpr ActionId screenshot = 2; // F12: write a frame when --screenshot was given.
+constexpr ActionId editor = 3;     // F1: open or close the editor.
 } // namespace engine_action
 } // namespace seed

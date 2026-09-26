@@ -44,6 +44,8 @@ AppOptions parse(const Game& game, int argc, char** argv) {
         const std::string_view arg = argv[i];
         if (arg == "--smoke")
             options.smoke = true;
+        else if (arg == "--editor")
+            options.editor = true;
         else if (arg == "--screenshot" && i + 1 < argc)
             options.screenshot = argv[++i];
         else if (arg == "--save" && i + 1 < argc) {
@@ -70,12 +72,13 @@ AppOptions parse(const Game& game, int argc, char** argv) {
         } else if (!game.option || !game.option(game.context, arg))
             throw std::invalid_argument(std::string("Usage: ") + game.name + " [--smoke] " +
                                         (game.usage ? game.usage : "") +
-                                        "[--screenshot FILE.ppm] [--seed N] [--save DIRECTORY] "
+                                        "[--editor] [--screenshot FILE.ppm] [--seed N] [--save DIRECTORY] "
                                         "[--benchmark REPORT.json --frames N --workload static|stream]");
     }
     if (game.validate) game.validate(game.context, options);
-    if (options.benchmark && (!options.explicit_save || options.screenshot || options.smoke))
-        throw std::invalid_argument("Benchmark requires --save and excludes smoke and screenshot");
+    if (options.benchmark &&
+        (!options.explicit_save || options.screenshot || options.smoke || options.editor))
+        throw std::invalid_argument("Benchmark requires --save and excludes smoke, screenshot and editor");
     if (options.benchmark && std::filesystem::exists(options.save) &&
         !std::filesystem::is_empty(options.save))
         throw std::invalid_argument(
@@ -90,6 +93,7 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       materials(register_materials(game)),
       window(!options.smoke && !options.benchmark),
       renderer(assets_ ? assets_->get() : no_assets(), materials),
+      editor(window, options.editor),
       gpu(options.benchmark ? options.measured_frames : 0),
       scene(game.scene_memory ? game.scene_memory : Scene::default_memory),
       checkpoint(options.save),
@@ -107,6 +111,7 @@ Engine::Engine(const Game& game, const AppOptions& opts)
     actions.add("quit", {Binding::key(SDL_SCANCODE_ESCAPE)});
     actions.add("checkpoint", {Binding::key(SDL_SCANCODE_F5)});
     actions.add("screenshot", {Binding::key(SDL_SCANCODE_F12)});
+    actions.add("editor", {Binding::key(SDL_SCANCODE_F1)});
     if (game.actions) game.actions(game.context, actions);
     ChunkHooks hooks;
     hooks.context = this;
@@ -229,7 +234,16 @@ void Engine::loop(const Game& game) {
                              : std::clamp(std::chrono::duration<float>(now - previous).count(), 0.0F, 0.1F);
         previous = now;
         window.poll(input);
+        editor.begin();
+        // Input the editor is using never reaches the game.
+        if (editor.captures_keyboard()) {
+            input.held.fill(false);
+            input.pressed.fill(false);
+            input.released.fill(false);
+        }
+        if (editor.captures_mouse()) input.mouse_buttons = 0;
         actions.update(input);
+        if (actions.pressed(engine_action::editor)) editor.toggle();
         if (options.benchmark) {
             // Benchmarks ignore every input except quitting.
             const bool quit = input.quit || actions.pressed(engine_action::quit);
@@ -243,6 +257,7 @@ void Engine::loop(const Game& game) {
         const auto physics_join_end = MeasurementClock::now();
         const auto physics_ns = physics.last_step_nanoseconds();
         const auto frame_bodies = physics.count();
+        editor.record({dt, frame_bodies, physics_ns});
         if (game.frame) game.frame(game.context, *this, dt);
         if (actions.pressed(engine_action::quit)) input.quit = true;
         auto& transform = *scene.transforms.find(focus);
@@ -274,6 +289,7 @@ void Engine::loop(const Game& game) {
         window.drawable_size(view.width, view.height);
         window.logical_size(view.logical_width, view.logical_height);
         if (view.width <= 0 || view.height <= 0 || view.logical_width <= 0 || view.logical_height <= 0) {
+            editor.cancel();
             SDL_Delay(16);
             continue;
         }
@@ -292,6 +308,7 @@ void Engine::loop(const Game& game) {
         renderer.set_ui_scale(static_cast<float>(view.width) / static_cast<float>(view.logical_width));
         if (game.render) game.render(game.context, *this, view);
         renderer.finish();
+        editor.finish(*this, game);
         gpu.end();
         const auto render_end = MeasurementClock::now();
         if (options.screenshot &&

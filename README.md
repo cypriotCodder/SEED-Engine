@@ -32,6 +32,8 @@ A game is an executable that links `seed_engine` and hands `seed::run` a `seed::
 
 It then adds the callbacks it needs: `step` for movement, `act` for pointer input, `render` to draw, and `shutdown` for end-of-run checks. Entities made with `Engine::create_saved` are stored in the file of the chunk they stand in; the engine keeps their transform and visual, and the game's `save_entity`/`load_entity` pair writes and reads its other components. [tests/minimal_game.cpp](tests/minimal_game.cpp) is a complete game in about 150 lines, and `games/demo/` is a fuller one. [Architecture](docs/architecture.md) describes the engine/game boundary and lists what the engine still assumes about a game.
 
+Every game gets the editor: F1 opens Dear ImGui panels over the running game showing frame time, draw calls, streaming, physics, entity and save state. A game adds its own panels through `Game::editor`. Input the editor is using (a click on a panel, typing in a field) does not reach the game.
+
 Add a game as a subdirectory with its own `CMakeLists.txt`, as `games/demo/` does. `-DSEED_BUILD_DEMO=OFF` builds the engine and its tests without the demo.
 
 ## Demo controls
@@ -46,6 +48,7 @@ Add a game as a subdirectory with its own `CMakeLists.txt`, as `games/demo/` doe
 | F5 | Commit a checkpoint now |
 | Escape / window close | Commit a checkpoint and quit |
 | F12 | Write a frame when `--screenshot FILE.ppm` was supplied |
+| F1 | Open or close the editor (`--editor` starts with it open) |
 
 The four stone piers support the generated timber platform. Removing all supports makes the remaining pieces fall to ground level. Ground-plane contacts use a spatial hash and oriented-box SAT; vertical support/gravity are a separate top-down model. New blocks are loose ground-level bodies, not an editor or a complete construction game.
 

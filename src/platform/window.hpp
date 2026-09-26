@@ -30,11 +30,20 @@ public:
     void title(std::string_view value);
     void drawable_size(int& width, int& height) const;
     void logical_size(int& width, int& height) const;
+    // Every polled event is also passed to `observer`, before Input sees it. One observer at a time.
+    void observe(void* context, void (*observer)(void*, const SDL_Event&)) {
+        observer_context_ = context;
+        observer_ = observer;
+    }
+    SDL_Window* handle() const { return window_; }
+    SDL_GLContext context() const { return context_; }
 
 private:
     void release() noexcept;
     SDL_Window* window_{};
     SDL_GLContext context_{};
+    void* observer_context_{};
+    void (*observer_)(void*, const SDL_Event&){};
     using ViewportFn = void(APIENTRY*)(int, int, int, int);
     using ClearColorFn = void(APIENTRY*)(float, float, float, float);
     using ClearFn = void(APIENTRY*)(unsigned int);
