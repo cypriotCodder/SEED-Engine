@@ -10,7 +10,7 @@ if [ -z "$seed_format" ]; then
     echo 'clang-format not found' >&2
     exit 1
 fi
-seed_files=$(find src games tests tools editor -name '*.cpp' -o -name '*.hpp')
+seed_files=$(find src games tests tools editor player -name '*.cpp' -o -name '*.hpp')
 if [ "${1:-}" = --check ]; then
     "$seed_format" --dry-run --Werror $seed_files
 else

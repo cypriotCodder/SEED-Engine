@@ -83,7 +83,8 @@ App::App(Options options)
       new_location_(default_location().string()),
       assets_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); },
               !options_.smoke),
-      scene_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); }) {
+      scene_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); }),
+      play_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); }) {
     window_.title("Seed Editor");
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -154,6 +155,7 @@ void App::create(const fs::path& parent, const std::string& name) {
 
 void App::close_project() {
     if (!project_) return;
+    play_.stop();
     if (dirty()) log(Level::warning, "Discarded unsaved changes.");
     assets_.unload();
     scene_.unload();
@@ -224,6 +226,49 @@ void App::unsaved_popup() {
     ImGui::EndPopup();
 }
 
+void App::start_play() {
+    if (!project_ || play_.running()) return;
+    // The game runs the files on disk, so unsaved edits are saved first.
+    if (dirty() && !save_all())
+        return log(Level::error, "Play needs the project saved; see the problems above.");
+    // Every Play starts a new world; the project's real saves are never touched.
+    const auto save = user_state_directory(*project_) / "play";
+    std::filesystem::remove_all(save);
+    std::vector<std::string> arguments{"--project", project_->root.string(), "--save", save.string()};
+    if (options_.smoke) arguments.push_back("--smoke");
+    // seed_player sits beside the editor when installed; in a build tree CMake records its path.
+    char* base = SDL_GetBasePath();
+    auto player = std::filesystem::path(base ? base : "") / "seed_player";
+    SDL_free(base);
+    if (!std::filesystem::exists(player)) player = SEED_PLAYER_PATH;
+    play_.start(player, arguments);
+    log(Level::info, "Playing \"" + project_->name + "\". Close the game window or press Stop to return.");
+}
+
+void App::play_controls() {
+    // Centred in the menu bar, like a transport control.
+    const float width = 90;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + 20, (ImGui::GetWindowWidth() - width) / 2));
+    if (!play_.running()) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.20F, 0.45F, 0.30F, 1});
+        if (ImGui::Button("Play", {width, 0})) start_play();
+        ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("Save and run the project in its own window (Cmd+P).");
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.55F, 0.22F, 0.20F, 1});
+        if (ImGui::Button("Stop", {width, 0})) play_.stop();
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Playing");
+    }
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_P, ImGuiInputFlags_RouteGlobal)) {
+        if (play_.running())
+            play_.stop();
+        else
+            start_play();
+    }
+}
+
 void App::record_history() {
     // An edit is finished once no field is being typed in or dragged and no button is held.
     if (ImGui::IsAnyItemActive() || ImGui::IsMouseDown(ImGuiMouseButton_Left) || scene_.busy()) return;
@@ -276,6 +321,7 @@ int App::run() {
     try {
         if (!options_.create_name.empty()) create(options_.create_parent, options_.create_name);
         if (!options_.open.empty()) open(options_.open);
+        if (options_.play) start_play();
     } catch (const std::exception& error) {
         log(Level::error, error.what());
         if (options_.smoke) throw;
@@ -292,6 +338,7 @@ int App::run() {
                 calm_frames_ = 0;
         }
         window_.poll(input);
+        play_.poll();
         if (input.quit) {
             input.quit = false;
             leave([this] { quit_ = true; });
@@ -307,10 +354,10 @@ int App::run() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData()); // Also draws the Scene view.
         if (const auto error = scene_.take_error(); !error.empty()) log(Level::error, "Scene view: " + error);
         ++frames_;
-        if (options_.smoke && frames_ == 60) {
-            if (!options_.screenshot.empty()) screenshot(options_.screenshot);
-            quit_ = true;
-        }
+        if (options_.smoke && frames_ == 60 && !options_.screenshot.empty()) screenshot(options_.screenshot);
+        // A smoke run with --play lasts until the game it started has finished.
+        if (options_.smoke && frames_ >= 60 && !play_.running()) quit_ = true;
+        if (options_.smoke && play_.running()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         window_.present();
         if (pending_) {
             const auto action = std::move(pending_);
@@ -325,7 +372,7 @@ int App::run() {
         }
         if (!options_.smoke) std::this_thread::sleep_until(frame_start + std::chrono::microseconds(16667));
     }
-    return 0;
+    return options_.play && play_.last_exit() != 0 ? 1 : 0;
 }
 
 void App::frame() {
@@ -545,6 +592,7 @@ void App::menu_bar() {
         if (ImGui::MenuItem("About Seed Editor")) show_about_ = true;
         ImGui::EndMenu();
     }
+    play_controls();
     ImGui::EndMainMenuBar();
     if (close) leave([this] { close_project(); });
 }

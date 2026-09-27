@@ -62,7 +62,7 @@ function(seed_strict target)
     endif()
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
-    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/core/metrics.cpp
+    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/runner.cpp src/core/metrics.cpp
     src/app/app.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
@@ -71,6 +71,12 @@ target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads)
 if(WIN32)
     target_link_libraries(seed_engine PUBLIC psapi)
 endif()
+# The runtime that plays a project; see player/main.cpp.
+add_executable(seed_player player/main.cpp)
+seed_strict(seed_player)
+target_link_libraries(seed_player PRIVATE seed_engine)
+install(TARGETS seed_player RUNTIME DESTINATION bin)
+
 add_executable(seed_checkpoint_bench tools/checkpoint_benchmark.cpp)
 seed_strict(seed_checkpoint_bench)
 target_link_libraries(seed_checkpoint_bench PRIVATE seed_engine)
@@ -149,14 +155,15 @@ if(BUILD_TESTING)
     target_link_libraries(seed_minimal_game PRIVATE seed_engine)
     add_custom_command(TARGET seed_minimal_game POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/minimal_game_assets" "$<TARGET_FILE_DIR:seed_minimal_game>/minimal_game_assets")
-    add_executable(seed_data_game tests/data_game.cpp)
-    seed_strict(seed_data_game)
-    target_link_libraries(seed_data_game PRIVATE seed_engine)
-    add_custom_command(TARGET seed_data_game POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/data_game_assets" "$<TARGET_FILE_DIR:seed_data_game>/data_game_assets")
-    add_test(NAME data_game_fresh_save COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/data-game-save")
-    add_test(NAME data_game COMMAND seed_data_game --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/data-game-save")
-    set_tests_properties(data_game PROPERTIES DEPENDS data_game_fresh_save)
+    # A project with no game code, run by seed_player: once on a fresh save, then resumed.
+    set(seed_sample_save "${CMAKE_CURRENT_BINARY_DIR}/sample-project-save")
+    add_test(NAME player_fresh_save COMMAND ${CMAKE_COMMAND} -E rm -rf "${seed_sample_save}")
+    add_test(NAME player COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/sample_project" --smoke
+        --save "${seed_sample_save}")
+    add_test(NAME player_resume COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/sample_project"
+        --smoke --save "${seed_sample_save}")
+    set_tests_properties(player PROPERTIES DEPENDS player_fresh_save)
+    set_tests_properties(player_resume PROPERTIES DEPENDS player)
     add_test(NAME minimal_game_fresh_save COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
     add_test(NAME minimal_game COMMAND seed_minimal_game --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
     set_tests_properties(minimal_game PROPERTIES DEPENDS minimal_game_fresh_save)

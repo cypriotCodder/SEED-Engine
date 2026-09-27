@@ -10,9 +10,11 @@ if(APPLE)
 else()
     set(seed_folder_dialog folder_dialog_none.cpp)
 endif()
-add_executable(seed_editor main.cpp app.cpp asset_panels.cpp terrain_panel.cpp scene_editor.cpp ${seed_folder_dialog})
+add_executable(seed_editor main.cpp app.cpp asset_panels.cpp terrain_panel.cpp scene_editor.cpp play.cpp ${seed_folder_dialog})
 seed_strict(seed_editor)
 target_link_libraries(seed_editor PRIVATE seed_editor_core seed_imgui)
+add_dependencies(seed_editor seed_player)
+target_compile_definitions(seed_editor PRIVATE SEED_PLAYER_PATH="$<TARGET_FILE:seed_player>")
 if(APPLE)
     target_link_libraries(seed_editor PRIVATE "-framework AppKit")
     # Compiled as C++ with an Objective-C++ flag, so the project needs no OBJCXX language.
@@ -39,4 +41,12 @@ if(BUILD_TESTING)
         --open "${seed_editor_smoke}/Smoke Test")
     set_tests_properties(editor_smoke_create PROPERTIES DEPENDS editor_smoke_clean)
     set_tests_properties(editor_smoke_open PROPERTIES DEPENDS editor_smoke_create)
+    # Presses Play on the sample project; passes only if the game it launches runs and exits cleanly.
+    # A copy, so the editor's layout and Play saves stay out of the source tree.
+    add_test(NAME editor_play_copy COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/tests/sample_project" "${seed_editor_smoke}/Sample")
+    add_test(NAME editor_play COMMAND seed_editor --smoke --play --preferences "${seed_editor_smoke}/preferences"
+        --open "${seed_editor_smoke}/Sample")
+    set_tests_properties(editor_play_copy PROPERTIES DEPENDS editor_smoke_open)
+    set_tests_properties(editor_play PROPERTIES DEPENDS editor_play_copy)
 endif()

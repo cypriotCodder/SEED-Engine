@@ -32,6 +32,12 @@ public:
 
     explicit Scene(std::size_t memory_bytes = default_memory)
         : memory_(memory_bytes), entities_(memory_), transforms(memory_), visuals(memory_), saved(memory_) {}
+    // An entity with a position and nothing to draw, such as a light or a marker.
+    Entity create(Transform transform) {
+        const auto entity = entities_.create();
+        transforms.add(entity, transform);
+        return entity;
+    }
     Entity create(Transform transform, Visual visual) {
         const auto entity = entities_.create();
         transforms.add(entity, transform);

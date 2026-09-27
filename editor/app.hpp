@@ -2,6 +2,7 @@
 #include "asset_panels.hpp"
 #include "history.hpp"
 #include "platform/window.hpp"
+#include "play.hpp"
 #include "project.hpp"
 #include "scene_editor.hpp"
 #include <chrono>
@@ -20,6 +21,7 @@ struct Options {
     std::filesystem::path create_parent; // With create_name: create this project at startup.
     std::string create_name;
     std::filesystem::path preferences; // Overrides the per-user preferences folder.
+    bool play{}; // Press Play once the project opens; with smoke, wait for the game to finish.
 };
 
 // The Seed editor: a hub for creating and opening projects, and a dockable workspace for the open
@@ -58,6 +60,8 @@ private:
     void leave(std::function<void()> then);
     void unsaved_popup();
     void record_history();
+    void start_play();
+    void play_controls();
     void step_history(bool redo);
     void refresh_files();
 
@@ -101,6 +105,7 @@ private:
     bool prompt_{};
     AssetPanels assets_;
     SceneEditor scene_;
+    PlaySession play_;
     // What undo restores: every edit to the project's assets, the open scene and its settings.
     struct Snapshot {
         Assets assets;
