@@ -2,6 +2,7 @@
 #include "project/scene_file.hpp"
 #include "project/terrain.hpp"
 #include "render/renderer.hpp"
+#include "scripts.hpp"
 #include <filesystem>
 #include <functional>
 #include <imgui.h>
@@ -110,6 +111,8 @@ private:
     WorldPosition grab_{}; // Pointer position when a move started.
     WorldPosition grab_entity_{};
     WorldPosition menu_at_{}; // Where the context menu was opened.
+    Scripts scripts_;
+    std::string new_script_;
     std::string new_scene_;
     int focus_{};
 };

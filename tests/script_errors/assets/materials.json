@@ -1,0 +1,105 @@
+{
+  "format": 1,
+  "materials": [
+    {
+      "name": "deep_water",
+      "color": [
+        22,
+        58,
+        98
+      ],
+      "pattern": "water",
+      "variation": 10
+    },
+    {
+      "name": "water",
+      "color": [
+        34,
+        92,
+        132
+      ],
+      "pattern": "water",
+      "variation": 12
+    },
+    {
+      "name": "sand",
+      "color": [
+        214,
+        196,
+        140
+      ],
+      "pattern": "speckle",
+      "variation": 14
+    },
+    {
+      "name": "grass",
+      "color": [
+        88,
+        142,
+        70
+      ],
+      "pattern": "speckle",
+      "variation": 23
+    },
+    {
+      "name": "forest_floor",
+      "color": [
+        58,
+        96,
+        50
+      ],
+      "pattern": "speckle",
+      "variation": 23
+    },
+    {
+      "name": "mud",
+      "color": [
+        96,
+        80,
+        54
+      ],
+      "pattern": "speckle",
+      "variation": 18
+    },
+    {
+      "name": "dry_grass",
+      "color": [
+        164,
+        152,
+        84
+      ],
+      "pattern": "speckle",
+      "variation": 23
+    },
+    {
+      "name": "stone",
+      "color": [
+        122,
+        122,
+        128
+      ],
+      "pattern": "speckle",
+      "variation": 30
+    },
+    {
+      "name": "snow",
+      "color": [
+        236,
+        240,
+        246
+      ],
+      "pattern": "speckle",
+      "variation": 8
+    },
+    {
+      "name": "tree",
+      "color": [
+        34,
+        78,
+        40
+      ],
+      "pattern": "round",
+      "variation": 30
+    }
+  ]
+}

@@ -6,7 +6,7 @@ The local macOS build and OpenGL demonstrations have been exercised. Windows/Lin
 
 ## Build and run
 
-Use CMake 3.24+ and a C++20 compiler. GCC/Clang compile project code with `-Wall -Wextra -Wpedantic -Werror`; MSVC uses `/W4 /WX`. SDL2 2.30.11, LZ4 1.10.0 and Dear ImGui 1.92.9b (docking release, used only by the editor) are fetched with pinned SHA-256 checksums. On Linux, the SDL video backend also needs X11/Wayland development libraries and an OpenGL driver. Rendering requires OpenGL 4.1 and BC3/S3TC texture support.
+Use CMake 3.24+ and a C++20 compiler. GCC/Clang compile project code with `-Wall -Wextra -Wpedantic -Werror`; MSVC uses `/W4 /WX`. SDL2 2.30.11, LZ4 1.10.0, Lua 5.4.9 and Dear ImGui 1.92.9b (docking release, used only by the editor) are fetched with pinned SHA-256 checksums. Lua is compiled as C++ so script errors unwind engine code safely; games that never use scripts do not link it. On Linux, the SDL video backend also needs X11/Wayland development libraries and an OpenGL driver. Rendering requires OpenGL 4.1 and BC3/S3TC texture support.
 
 ```sh
 cmake --preset release
@@ -29,6 +29,7 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 - **Project**, **Console** and **Project Settings** panels.
 - **Terrain**: the world generator as data: island or endless world, noise fields, and ordered rules that pick each tile's material, with scattered trees and rocks. **Create Starter Island** fills in a complete biome-ring island. The Scene view previews the generated world live and zooms out far enough to show a whole island.
 - **Materials**, **Input**, **Sounds** and **Particles** panels that edit the project's data assets, with validation as you type. Input bindings are recorded by pressing the key or button; sounds can be played while you tune them.
+- **Scripts**: Lua 5.4 gameplay scripts attached to entities with the Inspector's Script component, checked for syntax as you work. See [scripting](docs/scripting.md).
 - **Play** (Cmd+P) saves the project and runs it as a real game in its own window, with the game's output in the Console; **Stop** or closing the game window returns to editing. Every Play starts a fresh world, so the project's saves are untouched.
 - Cmd+Z and Shift+Cmd+Z undo and redo any edit in these panels (100 steps, per scene). Cmd+S saves; closing or quitting with unsaved changes asks first.
 
@@ -38,7 +39,7 @@ Projects are folders of JSON text files, described in [the project format](docs/
 ./build/release/editor/seed_editor
 ```
 
-Lua gameplay scripts and exporting a standalone game are the planned next steps; until then, behaviour beyond walking around is written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
+Exporting a standalone game is the planned next step. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
 
 ## Making a new game
 

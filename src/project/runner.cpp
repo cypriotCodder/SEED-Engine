@@ -3,8 +3,10 @@
 #include "io/storage.hpp"
 #include "physics/character.hpp"
 #include "project/scene_file.hpp"
+#include "script/host.hpp"
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 namespace seed {
 namespace {
@@ -24,11 +26,10 @@ struct Runner {
     Assets data; // For the scene's material names and the default seed.
     SceneFile scene;
     std::array<ActionId, 4> moves{};
+    std::unique_ptr<ScriptHost> scripts;
+    Entity player{};
+    bool scripted_player{}; // A player with its own script moves itself.
 };
-
-bool blocked(void*, const Tile* tile) {
-    return !tile || (tile->flags & tile_solid) || tile->elevation < 0;
-}
 
 void add_moves(void* context, Actions& actions) {
     auto& runner = *static_cast<Runner*>(context);
@@ -48,6 +49,8 @@ void add_moves(void* context, Actions& actions) {
 Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
     auto& lights = engine.scene.add_component<SceneLightComponent>();
+    runner.scripts = std::make_unique<ScriptHost>(engine, runner.root / "scripts");
+    std::vector<std::pair<Entity, const SceneEntity*>> scripted;
     const SceneEntity* player = nullptr;
     const SceneEntity* marker = nullptr;
     for (const auto& e : runner.scene.entities) {
@@ -63,6 +66,8 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
                 : engine.scene.create(transform);
         if (e.light)
             lights.add(entity, {e.light->color, e.light->radius, e.light->intensity, e.light->height});
+        runner.scripts->name(entity, e.name);
+        if (!e.script.empty()) scripted.emplace_back(entity, &e);
     }
     // A saved game resumes where the player was; a new one starts at the scene's player or spawn.
     const bool resumed = std::filesystem::exists(engine.checkpoint.read_path("player.delta"));
@@ -74,18 +79,28 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     if (player && player->light)
         lights.add(entity, {player->light->color, player->light->radius, player->light->intensity,
                             player->light->height});
+    runner.scripts->name(entity, "Player");
+    runner.player = entity;
+    runner.scripted_player = player && !player->script.empty();
+    if (runner.scripted_player) scripted.emplace_back(entity, player);
+    // Scripts load once every entity exists, so their top-level code can already find the others.
+    for (const auto& [e, source] : scripted)
+        runner.scripts->attach(e, source->script);
     return entity;
 }
 
 void step(void* context, Engine& engine, float dt) {
-    const auto& runner = *static_cast<const Runner*>(context);
+    auto& runner = *static_cast<Runner*>(context);
+    runner.scripts->update(dt);
+    if (runner.scripted_player || !engine.scene.alive(runner.player)) return;
     Vec2 direction{engine.actions.axis(runner.moves[2], runner.moves[3]),
                    engine.actions.axis(runner.moves[1], runner.moves[0])};
     if (direction.x != 0 && direction.y != 0) direction = direction * 0.70710678F;
-    auto& transform = *engine.scene.transforms.find(engine.focus);
+    auto& transform = *engine.scene.transforms.find(runner.player);
     transform.previous = transform.position;
-    transform.position = move_character(engine.world, engine.physics, transform.position,
-                                        direction * (player_speed * dt), player_half, {nullptr, blocked});
+    transform.position =
+        move_character(engine.world, engine.physics, transform.position, direction * (player_speed * dt),
+                       player_half, {nullptr, blocks_walking});
 }
 
 void render(void*, Engine& engine, const View& view) {
@@ -108,6 +123,7 @@ void render(void*, Engine& engine, const View& view) {
             }
     });
     engine.draw_entities(view);
+    engine.particles.draw(engine.renderer, view.camera);
     // Lights near the view, up to the renderer's 32.
     auto& lights = engine.scene.components<SceneLightComponent>();
     const auto owners = lights.owners();
@@ -167,6 +183,15 @@ int run_project(const std::filesystem::path& project, int argc, char** argv) {
     game.setup = setup;
     game.step = step;
     game.render = render;
+    // Automated runs (tests, the editor's checks) fail on any script error; players just see it
+    // reported and the game carries on.
+    game.shutdown = [](void* context, Engine& engine) {
+        auto& runner = *static_cast<Runner*>(context);
+        const auto errors = runner.scripts->errors();
+        runner.scripts.reset();
+        if (errors && engine.options.smoke)
+            throw std::runtime_error(std::to_string(errors) + " script error(s); see above");
+    };
     return run(game, argc, argv);
 }
 } // namespace seed

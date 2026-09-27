@@ -27,8 +27,12 @@ struct SceneEntity {
     float angle{};            // Radians, counter-clockwise.
     std::optional<SceneVisual> visual;
     std::optional<SceneLight> light;
+    std::string script; // A file in the project's scripts/ folder, such as "player.lua"; empty for none.
     bool operator==(const SceneEntity&) const = default;
 };
+// Whether `name` is a plain script file name: letters, digits, '_', '-' and '.', ending in ".lua".
+bool valid_script_name(std::string_view name);
+
 struct SceneFile {
     static constexpr std::size_t capacity = 4096; // Entities per scene.
     std::vector<SceneEntity> entities;

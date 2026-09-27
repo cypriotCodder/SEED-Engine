@@ -1,9 +1,9 @@
 # The Seed editor: a separate application for creating and building game projects. Games never link
 # it or Dear ImGui.
-add_library(seed_editor_core STATIC project.cpp starter.cpp)
+add_library(seed_editor_core STATIC project.cpp starter.cpp scripts.cpp)
 seed_strict(seed_editor_core)
 target_include_directories(seed_editor_core PUBLIC .)
-target_link_libraries(seed_editor_core PUBLIC seed_engine)
+target_link_libraries(seed_editor_core PUBLIC seed_engine PRIVATE seed_lua)
 
 if(APPLE)
     set(seed_folder_dialog folder_dialog_mac.mm)

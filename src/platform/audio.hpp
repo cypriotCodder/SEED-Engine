@@ -38,6 +38,11 @@ public:
         entries_[size_] = desc;
         return static_cast<SoundId>(size_++);
     }
+    SoundId find(std::string_view name) const {
+        for (std::size_t i = 0; i < size_; ++i)
+            if (entries_[i].name == name) return static_cast<SoundId>(i);
+        throw std::out_of_range("Unknown sound: " + std::string(name));
+    }
     const SoundDesc& operator[](SoundId id) const {
         if (id >= size_) throw std::out_of_range("Unregistered sound");
         return entries_[id];

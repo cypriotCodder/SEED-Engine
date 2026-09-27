@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "entities": [
+    {"name": "Player", "chunk": [0, 0], "position": [0.5, 0.5], "angle": 0,
+     "visual": {"material": "sand", "size": [0.6, 0.6]}},
+    {"name": "Tester", "chunk": [0, 0], "position": [2.5, 1.5], "angle": 0,
+     "visual": {"material": "stone", "size": [0.5, 0.5]}, "script": "checks.lua"},
+    {"name": "Box", "chunk": [0, 0], "position": [5, 5], "angle": 0,
+     "visual": {"material": "stone", "size": [1, 1]}}
+  ]
+}

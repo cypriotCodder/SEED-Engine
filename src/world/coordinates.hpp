@@ -47,6 +47,22 @@ inline Vec2 relative(WorldPosition a, WorldPosition b) {
     return {chunk_distance(a.chunk.x, b.chunk.x) + a.local.x - b.local.x,
             chunk_distance(a.chunk.y, b.chunk.y) + a.local.y - b.local.y};
 }
+// One axis of a position in global tile units: exact in a double for any practical world.
+inline double global_coordinate(std::int64_t chunk, float local) {
+    return static_cast<double>(chunk) * chunk_side + local;
+}
+// The canonical position at global tile coordinates (x, y).
+inline WorldPosition from_global(double x, double y) {
+    if (!std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 9e15 || std::abs(y) > 9e15)
+        throw std::out_of_range("Global position out of range");
+    WorldPosition p;
+    p.chunk = {static_cast<std::int64_t>(std::floor(x / chunk_side)),
+               static_cast<std::int64_t>(std::floor(y / chunk_side))};
+    p.local = {static_cast<float>(x - static_cast<double>(p.chunk.x) * chunk_side),
+               static_cast<float>(y - static_cast<double>(p.chunk.y) * chunk_side)};
+    p.move({}); // Rounding can leave an offset of exactly chunk_side.
+    return p;
+}
 inline bool nearby(ChunkCoord a, ChunkCoord b, std::uint64_t radius) {
     auto distance = [](std::int64_t x, std::int64_t y) {
         return x < y ? std::uint64_t(y) - std::uint64_t(x) : std::uint64_t(x) - std::uint64_t(y);

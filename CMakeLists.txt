@@ -46,6 +46,22 @@ target_include_directories(seed_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_
 target_compile_features(seed_imgui PUBLIC cxx_std_20)
 target_link_libraries(seed_imgui PUBLIC SDL2::SDL2)
 
+# Lua 5.4 runs projects' gameplay scripts. Only code that uses the script host links it in.
+FetchContent_Declare(lua
+    URL https://www.lua.org/ftp/lua-5.4.9.tar.gz
+    URL_HASH SHA256=2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(lua)
+file(GLOB seed_lua_sources ${lua_SOURCE_DIR}/src/*.c)
+list(REMOVE_ITEM seed_lua_sources ${lua_SOURCE_DIR}/src/lua.c ${lua_SOURCE_DIR}/src/luac.c)
+# Compiled as C++ so Lua errors are C++ exceptions and unwind engine frames properly.
+set_source_files_properties(${seed_lua_sources} PROPERTIES LANGUAGE CXX)
+add_library(seed_lua STATIC ${seed_lua_sources})
+target_include_directories(seed_lua SYSTEM PUBLIC ${lua_SOURCE_DIR}/src)
+if(NOT WIN32)
+    target_compile_definitions(seed_lua PRIVATE LUA_USE_POSIX)
+endif()
+
 function(seed_strict target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
@@ -62,12 +78,12 @@ function(seed_strict target)
     endif()
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
-    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/runner.cpp src/core/metrics.cpp
+    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/runner.cpp src/script/host.cpp src/core/metrics.cpp
     src/app/app.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
 target_compile_definitions(seed_engine PUBLIC SDL_MAIN_HANDLED)
-target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads)
+target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads PRIVATE seed_lua)
 if(WIN32)
     target_link_libraries(seed_engine PUBLIC psapi)
 endif()
@@ -80,7 +96,7 @@ install(TARGETS seed_player RUNTIME DESTINATION bin)
 add_executable(seed_checkpoint_bench tools/checkpoint_benchmark.cpp)
 seed_strict(seed_checkpoint_bench)
 target_link_libraries(seed_checkpoint_bench PRIVATE seed_engine)
-install(FILES licenses/SDL2.txt licenses/LZ4.txt licenses/ImGui.txt DESTINATION share/licenses/seed_engine)
+install(FILES licenses/SDL2.txt licenses/LZ4.txt licenses/ImGui.txt licenses/Lua.txt DESTINATION share/licenses/seed_engine)
 
 add_executable(seed_cook tools/cook.cpp src/io/storage.cpp)
 target_include_directories(seed_cook PRIVATE src)
@@ -164,6 +180,16 @@ if(BUILD_TESTING)
         --smoke --save "${seed_sample_save}")
     set_tests_properties(player PROPERTIES DEPENDS player_fresh_save)
     set_tests_properties(player_resume PROPERTIES DEPENDS player)
+    # Gameplay scripts: an API walkthrough that must pass, and broken scripts that must be caught
+    # (a syntax error and an endless loop) without hanging the game.
+    add_test(NAME scripts COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_project" --smoke
+        --save "${CMAKE_CURRENT_BINARY_DIR}/script-project-save")
+    set_tests_properties(scripts PROPERTIES PASS_REGULAR_EXPRESSION "Script checks passed"
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error")
+    add_test(NAME script_errors COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_errors" --smoke
+        --save "${CMAKE_CURRENT_BINARY_DIR}/script-errors-save")
+    set_tests_properties(script_errors PROPERTIES TIMEOUT 30
+        PASS_REGULAR_EXPRESSION "syntax.lua:3:.*endless loop.*2 script error")
     add_test(NAME minimal_game_fresh_save COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
     add_test(NAME minimal_game COMMAND seed_minimal_game --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/minimal-game-save")
     set_tests_properties(minimal_game PROPERTIES DEPENDS minimal_game_fresh_save)

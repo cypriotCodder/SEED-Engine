@@ -1,7 +1,9 @@
 #include "io/json.hpp"
 #include "io/storage.hpp"
 #include "project.hpp"
+#include "scripts.hpp"
 #include "starter.hpp"
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 
@@ -122,6 +124,30 @@ void starter(const fs::path& root) {
     const auto sea = terrain.sample(1, {{200, 0}, {0, 0}});
     check(sea.material == registry.find("deep_water"), "Past the rim is deep water");
 }
+// New scripts start from a template that compiles; syntax errors name the line, and edits are
+// noticed.
+void scripts(const fs::path& root) {
+    const auto folder = root / "scripts";
+    Scripts::create(folder, "player.lua");
+    rejects([&] { Scripts::create(folder, "player.lua"); }, "Existing script overwritten");
+    rejects([&] { Scripts::create(folder, "../escape.lua"); }, "Path outside scripts/ accepted");
+    rejects([&] { Scripts::create(folder, "notes.txt"); }, "Non-Lua script accepted");
+    Scripts::create(folder, "enemy.lua");
+    check(Scripts::list(folder) == std::vector<std::string>{"enemy.lua", "player.lua"},
+          "Scripts listed in order");
+
+    Scripts checker;
+    check(checker.syntax_error(folder / "player.lua").empty(), "The template has no syntax errors");
+    seed::write_text(folder / "enemy.lua", "function update(dt)\n  local x = = 1\nend\n");
+    const auto error = checker.syntax_error(folder / "enemy.lua");
+    check(error.find("enemy.lua:2:") != std::string::npos, "Syntax errors name the file and line");
+    // An edit is noticed: the cache is keyed by modification time.
+    seed::write_text(folder / "enemy.lua", "function update(dt) end\n");
+    std::filesystem::last_write_time(folder / "enemy.lua",
+                                     std::filesystem::file_time_type::clock::now() + std::chrono::seconds(5));
+    check(checker.syntax_error(folder / "enemy.lua").empty(), "A fixed script is checked again");
+    check(!checker.syntax_error(folder / "missing.lua").empty(), "A missing script is reported");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -135,6 +161,7 @@ int main(int argc, char** argv) {
         bad_projects(root);
         recent(root);
         starter(root);
+        scripts(root / "script-checks");
         std::cout << "Editor project checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

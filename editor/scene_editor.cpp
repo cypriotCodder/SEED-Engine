@@ -13,18 +13,6 @@ constexpr float min_zoom = 0.1F, max_zoom = 256; // 0.1: a 300-chunk world fits 
 constexpr std::uint64_t view_reach = 512;        // Chunks from the camera that the view considers.
 constexpr float pi = 3.14159265F;
 
-double global(std::int64_t chunk, float local) {
-    return static_cast<double>(chunk) * chunk_side + local;
-}
-WorldPosition from_global(double x, double y) {
-    WorldPosition p;
-    p.chunk = {static_cast<std::int64_t>(std::floor(x / chunk_side)),
-               static_cast<std::int64_t>(std::floor(y / chunk_side))};
-    p.local = {static_cast<float>(x - static_cast<double>(p.chunk.x) * chunk_side),
-               static_cast<float>(y - static_cast<double>(p.chunk.y) * chunk_side)};
-    p.move({}); // Rounding can leave an offset of exactly chunk_side.
-    return p;
-}
 Vec2 extent(const SceneEntity& e) {
     return e.visual ? e.visual->size : Vec2{marker_size, marker_size};
 }
@@ -268,8 +256,8 @@ void SceneEditor::scene_view() {
         auto target = grab_entity_;
         target.move(relative(to_world(mouse), grab_));
         if (io.KeyShift)
-            target = from_global(std::round(global(target.chunk.x, target.local.x) * 2) / 2,
-                                 std::round(global(target.chunk.y, target.local.y) * 2) / 2);
+            target = from_global(std::round(global_coordinate(target.chunk.x, target.local.x) * 2) / 2,
+                                 std::round(global_coordinate(target.chunk.y, target.local.y) * 2) / 2);
         edited_.entities[static_cast<std::size_t>(selected_)].position = target;
     }
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) moving_ = false;
@@ -350,8 +338,8 @@ void SceneEditor::scene_view() {
     if (hovered) {
         const auto p = to_world(mouse);
         char text[96];
-        std::snprintf(text, sizeof(text), "%.2f, %.2f", global(p.chunk.x, p.local.x),
-                      global(p.chunk.y, p.local.y));
+        std::snprintf(text, sizeof(text), "%.2f, %.2f", global_coordinate(p.chunk.x, p.local.x),
+                      global_coordinate(p.chunk.y, p.local.y));
         draw->AddText({view_min_.x + 10, view_min_.y + 8}, rgba(1, 1, 1, 0.7F), text);
     }
     draw->PopClipRect();
@@ -580,8 +568,8 @@ void SceneEditor::inspector(const Assets& assets) {
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##name", &e.name);
 
-    double position[2] = {global(e.position.chunk.x, e.position.local.x),
-                          global(e.position.chunk.y, e.position.local.y)};
+    double position[2] = {global_coordinate(e.position.chunk.x, e.position.local.x),
+                          global_coordinate(e.position.chunk.y, e.position.local.y)};
     ImGui::TextUnformatted("Position");
     ImGui::SetNextItemWidth(-1);
     if (ImGui::DragScalarN("##position", ImGuiDataType_Double, position, 2, 0.05F, nullptr, nullptr, "%.2f"))
@@ -629,8 +617,35 @@ void SceneEditor::inspector(const Assets& assets) {
         }
         if (!keep) e.light.reset();
     }
+    const auto script_folder = folder_.parent_path() / "scripts";
+    if (!e.script.empty()) {
+        bool keep = true;
+        if (ImGui::CollapsingHeader("Script", &keep, ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::SetNextItemWidth(-70);
+            if (ImGui::BeginCombo("##script", e.script.c_str())) {
+                for (const auto& name : Scripts::list(script_folder))
+                    if (ImGui::Selectable(name.c_str(), name == e.script)) e.script = name;
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Edit", {-1, 0})) {
+                const auto url = "file://" + (script_folder / e.script).string();
+                if (SDL_OpenURL(url.c_str()) != 0)
+                    log_(true, std::string("Cannot open the script: ") + SDL_GetError());
+            }
+            ImGui::SetItemTooltip("Open in your code editor. Changes apply the next time you press Play.");
+            const auto error = scripts_.syntax_error(script_folder / e.script);
+            ImGui::PushTextWrapPos(0);
+            if (error.empty())
+                ImGui::TextDisabled("No syntax errors.");
+            else
+                ImGui::TextColored({0.95F, 0.55F, 0.4F, 1}, "%s", error.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        if (!keep) e.script.clear();
+    }
     ImGui::Dummy({0, 4});
-    const bool full = e.visual && e.light;
+    const bool full = e.visual && e.light && !e.script.empty();
     ImGui::BeginDisabled(full);
     if (ImGui::Button("Add Component", {-1, 0})) ImGui::OpenPopup("add component");
     ImGui::EndDisabled();
@@ -640,6 +655,29 @@ void SceneEditor::inspector(const Assets& assets) {
             if (!assets.materials.empty()) e.visual->material = assets.materials.front().name;
         }
         if (!e.light && ImGui::MenuItem("Light")) e.light = SceneLight{};
+        if (e.script.empty() && ImGui::BeginMenu("Script")) {
+            for (const auto& name : Scripts::list(script_folder))
+                if (ImGui::MenuItem(name.c_str())) e.script = name;
+            ImGui::Separator();
+            ImGui::TextUnformatted("New script");
+            ImGui::SetNextItemWidth(180);
+            ImGui::InputTextWithHint("##new script", "name.lua", &new_script_);
+            ImGui::SameLine();
+            if (ImGui::Button("Create")) {
+                auto name = new_script_;
+                if (!name.ends_with(".lua")) name += ".lua";
+                try {
+                    Scripts::create(script_folder, name);
+                    e.script = name;
+                    new_script_.clear();
+                    log_(false, "Created scripts/" + name + ".");
+                    ImGui::CloseCurrentPopup();
+                } catch (const std::exception& error) {
+                    log_(true, error.what());
+                }
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndPopup();
     }
     // This entity's problems, from the same checks that block saving.

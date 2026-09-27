@@ -24,6 +24,14 @@ bool finite(float value) {
 }
 } // namespace
 
+bool valid_script_name(std::string_view name) {
+    if (name.size() < 5 || name.size() > 64 || !name.ends_with(".lua") || name.front() == '.') return false;
+    return std::all_of(name.begin(), name.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
+               c == '-' || c == '.';
+    });
+}
+
 std::string SceneFile::problems(const Assets& assets) const {
     std::string result;
     const auto report = [&](std::size_t i, const std::string& text) {
@@ -43,6 +51,8 @@ std::string SceneFile::problems(const Assets& assets) const {
             if (!(v.size.x > 0 && v.size.x <= 64 && v.size.y > 0 && v.size.y <= 64))
                 report(i, "Visual size must be above 0 and at most 64");
         }
+        if (!e.script.empty() && !valid_script_name(e.script))
+            report(i, "Script names are file names in scripts/ ending in .lua");
         if (e.light) {
             const auto& l = *e.light;
             const bool color =
@@ -83,6 +93,7 @@ Json scene_json(const SceneFile& scene) {
             light.set("height", json_float(e.light->height));
             entity.set("light", light);
         }
+        if (!e.script.empty()) entity.set("script", e.script);
         entities.push(entity);
     }
     auto file = Json::object();
@@ -127,6 +138,7 @@ SceneFile parse_scene(const Json& json) {
                 l.height = static_cast<float>(light->at("height").as_number());
                 e.light = l;
             }
+            if (const auto* script = item.find("script")) e.script = script->as_string();
             scene.entities.push_back(std::move(e));
         } catch (const std::exception& error) {
             throw std::runtime_error("Entity " + std::to_string(scene.entities.size() + 1) + ": " +

@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "entities": [
+    {"name": "Broken", "chunk": [0, 0], "position": [2, 2], "angle": 0, "script": "syntax.lua"},
+    {"name": "Loop", "chunk": [0, 0], "position": [3, 3], "angle": 0, "script": "loop.lua"}
+  ]
+}
