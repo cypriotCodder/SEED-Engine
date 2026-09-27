@@ -82,7 +82,8 @@ App::App(Options options)
       recent_(preferences_ / "recent-projects.json"),
       new_location_(default_location().string()),
       assets_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); },
-              !options_.smoke) {
+              !options_.smoke),
+      scene_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); }) {
     window_.title("Seed Editor");
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -128,6 +129,12 @@ void App::open(const fs::path& path) {
         log(Level::error, std::string("Could not load the project's assets: ") + error.what());
         assets_.unload();
     }
+    try {
+        scene_.load(project_->root, "main");
+    } catch (const std::exception& error) {
+        log(Level::error, std::string("Could not load the main scene: ") + error.what());
+        scene_.unload();
+    }
     layout_file_ = (user_state_directory(*project_) / "layout.ini").string();
     reset_layout_ = !fs::exists(layout_file_);
     if (!reset_layout_) ImGui::LoadIniSettingsFromDisk(layout_file_.c_str());
@@ -147,6 +154,7 @@ void App::close_project() {
     if (!project_) return;
     if (dirty()) log(Level::warning, "Discarded unsaved changes.");
     assets_.unload();
+    scene_.unload();
     ImGui::SaveIniSettingsToDisk(layout_file_.c_str());
     ImGui::GetIO().IniFilename = nullptr;
     ImGui::ClearIniSettings();
@@ -170,13 +178,14 @@ void App::save_settings() {
 }
 
 bool App::dirty() const {
-    return project_ && (edited_name_ != project_->name || assets_.dirty());
+    return project_ && (edited_name_ != project_->name || assets_.dirty() || scene_.dirty());
 }
 
 bool App::save_all() {
     if (!project_) return true;
     if (edited_name_ != project_->name) save_settings();
-    return edited_name_ == project_->name && assets_.save();
+    const bool assets = assets_.save(); // Scenes are checked against the assets, so they go first.
+    return edited_name_ == project_->name && assets && scene_.save(assets_.assets());
 }
 
 void App::leave(std::function<void()> then) {
@@ -200,6 +209,7 @@ void App::unsaved_popup() {
     ImGui::SameLine();
     if (ImGui::Button("Don't Save", {110, 0})) {
         assets_.revert();
+        scene_.revert();
         edited_name_ = project_->name;
         later(std::move(after_prompt_));
         ImGui::CloseCurrentPopup();
@@ -272,7 +282,8 @@ int App::run() {
         int width{}, height{};
         window_.drawable_size(width, height);
         window_.clear(0.08F, 0.09F, 0.10F);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData()); // Also draws the Scene view.
+        if (const auto error = scene_.take_error(); !error.empty()) log(Level::error, "Scene view: " + error);
         ++frames_;
         if (options_.smoke && frames_ == 60) {
             if (!options_.screenshot.empty()) screenshot(options_.screenshot);
@@ -423,6 +434,9 @@ void App::workspace() {
     ImGui::DockSpaceOverViewport(dockspace, ImGui::GetMainViewport(),
                                  ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoCloseButton);
     if (std::chrono::steady_clock::now() - files_scanned_ > std::chrono::seconds(2)) refresh_files();
+    // Scene panels first: a dock node lists tabs in the order windows first appear, so Scene and
+    // Inspector lead their nodes.
+    scene_.draw(assets_.assets());
     if (show_project_) project_panel();
     if (show_console_) console_panel();
     if (show_settings_) settings_panel();
@@ -437,18 +451,23 @@ void App::build_default_layout(unsigned dockspace) {
     ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
     ImGuiID center = dockspace;
-    const ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.22F, nullptr, &center);
-    const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28F, nullptr, &center);
-    const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.28F, nullptr, &center);
-    ImGui::DockBuilderDockWindow(project_window, left);
+    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.2F, nullptr, &center);
+    const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.26F, nullptr, &center);
+    const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.26F, nullptr, &center);
+    const ImGuiID left_bottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.45F, nullptr, &left);
+    ImGui::DockBuilderDockWindow(SceneEditor::hierarchy_id, left);
+    ImGui::DockBuilderDockWindow(project_window, left_bottom);
     ImGui::DockBuilderDockWindow(settings_window, right);
+    ImGui::DockBuilderDockWindow(SceneEditor::inspector_id, right);
     ImGui::DockBuilderDockWindow(console_window, bottom);
-    // The centre holds the asset panels as tabs until the scene view arrives.
+    // The centre holds the Scene view, with the asset panels as further tabs.
+    ImGui::DockBuilderDockWindow(SceneEditor::scene_id, center);
     for (const char* id : AssetPanels::window_ids)
         ImGui::DockBuilderDockWindow(id, center);
     ImGui::DockBuilderFinish(dockspace);
     show_project_ = show_console_ = show_settings_ = true;
     assets_.show_materials = assets_.show_input = assets_.show_sounds = assets_.show_particles = true;
+    scene_.show_scene = scene_.show_hierarchy = scene_.show_inspector = true;
 }
 
 void App::menu_bar() {
@@ -462,6 +481,7 @@ void App::menu_bar() {
         if (ImGui::MenuItem("Save", "Cmd+S", false, dirty())) save_all();
         if (ImGui::MenuItem("Revert Unsaved Changes", nullptr, false, dirty())) {
             assets_.revert();
+            scene_.revert();
             edited_name_ = project_->name;
             log(Level::info, "Reverted unsaved changes.");
         }
@@ -472,6 +492,10 @@ void App::menu_bar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Window")) {
+        ImGui::MenuItem("Scene", nullptr, &scene_.show_scene);
+        ImGui::MenuItem("Hierarchy", nullptr, &scene_.show_hierarchy);
+        ImGui::MenuItem("Inspector", nullptr, &scene_.show_inspector);
+        ImGui::Separator();
         ImGui::MenuItem(project_window, nullptr, &show_project_);
         ImGui::MenuItem(console_window, nullptr, &show_console_);
         ImGui::MenuItem(settings_window, nullptr, &show_settings_);

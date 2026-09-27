@@ -430,6 +430,14 @@ std::size_t Json::size() const {
     wrong_type("array or object");
 }
 
+Json json_float(float value) {
+    char text[32];
+    const auto end = std::to_chars(text, text + sizeof(text), value).ptr;
+    double shortest{};
+    std::from_chars(text, end, shortest);
+    return Json(shortest);
+}
+
 Json parse_json(std::string_view text) {
     return Parser(text).document();
 }

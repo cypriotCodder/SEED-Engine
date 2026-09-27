@@ -10,15 +10,6 @@ constexpr const char* kinds[] = {"materials", "actions", "sounds", "particles"};
 constexpr const char* pattern_names[] = {"speckle", "water", "planks", "round"};
 constexpr const char* mouse_names[] = {"Mouse Left", "Mouse Middle", "Mouse Right", "Mouse X1", "Mouse X2"};
 
-// Floats are written as the shortest text that reads back to the same float, so 0.9991F appears
-// as 0.9991 in the file rather than as its exact double expansion.
-Json number(float value) {
-    char text[32];
-    const auto end = std::to_chars(text, text + sizeof(text), value).ptr;
-    double shortest{};
-    std::from_chars(text, end, shortest);
-    return Json(shortest);
-}
 float get_float(const Json& object, std::string_view key, float fallback) {
     const auto* value = object.find(key);
     return value ? static_cast<float>(value->as_number()) : fallback;
@@ -158,11 +149,11 @@ Json write_action(const ActionAsset& action) {
 Json write_sound(const SoundAsset& sound) {
     auto entry = Json::object();
     entry.set("name", sound.name);
-    entry.set("frequency", number(sound.frequency));
-    entry.set("variation", number(sound.variation));
-    entry.set("gain", number(sound.gain));
-    entry.set("decay", number(sound.decay));
-    entry.set("tone", number(sound.tone));
+    entry.set("frequency", json_float(sound.frequency));
+    entry.set("variation", json_float(sound.variation));
+    entry.set("gain", json_float(sound.gain));
+    entry.set("decay", json_float(sound.decay));
+    entry.set("tone", json_float(sound.tone));
     return entry;
 }
 Json write_particle(const ParticleAsset& particle) {
@@ -170,13 +161,13 @@ Json write_particle(const ParticleAsset& particle) {
     entry.set("name", particle.name);
     entry.set("material", particle.material);
     entry.set("count", static_cast<int>(particle.count));
-    entry.set("speed", number(particle.speed));
-    entry.set("speed_range", number(particle.speed_range));
-    entry.set("life", number(particle.life));
-    entry.set("size", number(particle.size));
-    entry.set("drag", number(particle.drag));
-    entry.set("spin", number(particle.spin));
-    entry.set("shade", number(particle.shade));
+    entry.set("speed", json_float(particle.speed));
+    entry.set("speed_range", json_float(particle.speed_range));
+    entry.set("life", json_float(particle.life));
+    entry.set("size", json_float(particle.size));
+    entry.set("drag", json_float(particle.drag));
+    entry.set("spin", json_float(particle.spin));
+    entry.set("shade", json_float(particle.shade));
     return entry;
 }
 

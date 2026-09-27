@@ -2,6 +2,7 @@
 #include "asset_panels.hpp"
 #include "platform/window.hpp"
 #include "project.hpp"
+#include "scene_editor.hpp"
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -96,5 +97,6 @@ private:
     std::function<void()> after_prompt_; // Waiting on the unsaved-changes prompt.
     bool prompt_{};
     AssetPanels assets_;
+    SceneEditor scene_;
 };
 } // namespace seed::editor

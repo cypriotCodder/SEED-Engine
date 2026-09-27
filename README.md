@@ -25,6 +25,7 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 
 `seed_editor` (under `editor/`) is the application for building games, separate from the games themselves; games never link it or Dear ImGui. It opens on a hub where you create a project or open a recent one. The open project shows in a dockable workspace:
 
+- **Scene**, **Hierarchy** and **Inspector**: the Scene view draws the scene with the engine's own renderer (optionally with the game's lighting). Click to select, drag to move (Shift snaps to half units), right-drag or middle-drag to pan, scroll to zoom, right-click to create. The Hierarchy lists and switches scenes; the Inspector edits position, rotation and the Visual and Light components.
 - **Project**, **Console** and **Project Settings** panels.
 - **Materials**, **Input**, **Sounds** and **Particles** panels that edit the project's data assets, with validation as you type. Input bindings are recorded by pressing the key or button; sounds can be played while you tune them.
 - Cmd+S saves; closing or quitting with unsaved changes asks first.
@@ -35,7 +36,7 @@ Projects are folders of JSON text files, described in [the project format](docs/
 ./build/release/editor/seed_editor
 ```
 
-Scene editing, world authoring, play mode, Lua gameplay scripts and exporting a standalone game are the planned next steps; until then, game logic is written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
+World authoring, play mode, Lua gameplay scripts and exporting a standalone game are the planned next steps; until then, game logic is written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
 
 ## Making a new game
 

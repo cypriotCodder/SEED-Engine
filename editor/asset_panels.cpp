@@ -102,7 +102,6 @@ void AssetPanels::load(const std::filesystem::path& folder) {
     sound_ = first(edited_.sounds);
     particle_ = first(edited_.particles);
     capturing_ = -1;
-    focus_ = 3;
     refresh();
     if (!problems_.empty()) log_(true, "The project's assets have problems:\n" + problems_);
 }
@@ -167,9 +166,6 @@ void AssetPanels::problems(const char* kind) {
 }
 
 void AssetPanels::materials() {
-    // Materials is the tab shown after opening a project. The request waits a few frames so it
-    // lands after the dock builder has placed every tab.
-    if (focus_ && --focus_ == 0) ImGui::SetNextWindowFocus();
     if (!begin_panel("Materials", edited_.materials != saved_.materials, &show_materials)) return;
     problems("Material");
     bool changed = false;

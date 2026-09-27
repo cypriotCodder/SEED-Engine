@@ -41,6 +41,9 @@ public:
                 float shade = 1);
     void flush();
     void finish();
+    // Where finish() places the frame in the window's framebuffer, in pixels from its bottom-left
+    // corner. Games leave it at the origin; the editor draws its scene view inside a panel.
+    void set_output(int x, int y) { output_x_ = x, output_y_ = y; }
     void light(float x, float y, float radius, float red, float green, float blue, float intensity = 2,
                float height = 2);
     void screenshot(const char* path, int width, int height);
@@ -84,7 +87,7 @@ private:
     void ui_quad(float x, float y, float width, float height, float u0, float v0, float u1, float v1,
                  Color color);
     GLint normal_enabled_{}, light_rect_{}, light_position_{}, light_view_{}, light_color_{};
-    int width_{}, height_{};
+    int width_{}, height_{}, output_x_{}, output_y_{};
     float view_width_{}, view_height_{};
     GLint camera_uniform_{}, scale_uniform_{};
     std::unique_ptr<Sprite[]> sprites_;

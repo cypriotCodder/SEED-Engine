@@ -5,6 +5,7 @@
 namespace seed {
 struct Vec2 {
     float x{}, y{};
+    bool operator==(const Vec2&) const = default;
     Vec2 operator+(Vec2 b) const { return {x + b.x, y + b.y}; }
     Vec2 operator-(Vec2 b) const { return {x - b.x, y - b.y}; }
     Vec2 operator*(float s) const { return {x * s, y * s}; }

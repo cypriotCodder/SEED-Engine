@@ -18,6 +18,7 @@ public:
     void load(const std::filesystem::path& folder);
     void unload();
     bool dirty() const { return edited_ != saved_; }
+    const Assets& assets() const { return edited_; }
     // Saves the kinds that changed. Returns false, logging why, when the assets have problems.
     bool save();
     void revert() { edited_ = saved_, refresh(); }
@@ -45,6 +46,5 @@ private:
     std::string problems_;
     int material_{-1}, action_{-1}, sound_{-1}, particle_{-1}; // Selected rows.
     int capturing_{-1}; // Action waiting for a key or button press, or -1.
-    int focus_{};
 };
 } // namespace seed::editor

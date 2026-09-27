@@ -6,7 +6,7 @@ A Seed project is a folder the editor creates. Every file is UTF-8 JSON written 
 My Game/
   project.seed.json   project identity
   assets/             data assets, one file per kind
-  scenes/             (scene editing, planned)
+  scenes/             scenes, one file each; new projects start with main.json
   scripts/            (Lua gameplay scripts, planned)
   .seed/              per-user editor state such as the window layout; ignored by git
 ```
@@ -25,5 +25,14 @@ Each file is `{"format": 1, "<kind>": [...]}`. A missing file is an empty list. 
 - `particles.json`: `name`, `material` (a material name), `count` (1–512), `speed`, `speed_range`, `life`, `size`, `drag` (0–1), `spin`, `shade`. At most 32.
 
 Floats are written in the shortest form that reads back to the same 32-bit value.
+
+## scenes/
+
+Each `<name>.json` is `{"format": 1, "entities": [...]}`, at most 4096 entities, drawn in list order (later entries on top). An entity has `name` (1–64 characters; need not be unique), `chunk` ([x, y], whole numbers), `position` ([x, y] within the chunk; offsets outside 0–32 are moved into the right chunk on load), `angle` (radians) and optional components:
+
+- `visual`: `material` (a material name) and `size` ([w, h], above 0 and at most 64).
+- `light`: `color` ([r, g, b], 0–16), `radius` (up to 256), `intensity` (0–64) and `height` (above 0, at most 64).
+
+An entity with no components is a named marker, such as a spawn point. Material references are checked against `assets/materials.json`; the editor will not save a scene with problems.
 
 A C++ game uses a project's assets by setting `Game::project_assets` to the folder; the engine registers them before calling the game's own `materials`, `actions` and `effects` callbacks, which may add more.

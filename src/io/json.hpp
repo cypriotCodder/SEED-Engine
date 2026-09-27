@@ -71,6 +71,10 @@ private:
     std::variant<std::nullptr_t, bool, double, std::string, Items, Members> value_;
 };
 
+// A float as the shortest decimal that reads back to the same float, so 0.9991F is written as
+// 0.9991 rather than as its exact double expansion.
+Json json_float(float value);
+
 // Parses strict RFC 8259 JSON: no comments, no trailing commas, at most 128 levels of nesting.
 Json parse_json(std::string_view text);
 // Writes JSON with two-space indentation and a trailing newline. Numbers use the shortest text

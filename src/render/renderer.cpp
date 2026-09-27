@@ -390,6 +390,7 @@ void Renderer::begin(int width, int height, float x, float y, float zoom) {
     view_height_ = static_cast<float>(height) / zoom;
     gl_.BindFramebuffer(GL_FRAMEBUFFER, geometry_fbo_);
     gl_.Viewport(0, 0, width, height);
+    gl_.Disable(GL_SCISSOR_TEST); // A host UI may leave it on; every pass here covers its whole target.
     gl_.ClearColor(lighting.clear[0], lighting.clear[1], lighting.clear[2], 1);
     ui_size_ = 0;
     gl_.Clear(GL_COLOR_BUFFER_BIT);
@@ -478,7 +479,7 @@ void Renderer::finish() {
         ++calls_;
     }
     gl_.BindFramebuffer(GL_FRAMEBUFFER, 0);
-    gl_.Viewport(0, 0, width_, height_);
+    gl_.Viewport(output_x_, output_y_, width_, height_);
     gl_.Disable(GL_BLEND);
     gl_.UseProgram(composite_program_);
     gl_.Uniform4f(haze_uniform_, lighting.haze[0], lighting.haze[1], lighting.haze[2], lighting.haze_amount);
@@ -505,6 +506,7 @@ void Renderer::finish() {
         ++calls_;
         ui_size_ = 0;
     }
+    gl_.ActiveTexture(GL_TEXTURE0); // Leave the default unit active for whatever draws next.
     gl_.check();
 }
 

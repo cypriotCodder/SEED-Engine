@@ -19,6 +19,7 @@ inline std::int64_t checked_add(std::int64_t a, std::int64_t b) {
 struct WorldPosition {
     ChunkCoord chunk{};
     Vec2 local{};
+    bool operator==(const WorldPosition&) const = default;
     void move(Vec2 movement) {
         auto normalize = [](std::int64_t& c, float& p) {
             if (!std::isfinite(p) || std::abs(p) > 1048576)

@@ -1,6 +1,7 @@
 #include "project.hpp"
 #include "io/json.hpp"
 #include "io/storage.hpp"
+#include "project/scene_file.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <random>
@@ -68,6 +69,7 @@ Project create_project(const fs::path& parent, std::string_view name) {
     for (const char* folder : {"scenes", "assets", "scripts"})
         fs::create_directory(project.root / folder);
     write_text(project.root / ".gitignore", "# Per-user editor state\n.seed/\n");
+    save_scene(project.root / "scenes" / "main.json", {});
     save_project(project);
     return project;
 }
