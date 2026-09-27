@@ -1,4 +1,5 @@
 #pragma once
+#include "core/material.hpp"
 #include "world/coordinates.hpp"
 #include "world/structures.hpp"
 #include <array>
@@ -14,8 +15,16 @@ constexpr std::uint8_t tile_solid = 1; // Blocks movement and building.
 struct Tile {
     float elevation{};
     std::uint8_t material{}, flags{};
+    // An object standing on the tile, such as a tree or rock, drawn over the ground: 0 for none,
+    // otherwise its material ID + 1.
+    std::uint8_t object{};
     std::array<std::uint8_t, 4> game{};
 };
+static_assert(sizeof(Tile) == 12, "Tile grew; every resident chunk holds 1,024 of them");
+constexpr std::uint8_t no_object = 0;
+constexpr std::uint8_t tile_object(MaterialId material) {
+    return static_cast<std::uint8_t>(material + 1);
+}
 
 // Saved scene entities owned by a chunk, kept in their chunk-file encoding while the chunk is
 // loaded but not active. The engine turns them into scene entities on activation and back into

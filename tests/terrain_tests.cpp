@@ -81,14 +81,17 @@ void sampling() {
             const auto& tile = chunk->tiles[static_cast<std::size_t>(y * seed::chunk_side + x)];
             const auto s = terrain.sample(
                 7, {{0, 0}, {32.0F + static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F}});
-            check(tile.material == s.material && tile.elevation == s.elevation, "Chunk fill matches samples");
+            check(tile.material == s.material && tile.object == s.object && tile.elevation == s.elevation,
+                  "Chunk fill matches samples");
             check(((tile.flags & seed::tile_solid) != 0) == s.solid, "Solid flags follow the rules");
-            trees += tile.material == registry.find("tree");
-            grass += tile.material == registry.find("grass");
+            check(tile.material != registry.find("tree"), "Objects never replace the ground");
+            if (tile.material == registry.find("grass")) {
+                ++grass;
+                trees += tile.object == seed::tile_object(registry.find("tree"));
+            }
         }
-    // Trees replace one grass tile in four, give or take.
-    check(trees > 0 && grass > 0 && trees * 10 > (trees + grass) && trees * 10 < (trees + grass) * 4,
-          "Scatter density is about one in four");
+    // A tree stands on one grass tile in four, give or take.
+    check(trees > 0 && trees * 10 > grass && trees * 10 < grass * 4, "Scatter density is about one in four");
 }
 
 void versions() {

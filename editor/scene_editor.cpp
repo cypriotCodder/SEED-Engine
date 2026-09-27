@@ -454,8 +454,9 @@ void SceneEditor::draw_terrain(float half_w, float half_h) {
                 WorldPosition at{cache_.origin, {}};
                 at.move({(static_cast<float>(cache_.x0 + x) + 0.5F) * static_cast<float>(block),
                          (static_cast<float>(cache_.y0 + y) + 0.5F) * static_cast<float>(block)});
-                cache_.cells[static_cast<std::size_t>(y * cache_.columns + x)] =
-                    terrain_->sample(seed, at).material;
+                const auto sample = terrain_->sample(seed, at);
+                cache_.cells[static_cast<std::size_t>(y * cache_.columns + x)] = {sample.material,
+                                                                                  sample.object};
             }
         cache_ms_ =
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
@@ -468,10 +469,15 @@ void SceneEditor::draw_terrain(float half_w, float half_h) {
     const float size = static_cast<float>(block);
     for (int y = vy0; y <= vy1; ++y)
         for (int x = vx0; x <= vx1; ++x) {
-            const auto material =
+            const auto cell =
                 cache_.cells[static_cast<std::size_t>((y - cache_.y0) * cache_.columns + (x - cache_.x0))];
-            renderer_->sprite(material, origin.x + (static_cast<float>(x) + 0.5F) * size,
-                              origin.y + (static_cast<float>(y) + 0.5F) * size, size, size);
+            const float cx = origin.x + (static_cast<float>(x) + 0.5F) * size;
+            const float cy = origin.y + (static_cast<float>(y) + 0.5F) * size;
+            renderer_->sprite(cell.ground, cx, cy, size, size);
+            // Objects show only up close: zoomed out, a block's one sample would blow a single tree
+            // up to the size of the whole block.
+            if (block == 1 && cell.object != no_object)
+                renderer_->sprite(static_cast<MaterialId>(cell.object - 1), cx, cy);
         }
 }
 

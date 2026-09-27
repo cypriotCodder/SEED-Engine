@@ -298,7 +298,7 @@ Terrain::Sample Terrain::sample(std::uint64_t seed, WorldPosition position) cons
         const auto y = static_cast<std::uint64_t>(position.chunk.y) * chunk_side +
                        static_cast<std::uint64_t>(position.local.y);
         if (world_hash(seed ^ scatter_stream, x, y) % chosen->one_in == 0) {
-            out.material = chosen->scatter_material;
+            out.object = tile_object(chosen->scatter_material);
             out.solid = out.solid || chosen->scatter_solid;
         }
     }
@@ -314,6 +314,7 @@ void Terrain::fill(void* context, std::uint64_t seed, ChunkCoord coord, Chunk& c
             auto& tile = chunk.tiles[static_cast<std::size_t>(y * chunk_side + x)];
             tile.elevation = s.elevation;
             tile.material = s.material;
+            tile.object = s.object;
             tile.flags = s.solid ? tile_solid : 0;
         }
 }

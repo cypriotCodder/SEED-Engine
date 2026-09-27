@@ -39,7 +39,7 @@ struct TerrainCondition {
     bool operator==(const TerrainCondition&) const = default;
 };
 struct TerrainScatter {
-    std::string material; // Replaces the tile's material where an object is scattered.
+    std::string material; // The object placed over the ground (Tile::object).
     std::uint32_t one_in{20};
     bool solid{true};
     bool operator==(const TerrainScatter&) const = default;
@@ -77,6 +77,7 @@ public:
     struct Sample {
         float elevation{};
         MaterialId material{};
+        std::uint8_t object{no_object}; // As Tile::object.
         bool solid{};
     };
     // Throws if the asset has problems against `materials`.

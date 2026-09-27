@@ -91,7 +91,11 @@ private:
         int block{}, x0{}, y0{}, columns{}, rows{};
         std::uint32_t version{};
         std::uint64_t seed{};
-        std::vector<MaterialId> cells;
+        struct Cell {
+            MaterialId ground;
+            std::uint8_t object; // As Tile::object.
+        };
+        std::vector<Cell> cells;
     } cache_;
     float cache_ms_{}; // Time the last refill took, shown in the toolbar tooltip.
     Lighting game_lighting_;

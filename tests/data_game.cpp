@@ -28,10 +28,14 @@ void render(void*, seed::Engine& engine, const seed::View& view) {
     engine.world.each([&](seed::ChunkCoord coord, const seed::Chunk& chunk) {
         const auto offset = seed::relative({coord, {}}, view.camera);
         for (int y = 0; y < seed::chunk_side; ++y)
-            for (int x = 0; x < seed::chunk_side; ++x)
-                engine.renderer.sprite(
-                    chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)].material,
-                    offset.x + static_cast<float>(x) + 0.5F, offset.y + static_cast<float>(y) + 0.5F);
+            for (int x = 0; x < seed::chunk_side; ++x) {
+                const auto& tile = chunk.tiles[static_cast<std::size_t>(y * seed::chunk_side + x)];
+                const float px = offset.x + static_cast<float>(x) + 0.5F,
+                            py = offset.y + static_cast<float>(y) + 0.5F;
+                engine.renderer.sprite(tile.material, px, py);
+                if (tile.object != seed::no_object)
+                    engine.renderer.sprite(static_cast<seed::MaterialId>(tile.object - 1), px, py);
+            }
     });
     engine.draw_entities(view);
 }
