@@ -1,5 +1,6 @@
 #pragma once
 #include "project/scene_file.hpp"
+#include "project/terrain.hpp"
 #include "render/renderer.hpp"
 #include <filesystem>
 #include <functional>
@@ -78,6 +79,21 @@ private:
     // Preview renderer and the materials it was built from (textures replaced by generated tiles).
     std::unique_ptr<Renderer> renderer_;
     std::vector<MaterialAsset> rendered_;
+    // Terrain preview: the compiled terrain, and sampled tiles cached for the area around the view.
+    // Zoomed out, one sample stands for a block of tiles so the sprite count stays bounded.
+    void draw_terrain(float half_w, float half_h);
+    std::unique_ptr<Terrain> terrain_;
+    TerrainAsset compiled_terrain_;
+    std::string terrain_error_;
+    bool show_terrain_{true};
+    struct TerrainCache {
+        ChunkCoord origin{}; // Cells are counted from this chunk's corner.
+        int block{}, x0{}, y0{}, columns{}, rows{};
+        std::uint32_t version{};
+        std::uint64_t seed{};
+        std::vector<MaterialId> cells;
+    } cache_;
+    float cache_ms_{}; // Time the last refill took, shown in the toolbar tooltip.
     Lighting game_lighting_;
     std::string renderer_error_, render_error_;
 

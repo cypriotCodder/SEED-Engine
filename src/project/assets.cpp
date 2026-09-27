@@ -6,7 +6,7 @@
 namespace seed {
 namespace {
 constexpr int assets_format = 1;
-constexpr const char* kinds[] = {"materials", "actions", "sounds", "particles"};
+constexpr const char* kinds[] = {"materials", "actions", "sounds", "particles", "terrain"};
 constexpr const char* pattern_names[] = {"speckle", "water", "planks", "round"};
 constexpr const char* mouse_names[] = {"Mouse Left", "Mouse Middle", "Mouse Right", "Mouse X1", "Mouse X2"};
 
@@ -219,6 +219,13 @@ void Assets::register_effects(const Materials& registry, Sounds& out_sounds, Par
         add_particle(registry, out_particles, particle);
 }
 
+std::vector<std::string> Assets::material_names() const {
+    std::vector<std::string> names;
+    for (const auto& m : materials)
+        names.push_back(m.name);
+    return names;
+}
+
 std::string Assets::problems() const {
     std::string result;
     Materials material_registry;
@@ -231,6 +238,12 @@ std::string Assets::problems() const {
     check_all(result, "Sound", sounds, [&](const auto& s) { sound_registry.add(s.desc()); });
     check_all(result, "Particle style", particles,
               [&](const auto& p) { add_particle(material_registry, particle_registry, p); });
+    const auto terrain_problems = terrain.problems(material_names());
+    for (std::size_t start = 0; start < terrain_problems.size();) {
+        const auto end = terrain_problems.find('\n', start);
+        result += "Terrain: " + terrain_problems.substr(start, end - start + 1);
+        start = end + 1;
+    }
     return result;
 }
 
@@ -239,6 +252,12 @@ Json assets_json(const Assets& assets, std::string_view kind) {
     if (kind == "actions") return file_of("actions", assets.actions, write_action);
     if (kind == "sounds") return file_of("sounds", assets.sounds, write_sound);
     if (kind == "particles") return file_of("particles", assets.particles, write_particle);
+    if (kind == "terrain") {
+        auto file = Json::object();
+        file.set("format", assets_format);
+        file.set("terrain", terrain_json(assets.terrain));
+        return file;
+    }
     throw std::invalid_argument("Unknown asset kind");
 }
 
@@ -254,6 +273,11 @@ Assets load_assets(const std::filesystem::path& folder) {
             if (k == "actions") assets.actions = read_list<ActionAsset>(file, kind, read_action);
             if (k == "sounds") assets.sounds = read_list<SoundAsset>(file, kind, read_sound);
             if (k == "particles") assets.particles = read_list<ParticleAsset>(file, kind, read_particle);
+            if (k == "terrain") {
+                if (file.at("format").as_int(1, 1000000) > assets_format)
+                    throw std::runtime_error("Made by a newer editor");
+                assets.terrain = parse_terrain(file.at("terrain"));
+            }
         } catch (const std::exception& error) {
             throw std::runtime_error(path.string() + ": " + error.what());
         }

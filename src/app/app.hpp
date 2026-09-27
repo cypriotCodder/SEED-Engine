@@ -62,8 +62,10 @@ struct Game {
     const char* project_assets{};
     std::uint64_t default_seed{};
     const char* default_save{};
-    const char* usage{};    // Game options, appended to the usage message.
-    WorldGenerator world{}; // How the game\'s world is generated and edited.
+    const char* usage{}; // Game options, appended to the usage message.
+    // How the game's world is generated and edited. Leave `terrain` unset to use the project's
+    // terrain.json (see project_assets) instead.
+    WorldGenerator world{};
     // Register every material, in a fixed order, before the renderer or world generation start.
     void (*materials)(void*, Materials&){};
     // Register the game's input actions with their default bindings. Optional.
@@ -119,6 +121,11 @@ private:
 
 public:
     Materials materials;
+
+private:
+    std::unique_ptr<Terrain> terrain_; // The project's terrain, when the game has no terrain code.
+
+public:
     Window window;
     Renderer renderer;
     GpuTimer gpu;

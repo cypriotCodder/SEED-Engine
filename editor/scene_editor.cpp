@@ -1,15 +1,16 @@
 #include "scene_editor.hpp"
 #include "project.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <imgui_stdlib.h>
 
 namespace seed::editor {
 namespace {
 namespace fs = std::filesystem;
-constexpr float marker_size = 0.6F; // World size of entities without a visual.
-constexpr float min_zoom = 2, max_zoom = 256;
-constexpr std::uint64_t view_reach = 64; // Chunks from the camera that the view considers.
+constexpr float marker_size = 0.6F;              // World size of entities without a visual.
+constexpr float min_zoom = 0.1F, max_zoom = 256; // 0.1: a 300-chunk world fits on screen.
+constexpr std::uint64_t view_reach = 512;        // Chunks from the camera that the view considers.
 constexpr float pi = 3.14159265F;
 
 double global(std::int64_t chunk, float local) {
@@ -79,7 +80,26 @@ bool SceneEditor::save(const Assets& assets) {
 }
 
 void SceneEditor::sync(const Assets& assets) {
-    if (assets.materials == rendered_ && (renderer_ || rendered_.empty())) return;
+    const bool materials_changed = !(assets.materials == rendered_ && (renderer_ || rendered_.empty()));
+    if (materials_changed || assets.terrain != compiled_terrain_) {
+        // Recompile the terrain against the preview's material order.
+        compiled_terrain_ = assets.terrain;
+        terrain_.reset();
+        terrain_error_.clear();
+        cache_.cells.clear();
+        if (assets.terrain.enabled() && !assets.materials.empty()) try {
+                Materials registry;
+                Assets names;
+                names.materials = assets.materials;
+                for (auto& m : names.materials)
+                    m.texture.clear();
+                names.register_materials(registry);
+                terrain_ = std::make_unique<Terrain>(assets.terrain, registry);
+            } catch (const std::exception&) {
+                terrain_error_ = "Terrain not shown: fix the problems in the Terrain panel.";
+            }
+    }
+    if (!materials_changed) return;
     rendered_ = assets.materials;
     renderer_.reset();
     renderer_error_.clear();
@@ -195,12 +215,20 @@ void SceneEditor::scene_view() {
     ImGui::Checkbox("Lit", &lit_);
     ImGui::SetItemTooltip("Show the game's lighting and lights instead of flat full brightness.");
     ImGui::SameLine();
+    ImGui::Checkbox("Terrain", &show_terrain_);
+    if (terrain_)
+        ImGui::SetItemTooltip(
+            "Show the generated world for the seed in the Terrain panel.\nLast refill: %.1f ms", cache_ms_);
+    else
+        ImGui::SetItemTooltip("%s", terrain_error_.empty() ? "This project has no terrain yet."
+                                                           : terrain_error_.c_str());
+    ImGui::SameLine();
     ImGui::BeginDisabled(selected_ < 0);
     if (ImGui::Button("Frame")) frame_selection();
     ImGui::SetItemTooltip("Centre the view on the selected entity (F).");
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::TextDisabled("%.0f%%", zoom_ / 32 * 100);
+    ImGui::TextDisabled(zoom_ >= 3.2F ? "%.0f%%" : "%.1f%%", zoom_ / 32 * 100);
     const ImVec2 view_top{top.x, top.y + bar};
     ImGui::SetCursorScreenPos(view_top);
     const ImVec2 size = ImGui::GetContentRegionAvail();
@@ -289,7 +317,7 @@ void SceneEditor::scene_view() {
             draw->AddLine({view_min_.x, c.y - y * zoom_}, {view_max_.x, c.y - y * zoom_}, color);
     };
     if (zoom_ >= 12) grid(1, rgba(1, 1, 1, 0.06F));
-    grid(chunk_side, rgba(1, 1, 1, 0.18F));
+    if (zoom_ * chunk_side >= 16) grid(chunk_side, rgba(1, 1, 1, 0.18F));
     for (std::size_t i = 0; i < edited_.entities.size(); ++i) {
         const auto& e = edited_.entities[i];
         if (!nearby(e.position.chunk, camera_.chunk, view_reach)) continue;
@@ -360,6 +388,7 @@ void SceneEditor::render() {
     r.set_output(static_cast<int>(view_min_.x * sx), static_cast<int>((io.DisplaySize.y - view_max_.y) * sy));
     const float half_w = (view_max_.x - view_min_.x) / 2 / zoom_,
                 half_h = (view_max_.y - view_min_.y) / 2 / zoom_;
+    if (show_terrain_ && terrain_) draw_terrain(half_w, half_h); // Under the entities.
     std::size_t lights = 0;
     for (const auto& e : edited_.entities) {
         if (!nearby(e.position.chunk, camera_.chunk, view_reach)) continue;
@@ -382,6 +411,68 @@ void SceneEditor::render() {
     }
     r.finish();
     r.set_output(0, 0);
+}
+
+void SceneEditor::draw_terrain(float half_w, float half_h) {
+    constexpr float max_cells = 30000; // Visible sprites; keeps the view to one draw batch.
+    int block = 1;
+    while (block < 256 &&
+           (2 * half_w / static_cast<float>(block)) * (2 * half_h / static_cast<float>(block)) > max_cells)
+        block *= 2;
+    const auto seed = compiled_terrain_.default_seed;
+    // The visible cells, counted from the camera chunk's corner.
+    const auto cell = [&](float offset) {
+        return static_cast<int>(std::floor(offset / static_cast<float>(block)));
+    };
+    // Refill when the view leaves the cached area, the block size changes, or the terrain does.
+    bool covered = !cache_.cells.empty() && cache_.block == block && cache_.version == terrain_->version() &&
+                   cache_.seed == seed && nearby(cache_.origin, camera_.chunk, 64);
+    int vx0{}, vy0{}, vx1{}, vy1{};
+    if (covered) {
+        const auto shift = relative({camera_.chunk, {}}, {cache_.origin, {}}); // Whole chunks: exact.
+        vx0 = cell(shift.x + camera_.local.x - half_w);
+        vx1 = cell(shift.x + camera_.local.x + half_w);
+        vy0 = cell(shift.y + camera_.local.y - half_h);
+        vy1 = cell(shift.y + camera_.local.y + half_h);
+        covered = vx0 >= cache_.x0 && vy0 >= cache_.y0 && vx1 < cache_.x0 + cache_.columns &&
+                  vy1 < cache_.y0 + cache_.rows;
+    }
+    if (!covered) {
+        const auto start = std::chrono::steady_clock::now();
+        // A margin of half a view on each side lets small pans reuse the cache.
+        cache_.origin = camera_.chunk;
+        cache_.block = block;
+        cache_.version = terrain_->version();
+        cache_.seed = seed;
+        cache_.x0 = cell(camera_.local.x - half_w * 1.5F);
+        cache_.y0 = cell(camera_.local.y - half_h * 1.5F);
+        cache_.columns = cell(camera_.local.x + half_w * 1.5F) - cache_.x0 + 1;
+        cache_.rows = cell(camera_.local.y + half_h * 1.5F) - cache_.y0 + 1;
+        cache_.cells.resize(static_cast<std::size_t>(cache_.columns) * static_cast<std::size_t>(cache_.rows));
+        for (int y = 0; y < cache_.rows; ++y)
+            for (int x = 0; x < cache_.columns; ++x) {
+                WorldPosition at{cache_.origin, {}};
+                at.move({(static_cast<float>(cache_.x0 + x) + 0.5F) * static_cast<float>(block),
+                         (static_cast<float>(cache_.y0 + y) + 0.5F) * static_cast<float>(block)});
+                cache_.cells[static_cast<std::size_t>(y * cache_.columns + x)] =
+                    terrain_->sample(seed, at).material;
+            }
+        cache_ms_ =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count();
+        vx0 = cell(camera_.local.x - half_w);
+        vx1 = cell(camera_.local.x + half_w);
+        vy0 = cell(camera_.local.y - half_h);
+        vy1 = cell(camera_.local.y + half_h);
+    }
+    const auto origin = relative({cache_.origin, {}}, camera_);
+    const float size = static_cast<float>(block);
+    for (int y = vy0; y <= vy1; ++y)
+        for (int x = vx0; x <= vx1; ++x) {
+            const auto material =
+                cache_.cells[static_cast<std::size_t>((y - cache_.y0) * cache_.columns + (x - cache_.x0))];
+            renderer_->sprite(material, origin.x + (static_cast<float>(x) + 0.5F) * size,
+                              origin.y + (static_cast<float>(y) + 0.5F) * size, size, size);
+        }
 }
 
 void SceneEditor::scene_menu() {

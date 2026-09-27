@@ -5,7 +5,7 @@ A Seed project is a folder the editor creates. Every file is UTF-8 JSON written 
 ```
 My Game/
   project.seed.json   project identity
-  assets/             data assets, one file per kind
+  assets/             data assets, one file per kind, including terrain.json
   scenes/             scenes, one file each; new projects start with main.json
   scripts/            (Lua gameplay scripts, planned)
   .seed/              per-user editor state such as the window layout; ignored by git
@@ -25,6 +25,16 @@ Each file is `{"format": 1, "<kind>": [...]}`. A missing file is an empty list. 
 - `particles.json`: `name`, `material` (a material name), `count` (1–512), `speed`, `speed_range`, `life`, `size`, `drag` (0–1), `spin`, `shade`. At most 32.
 
 Floats are written in the shortest form that reads back to the same 32-bit value.
+
+### terrain.json
+
+`{"format": 1, "terrain": {...}}` describes the world generator. The generator version saved with worlds is a hash of these settings (without `default_seed`), so any change starts new worlds instead of mixing old saves with new terrain.
+
+- `island` (true: a disc of land in endless ocean; false: endless), `radius` (chunks; also the unit of `distance` terms), `coast` (island falloff as a fraction of the radius), `warp` (domain warp in tiles, 0 to 256) and `warp_wavelength`, `default_seed` (the world the editor previews and the game's default).
+- `fields`: up to 8 of `{name, base, terms}`; one must be `elevation` (the tile height: below 0 is water; on islands the coast lowers it near the rim). A field is `base` plus the sum of its terms, each `{type, wavelength, amplitude, warped}`: `perlin` (smooth noise in -1..1, power-of-two wavelength up to 1024), `fractal` (octaves from 128 down to 8), `ridged` (1 - 2|perlin|, crests), `distance` (0 at the centre, 1 at the rim), `spot` (exp(-(d/wavelength)^2), a bump at the centre). `warped` samples at the domain-warped position. Each term has its own noise stream, derived from its field's name and position in the list.
+- `rules`: up to 64 of `{name, material, when, solid, scatter}`. Each tile takes the first rule whose `when` ranges (`{field, min, max}`, either end optional) all hold; a tile no rule matches takes the last rule's material. `scatter` (`{material, one_in, solid}`) replaces the material on a hashed one tile in `one_in`, for trees and rocks. An empty rule list means no terrain.
+
+A game with `Game::project_assets` set and no `world.terrain` callback generates its world from this file.
 
 ## scenes/
 

@@ -4,6 +4,7 @@
 #include "io/json.hpp"
 #include "platform/actions.hpp"
 #include "platform/audio.hpp"
+#include "project/terrain.hpp"
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -45,7 +46,9 @@ struct Assets {
     std::vector<ActionAsset> actions;
     std::vector<SoundAsset> sounds;
     std::vector<ParticleAsset> particles;
+    TerrainAsset terrain;
     bool operator==(const Assets&) const = default;
+    std::vector<std::string> material_names() const;
 
     // Registers every asset. The registries keep pointers to these names, so this Assets must
     // outlive them and must not change while they are in use. Throws on the first invalid entry,
@@ -64,7 +67,8 @@ std::string binding_name(const Binding& binding);
 Binding parse_binding(std::string_view name); // Throws for an unknown name.
 
 // Project files live in the project's assets/ folder, one per kind: materials.json,
-// actions.json, sounds.json and particles.json. A missing file is an empty list.
+// actions.json, sounds.json, particles.json and terrain.json. A missing file is an empty list
+// (for terrain: no terrain).
 Assets load_assets(const std::filesystem::path& folder);
 // Writes the files whose contents changed since `previous` (all of them if null), atomically.
 void save_assets(const std::filesystem::path& folder, const Assets& assets, const Assets* previous = nullptr);

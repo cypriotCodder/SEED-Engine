@@ -47,6 +47,16 @@ Sounds register_effects(const Game& game, const Assets& assets, const Materials&
     return sounds;
 }
 
+// The game's own generator, or one built from the project's terrain.json.
+WorldGenerator world_generator(const Game& game, const Assets& assets, const Materials& materials,
+                               std::unique_ptr<Terrain>& terrain) {
+    if (game.world.terrain) return game.world;
+    if (!game.project_assets)
+        throw std::invalid_argument("A game needs world.terrain or project assets with a terrain");
+    terrain = std::make_unique<Terrain>(assets.terrain, materials);
+    return terrain->generator();
+}
+
 const Pack& no_assets() {
     static const Pack empty;
     return empty;
@@ -110,7 +120,8 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       gpu(options.benchmark ? options.measured_frames : 0),
       scene(game.scene_memory ? game.scene_memory : Scene::default_memory),
       checkpoint(options.save),
-      world(jobs, stable_id(game.id), game.world, options.seed, checkpoint.working_directory(),
+      world(jobs, stable_id(game.id), world_generator(game, project_assets_, materials, terrain_),
+            options.seed, checkpoint.working_directory(),
             [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
       physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
       sounds(register_effects(game, project_assets_, materials, particles)),

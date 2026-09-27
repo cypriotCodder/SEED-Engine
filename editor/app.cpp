@@ -492,7 +492,8 @@ void App::build_default_layout(unsigned dockspace) {
         ImGui::DockBuilderDockWindow(id, center);
     ImGui::DockBuilderFinish(dockspace);
     show_project_ = show_console_ = show_settings_ = true;
-    assets_.show_materials = assets_.show_input = assets_.show_sounds = assets_.show_particles = true;
+    assets_.show_materials = assets_.show_input = assets_.show_sounds = assets_.show_particles =
+        assets_.show_terrain = true;
     scene_.show_scene = scene_.show_hierarchy = scene_.show_inspector = true;
 }
 
@@ -535,6 +536,7 @@ void App::menu_bar() {
         ImGui::MenuItem("Input", nullptr, &assets_.show_input);
         ImGui::MenuItem("Sounds", nullptr, &assets_.show_sounds);
         ImGui::MenuItem("Particles", nullptr, &assets_.show_particles);
+        ImGui::MenuItem("Terrain", nullptr, &assets_.show_terrain);
         ImGui::Separator();
         if (ImGui::MenuItem("Reset Layout")) reset_layout_ = true;
         ImGui::EndMenu();

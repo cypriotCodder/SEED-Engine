@@ -7,6 +7,7 @@
 #include <string>
 
 namespace seed::editor {
+
 // Editor panels for a project's data assets: materials, input actions, sounds and particle
 // styles. Edits stay in memory until saved; invalid assets cannot be saved.
 class AssetPanels final {
@@ -27,11 +28,12 @@ public:
     // Gives a raw event to the panels first; returns true if it was used to record a binding.
     bool capture(const SDL_Event& event);
 
-    bool show_materials{true}, show_input{true}, show_sounds{true}, show_particles{true};
+    bool show_materials{true}, show_input{true}, show_sounds{true}, show_particles{true}, show_terrain{true};
     void draw();
 
     // Window identities for docking (titles change with the unsaved marker).
-    static constexpr const char* window_ids[] = {"###Materials", "###Input", "###Sounds", "###Particles"};
+    static constexpr const char* window_ids[] = {"###Terrain", "###Materials", "###Input", "###Sounds",
+                                                 "###Particles"};
 
 private:
     void refresh() { problems_ = edited_.problems(); }
@@ -39,6 +41,7 @@ private:
     void input();
     void sounds();
     void particles();
+    void terrain(); // In terrain_panel.cpp.
     void problems(const char* kind);
 
     Log log_;
@@ -47,6 +50,7 @@ private:
     Assets saved_, edited_;
     std::string problems_;
     int material_{-1}, action_{-1}, sound_{-1}, particle_{-1}; // Selected rows.
+    int rule_{-1}, field_{-1};
     int capturing_{-1}; // Action waiting for a key or button press, or -1.
 };
 } // namespace seed::editor

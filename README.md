@@ -27,16 +27,17 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 
 - **Scene**, **Hierarchy** and **Inspector**: the Scene view draws the scene with the engine's own renderer (optionally with the game's lighting). Click to select, drag to move (Shift snaps to half units), right-drag or middle-drag to pan, scroll to zoom, right-click to create. The Hierarchy lists and switches scenes; the Inspector edits position, rotation and the Visual and Light components.
 - **Project**, **Console** and **Project Settings** panels.
+- **Terrain**: the world generator as data: island or endless world, noise fields, and ordered rules that pick each tile's material, with scattered trees and rocks. **Create Starter Island** fills in a complete biome-ring island. The Scene view previews the generated world live and zooms out far enough to show a whole island.
 - **Materials**, **Input**, **Sounds** and **Particles** panels that edit the project's data assets, with validation as you type. Input bindings are recorded by pressing the key or button; sounds can be played while you tune them.
 - Cmd+Z and Shift+Cmd+Z undo and redo any edit in these panels (100 steps, per scene). Cmd+S saves; closing or quitting with unsaved changes asks first.
 
-Projects are folders of JSON text files, described in [the project format](docs/project-format.md). A C++ game can use a project's assets by setting `Game::project_assets`; [tests/minimal_game.cpp](tests/minimal_game.cpp) does this.
+Projects are folders of JSON text files, described in [the project format](docs/project-format.md). A C++ game can use a project's assets by setting `Game::project_assets`; [tests/minimal_game.cpp](tests/minimal_game.cpp) does this for materials, and [tests/data_game.cpp](tests/data_game.cpp) takes its materials and whole world from project files.
 
 ```sh
 ./build/release/editor/seed_editor
 ```
 
-World authoring, play mode, Lua gameplay scripts and exporting a standalone game are the planned next steps; until then, game logic is written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
+Play mode, Lua gameplay scripts and exporting a standalone game are the planned next steps; until then, game logic is written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
 
 ## Making a new game
 

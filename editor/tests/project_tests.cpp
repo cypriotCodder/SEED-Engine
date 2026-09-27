@@ -1,6 +1,7 @@
 #include "io/json.hpp"
 #include "io/storage.hpp"
 #include "project.hpp"
+#include "starter.hpp"
 #include <filesystem>
 #include <iostream>
 
@@ -101,6 +102,26 @@ void recent(const fs::path& root) {
     seed::write_text(file, "not json");
     check(RecentProjects(file).entries().empty(), "A damaged list starts empty");
 }
+// The starter island is valid, generates land at the centre and sea past the rim, and is saved
+// as a complete project that opens in the editor.
+void starter(const fs::path& root) {
+    const auto project = create_project(root, "Starter Island");
+    seed::Assets assets;
+    starter_island(assets);
+    check(assets.problems().empty(), "Starter island assets are valid");
+    starter_island(assets);
+    check(assets.materials.size() == 10, "Applying the starter again adds no duplicate materials");
+    seed::save_assets(project.root / "assets", assets);
+    check(seed::load_assets(project.root / "assets") == assets, "Starter assets read back unchanged");
+
+    seed::Materials registry;
+    assets.register_materials(registry);
+    const seed::Terrain terrain(assets.terrain, registry);
+    const auto centre = terrain.sample(1, {{}, {0.5F, 0.5F}});
+    check(centre.elevation > 0.3F, "Spawn is on land");
+    const auto sea = terrain.sample(1, {{200, 0}, {0, 0}});
+    check(sea.material == registry.find("deep_water"), "Past the rim is deep water");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -113,6 +134,7 @@ int main(int argc, char** argv) {
         create_and_open(root);
         bad_projects(root);
         recent(root);
+        starter(root);
         std::cout << "Editor project checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

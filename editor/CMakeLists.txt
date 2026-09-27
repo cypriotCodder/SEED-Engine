@@ -1,6 +1,6 @@
 # The Seed editor: a separate application for creating and building game projects. Games never link
 # it or Dear ImGui.
-add_library(seed_editor_core STATIC project.cpp)
+add_library(seed_editor_core STATIC project.cpp starter.cpp)
 seed_strict(seed_editor_core)
 target_include_directories(seed_editor_core PUBLIC .)
 target_link_libraries(seed_editor_core PUBLIC seed_engine)
@@ -10,7 +10,7 @@ if(APPLE)
 else()
     set(seed_folder_dialog folder_dialog_none.cpp)
 endif()
-add_executable(seed_editor main.cpp app.cpp asset_panels.cpp scene_editor.cpp ${seed_folder_dialog})
+add_executable(seed_editor main.cpp app.cpp asset_panels.cpp terrain_panel.cpp scene_editor.cpp ${seed_folder_dialog})
 seed_strict(seed_editor)
 target_link_libraries(seed_editor PRIVATE seed_editor_core seed_imgui)
 if(APPLE)
