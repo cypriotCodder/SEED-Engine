@@ -28,7 +28,7 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 - **Scene**, **Hierarchy** and **Inspector**: the Scene view draws the scene with the engine's own renderer (optionally with the game's lighting). Click to select, drag to move (Shift snaps to half units), right-drag or middle-drag to pan, scroll to zoom, right-click to create. The Hierarchy lists and switches scenes; the Inspector edits position, rotation and the Visual and Light components.
 - **Project**, **Console** and **Project Settings** panels.
 - **Materials**, **Input**, **Sounds** and **Particles** panels that edit the project's data assets, with validation as you type. Input bindings are recorded by pressing the key or button; sounds can be played while you tune them.
-- Cmd+S saves; closing or quitting with unsaved changes asks first.
+- Cmd+Z and Shift+Cmd+Z undo and redo any edit in these panels (100 steps, per scene). Cmd+S saves; closing or quitting with unsaved changes asks first.
 
 Projects are folders of JSON text files, described in [the project format](docs/project-format.md). A C++ game can use a project's assets by setting `Game::project_assets`; [tests/minimal_game.cpp](tests/minimal_game.cpp) does this.
 

@@ -140,6 +140,8 @@ void App::open(const fs::path& path) {
     if (!reset_layout_) ImGui::LoadIniSettingsFromDisk(layout_file_.c_str());
     ImGui::GetIO().IniFilename = layout_file_.c_str();
     window_.title(project_->name + " - Seed Editor");
+    history_.reset(snapshot());
+    history_scene_ = scene_.name();
     refresh_files();
     log(Level::info, "Opened project \"" + project_->name + "\" at " + project_->root.string());
 }
@@ -220,6 +222,26 @@ void App::unsaved_popup() {
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
+}
+
+void App::record_history() {
+    // An edit is finished once no field is being typed in or dragged and no button is held.
+    if (ImGui::IsAnyItemActive() || ImGui::IsMouseDown(ImGuiMouseButton_Left) || scene_.busy()) return;
+    auto now = snapshot();
+    // Opening another scene starts a new history, so undo never reaches into a different scene.
+    if (now.scene_name != history_scene_) {
+        history_scene_ = now.scene_name;
+        return history_.reset(std::move(now));
+    }
+    history_.offer(now);
+}
+
+void App::step_history(bool redo) {
+    if (ImGui::IsAnyItemActive()) return; // A text field's own undo applies instead.
+    const auto& state = redo ? history_.redo() : history_.undo();
+    assets_.set(state.assets);
+    scene_.set(state.scene);
+    edited_name_ = state.project_name;
 }
 
 void App::refresh_files() {
@@ -443,6 +465,10 @@ void App::workspace() {
     assets_.draw();
     about_popup();
     unsaved_popup();
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal)) step_history(false);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal))
+        step_history(true);
+    record_history();
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal)) save_all();
 }
 
@@ -489,6 +515,11 @@ void App::menu_bar() {
         ImGui::Separator();
         if (ImGui::MenuItem("Close Project")) close = true;
         if (ImGui::MenuItem("Quit", "Cmd+Q")) leave([this] { quit_ = true; });
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Edit")) {
+        if (ImGui::MenuItem("Undo", "Cmd+Z", false, history_.can_undo())) step_history(false);
+        if (ImGui::MenuItem("Redo", "Shift+Cmd+Z", false, history_.can_redo())) step_history(true);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Window")) {

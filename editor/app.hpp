@@ -1,5 +1,6 @@
 #pragma once
 #include "asset_panels.hpp"
+#include "history.hpp"
 #include "platform/window.hpp"
 #include "project.hpp"
 #include "scene_editor.hpp"
@@ -56,6 +57,8 @@ private:
     // Runs `then` after the current frame, first asking to save when there are unsaved changes.
     void leave(std::function<void()> then);
     void unsaved_popup();
+    void record_history();
+    void step_history(bool redo);
     void refresh_files();
 
     void frame();
@@ -98,5 +101,15 @@ private:
     bool prompt_{};
     AssetPanels assets_;
     SceneEditor scene_;
+    // What undo restores: every edit to the project's assets, the open scene and its settings.
+    struct Snapshot {
+        Assets assets;
+        SceneFile scene;
+        std::string scene_name, project_name;
+        bool operator==(const Snapshot&) const = default;
+    };
+    Snapshot snapshot() const { return {assets_.assets(), scene_.scene(), scene_.name(), edited_name_}; }
+    History<Snapshot> history_;
+    std::string history_scene_;
 };
 } // namespace seed::editor

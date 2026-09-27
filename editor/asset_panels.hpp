@@ -19,6 +19,8 @@ public:
     void unload();
     bool dirty() const { return edited_ != saved_; }
     const Assets& assets() const { return edited_; }
+    // Replaces the edited assets, e.g. from undo; selections stay where they still fit.
+    void set(const Assets& assets);
     // Saves the kinds that changed. Returns false, logging why, when the assets have problems.
     bool save();
     void revert() { edited_ = saved_, refresh(); }

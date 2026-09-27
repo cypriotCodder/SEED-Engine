@@ -27,7 +27,16 @@ public:
     // Saves the scene; false, logging why, when it has problems.
     bool save(const Assets& assets);
     void revert() { edited_ = saved_; }
-    SceneFile& scene() { return edited_; }
+    const SceneFile& scene() const { return edited_; }
+    // Replaces the edited scene, e.g. from undo.
+    void set(const SceneFile& scene) {
+        edited_ = scene;
+        if (selected_ >= static_cast<int>(edited_.entities.size()))
+            selected_ = static_cast<int>(edited_.entities.size()) - 1;
+        moving_ = false;
+    }
+    // True while the mouse is moving an entity; an edit is finished only when this ends.
+    bool busy() const { return moving_; }
     const std::string& name() const { return name_; }
 
     // Draws the panels. Call once per frame between ImGui::NewFrame and ImGui::Render.

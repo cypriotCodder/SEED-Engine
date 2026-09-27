@@ -106,6 +106,20 @@ void AssetPanels::load(const std::filesystem::path& folder) {
     if (!problems_.empty()) log_(true, "The project's assets have problems:\n" + problems_);
 }
 
+void AssetPanels::set(const Assets& assets) {
+    edited_ = assets;
+    const auto clamp = [](int& selected, const auto& list) {
+        selected = std::min(selected, static_cast<int>(list.size()) - 1);
+        if (selected < 0 && !list.empty()) selected = 0;
+    };
+    clamp(material_, edited_.materials);
+    clamp(action_, edited_.actions);
+    clamp(sound_, edited_.sounds);
+    clamp(particle_, edited_.particles);
+    capturing_ = -1;
+    refresh();
+}
+
 void AssetPanels::unload() {
     folder_.clear();
     saved_ = edited_ = {};
