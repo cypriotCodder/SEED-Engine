@@ -23,20 +23,26 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 
 ## Seed Editor
 
-`seed_editor` (under `editor/`) is the application for building games, separate from the games themselves. It opens on a hub where you create a project or open a recent one. A project is a folder holding `project.seed.json` plus `scenes/`, `assets/` and `scripts/`; every file the editor writes is JSON text, so projects work well in git. The open project shows in a dockable workspace with a file browser, a console and project settings. The layout is saved per project in `.seed/`, which the project's `.gitignore` excludes.
+`seed_editor` (under `editor/`) is the application for building games, separate from the games themselves; games never link it or Dear ImGui. It opens on a hub where you create a project or open a recent one. The open project shows in a dockable workspace:
+
+- **Project**, **Console** and **Project Settings** panels.
+- **Materials**, **Input**, **Sounds** and **Particles** panels that edit the project's data assets, with validation as you type. Input bindings are recorded by pressing the key or button; sounds can be played while you tune them.
+- Cmd+S saves; closing or quitting with unsaved changes asks first.
+
+Projects are folders of JSON text files, described in [the project format](docs/project-format.md). A C++ game can use a project's assets by setting `Game::project_assets`; [tests/minimal_game.cpp](tests/minimal_game.cpp) does this.
 
 ```sh
 ./build/release/editor/seed_editor
 ```
 
-The editor is at its first step. Scene editing, world authoring, play mode, Lua gameplay scripts and exporting a standalone game are the planned next steps; until they land, games are still written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building it.
+Scene editing, world authoring, play mode, Lua gameplay scripts and exporting a standalone game are the planned next steps; until then, game logic is written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
 
 ## Making a new game
 
 A game is an executable that links `seed_engine` and hands `seed::run` a `seed::Game`: a struct of callbacks plus a context pointer. At minimum it provides:
 
 - `id` (stable; recorded in saves), `name` and `default_save`
-- `materials`: registers the game's materials in a fixed order
+- materials: a project assets folder (`project_assets`) or a `materials` callback that registers them in a fixed order
 - `world`: a `WorldGenerator` with a stable name, a version and a `terrain` callback that fills a chunk's tiles (plus `structures` and edit rules if the game has them)
 - `setup`: creates the game's entities and returns the one the camera and streaming follow
 

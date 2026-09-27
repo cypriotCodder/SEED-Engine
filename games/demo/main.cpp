@@ -48,6 +48,7 @@ void register_effects(void* context, seed::Sounds& sounds, seed::Particles& part
     auto& demo = *static_cast<Demo*>(context);
     demo.impact = sounds.add({"impact", 140, 180, 0.2F, 0.9991F, 0.75F});
     seed::ParticleStyle chips;
+    chips.name = "chips";
     chips.material = demo::mat::wood;
     demo.chips = particles.add_style(chips);
 }

@@ -1,8 +1,10 @@
 #pragma once
 #include "platform/window.hpp"
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <initializer_list>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -14,6 +16,7 @@ struct Binding {
     enum class Kind : std::uint8_t { none, key, mouse };
     Kind kind{Kind::none};
     int code{};
+    bool operator==(const Binding&) const = default;
     static Binding key(SDL_Scancode scancode) { return {Kind::key, static_cast<int>(scancode)}; }
     static Binding mouse(int button) { return {Kind::mouse, button}; }
 };
@@ -27,7 +30,12 @@ public:
     static constexpr std::size_t capacity = 64, bindings_per_action = 4;
 
     ActionId add(const char* name, std::initializer_list<Binding> bindings) {
+        return add(name, std::span<const Binding>(bindings.begin(), bindings.size()));
+    }
+    // Registers an action. Nothing changes if the name or any binding is invalid.
+    ActionId add(const char* name, std::span<const Binding> bindings) {
         if (!name || !*name) throw std::invalid_argument("An action needs a name");
+        check(bindings);
         for (std::size_t i = 0; i < size_; ++i)
             if (std::string_view(actions_[i].name) == name)
                 throw std::invalid_argument(std::string("Duplicate action: ") + name);
@@ -39,20 +47,13 @@ public:
     }
     // Replaces every binding of an action. Invalid bindings are rejected before anything changes.
     void bind(ActionId id, std::initializer_list<Binding> bindings) {
+        bind(id, std::span<const Binding>(bindings.begin(), bindings.size()));
+    }
+    void bind(ActionId id, std::span<const Binding> bindings) {
         auto& action = at(id);
-        if (bindings.size() > bindings_per_action)
-            throw std::invalid_argument("Too many bindings for one action");
-        for (const auto& binding : bindings) {
-            const bool valid =
-                (binding.kind == Binding::Kind::key && binding.code > 0 &&
-                 binding.code < SDL_NUM_SCANCODES) ||
-                (binding.kind == Binding::Kind::mouse && binding.code >= 1 && binding.code <= 5);
-            if (!valid) throw std::invalid_argument("Invalid input binding");
-        }
+        check(bindings);
         action.bindings = {};
-        std::size_t i = 0;
-        for (const auto& binding : bindings)
-            action.bindings[i++] = binding;
+        std::copy(bindings.begin(), bindings.end(), action.bindings.begin());
     }
     ActionId find(std::string_view name) const {
         for (std::size_t i = 0; i < size_; ++i)
@@ -95,6 +96,17 @@ public:
     std::size_t size() const { return size_; }
 
 private:
+    static void check(std::span<const Binding> bindings) {
+        if (bindings.size() > bindings_per_action)
+            throw std::invalid_argument("Too many bindings for one action");
+        for (const auto& binding : bindings) {
+            const bool valid =
+                (binding.kind == Binding::Kind::key && binding.code > 0 &&
+                 binding.code < SDL_NUM_SCANCODES) ||
+                (binding.kind == Binding::Kind::mouse && binding.code >= 1 && binding.code <= 5);
+            if (!valid) throw std::invalid_argument("Invalid input binding");
+        }
+    }
     struct Action {
         const char* name{};
         std::array<Binding, bindings_per_action> bindings{};
@@ -119,4 +131,12 @@ constexpr ActionId quit = 0;       // Escape: checkpoint and quit.
 constexpr ActionId checkpoint = 1; // F5: start a background checkpoint.
 constexpr ActionId screenshot = 2; // F12: write a frame when --screenshot was given.
 } // namespace engine_action
+
+// Registers the engine's actions; they must come first so their IDs match engine_action.
+inline void add_engine_actions(Actions& actions) {
+    if (actions.size()) throw std::logic_error("Engine actions must be registered first");
+    actions.add("quit", {Binding::key(SDL_SCANCODE_ESCAPE)});
+    actions.add("checkpoint", {Binding::key(SDL_SCANCODE_F5)});
+    actions.add("screenshot", {Binding::key(SDL_SCANCODE_F12)});
+}
 } // namespace seed

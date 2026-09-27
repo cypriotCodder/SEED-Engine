@@ -1,4 +1,5 @@
 #pragma once
+#include "asset_panels.hpp"
 #include "platform/window.hpp"
 #include "project.hpp"
 #include <chrono>
@@ -48,6 +49,12 @@ private:
     void create(const std::filesystem::path& parent, const std::string& name);
     void close_project();
     void save_settings();
+    bool dirty() const;
+    // Saves settings and assets; false if something could not be saved.
+    bool save_all();
+    // Runs `then` after the current frame, first asking to save when there are unsaved changes.
+    void leave(std::function<void()> then);
+    void unsaved_popup();
     void refresh_files();
 
     void frame();
@@ -86,5 +93,8 @@ private:
     unsigned frames_{};
     unsigned calm_frames_{};
     std::function<void()> pending_;
+    std::function<void()> after_prompt_; // Waiting on the unsaved-changes prompt.
+    bool prompt_{};
+    AssetPanels assets_;
 };
 } // namespace seed::editor

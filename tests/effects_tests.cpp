@@ -33,10 +33,14 @@ int main() {
 
         seed::Particles particles;
         seed::ParticleStyle sparks;
+        sparks.name = "sparks";
         sparks.count = 5;
         sparks.life = 0.5F;
         const auto id = particles.add_style(sparks);
-        throws<std::invalid_argument>([&] { particles.add_style({0, 0}); }, "Empty style accepted");
+        throws<std::invalid_argument>([&] { particles.add_style({"empty", 0, 0}); }, "Empty style accepted");
+        throws<std::invalid_argument>([&] { particles.add_style({}); }, "Unnamed style accepted");
+        throws<std::invalid_argument>([&] { particles.add_style(sparks); }, "Duplicate style accepted");
+        check(particles.find_style("sparks") == id, "Style found by name");
         throws<std::out_of_range>([&] { particles.burst({}, 9); }, "Unregistered style accepted");
         particles.burst({}, id);
         particles.burst({}, id);
@@ -46,6 +50,7 @@ int main() {
         particles.update(0.3F);
         check(particles.count() == 0, "Particles expire after their life");
         seed::ParticleStyle flood;
+        flood.name = "flood";
         flood.count = 400;
         const auto big = particles.add_style(flood);
         particles.burst({}, big);

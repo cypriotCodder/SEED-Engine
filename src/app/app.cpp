@@ -19,14 +19,30 @@ std::filesystem::path asset_path(const char* name) {
     return path;
 }
 
-Materials register_materials(const Game& game) {
+Assets load_project_assets(const Game& game) {
+    if (!game.project_assets) return {};
+    std::filesystem::path folder = game.project_assets;
+    if (folder.is_relative()) folder = asset_path(game.project_assets);
+    if (!std::filesystem::is_directory(folder))
+        throw std::runtime_error("Project assets folder not found: " + folder.string());
+    auto assets = load_assets(folder);
+    if (const auto problems = assets.problems(); !problems.empty())
+        throw std::runtime_error("The project's assets have problems:\n" + problems);
+    return assets;
+}
+
+Materials register_materials(const Game& game, const Assets& assets) {
     Materials materials;
-    game.materials(game.context, materials);
+    assets.register_materials(materials);
+    if (game.materials) game.materials(game.context, materials);
+    if (!materials.size()) throw std::invalid_argument("A game needs at least one material");
     return materials;
 }
 
-Sounds register_effects(const Game& game, Particles& particles) {
+Sounds register_effects(const Game& game, const Assets& assets, const Materials& materials,
+                        Particles& particles) {
     Sounds sounds;
+    assets.register_effects(materials, sounds, particles);
     if (game.effects) game.effects(game.context, sounds, particles);
     return sounds;
 }
@@ -87,7 +103,8 @@ AppOptions parse(const Game& game, int argc, char** argv) {
 Engine::Engine(const Game& game, const AppOptions& opts)
     : options(opts),
       assets_(game.asset_pack ? std::make_unique<PackStream>(jobs, asset_path(game.asset_pack)) : nullptr),
-      materials(register_materials(game)),
+      project_assets_(load_project_assets(game)),
+      materials(register_materials(game, project_assets_)),
       window(!options.smoke && !options.benchmark),
       renderer(assets_ ? assets_->get() : no_assets(), materials),
       gpu(options.benchmark ? options.measured_frames : 0),
@@ -96,7 +113,7 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       world(jobs, stable_id(game.id), game.world, options.seed, checkpoint.working_directory(),
             [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
       physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
-      sounds(register_effects(game, particles)),
+      sounds(register_effects(game, project_assets_, materials, particles)),
       audio(!options.smoke && !options.benchmark, sounds),
       measurements_(options.benchmark ? options.measured_frames : 0),
       physics_hooks_(physics.hooks()),
@@ -104,9 +121,8 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       save_entity_(game.save_entity),
       load_entity_(game.load_entity) {
     if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");
-    actions.add("quit", {Binding::key(SDL_SCANCODE_ESCAPE)});
-    actions.add("checkpoint", {Binding::key(SDL_SCANCODE_F5)});
-    actions.add("screenshot", {Binding::key(SDL_SCANCODE_F12)});
+    add_engine_actions(actions);
+    project_assets_.register_actions(actions);
     if (game.actions) game.actions(game.context, actions);
     ChunkHooks hooks;
     hooks.context = this;
@@ -361,9 +377,8 @@ void Engine::loop(const Game& game) {
 
 int run(const Game& game, int argc, char** argv) {
     try {
-        if (!game.setup || !game.materials || !game.id || !game.name || !game.default_save)
-            throw std::invalid_argument(
-                "A game needs an id, a name, a default save, materials() and setup()");
+        if (!game.setup || !game.id || !game.name || !game.default_save)
+            throw std::invalid_argument("A game needs an id, a name, a default save and setup()");
         if (!game.save_entity != !game.load_entity)
             throw std::invalid_argument("save_entity() and load_entity() must be given together");
         const auto options = parse(game, argc, argv);

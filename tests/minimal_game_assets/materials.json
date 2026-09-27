@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "materials": [
+    {
+      "name": "meadow",
+      "color": [
+        90,
+        140,
+        70
+      ],
+      "pattern": "speckle",
+      "variation": 23
+    },
+    {
+      "name": "pond",
+      "color": [
+        30,
+        80,
+        120
+      ],
+      "pattern": "water",
+      "variation": 23
+    }
+  ]
+}

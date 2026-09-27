@@ -80,7 +80,9 @@ App::App(Options options)
       window_(true),
       preferences_(preferences_directory(options_.preferences)),
       recent_(preferences_ / "recent-projects.json"),
-      new_location_(default_location().string()) {
+      new_location_(default_location().string()),
+      assets_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); },
+              !options_.smoke) {
     window_.title("Seed Editor");
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -93,7 +95,10 @@ App::App(Options options)
         ImGui::DestroyContext();
         throw std::runtime_error("Could not start ImGui");
     }
-    window_.observe(nullptr, [](void*, const SDL_Event& event) { ImGui_ImplSDL2_ProcessEvent(&event); });
+    // A key or click recording an input binding is not also delivered to ImGui.
+    window_.observe(this, [](void* self, const SDL_Event& event) {
+        if (!static_cast<App*>(self)->assets_.capture(event)) ImGui_ImplSDL2_ProcessEvent(&event);
+    });
     log(Level::info, "Seed Editor started.");
 }
 
@@ -117,6 +122,12 @@ void App::open(const fs::path& path) {
     project_ = std::move(project);
     recent_.add(project_->root);
     edited_name_ = project_->name;
+    try {
+        assets_.load(project_->root / "assets");
+    } catch (const std::exception& error) {
+        log(Level::error, std::string("Could not load the project's assets: ") + error.what());
+        assets_.unload();
+    }
     layout_file_ = (user_state_directory(*project_) / "layout.ini").string();
     reset_layout_ = !fs::exists(layout_file_);
     if (!reset_layout_) ImGui::LoadIniSettingsFromDisk(layout_file_.c_str());
@@ -134,7 +145,8 @@ void App::create(const fs::path& parent, const std::string& name) {
 
 void App::close_project() {
     if (!project_) return;
-    if (edited_name_ != project_->name) log(Level::warning, "Discarded unsaved project settings.");
+    if (dirty()) log(Level::warning, "Discarded unsaved changes.");
+    assets_.unload();
     ImGui::SaveIniSettingsToDisk(layout_file_.c_str());
     ImGui::GetIO().IniFilename = nullptr;
     ImGui::ClearIniSettings();
@@ -155,6 +167,49 @@ void App::save_settings() {
     project_ = std::move(updated);
     window_.title(project_->name + " - Seed Editor");
     log(Level::info, "Saved project settings.");
+}
+
+bool App::dirty() const {
+    return project_ && (edited_name_ != project_->name || assets_.dirty());
+}
+
+bool App::save_all() {
+    if (!project_) return true;
+    if (edited_name_ != project_->name) save_settings();
+    return edited_name_ == project_->name && assets_.save();
+}
+
+void App::leave(std::function<void()> then) {
+    if (!dirty()) return later(std::move(then));
+    after_prompt_ = std::move(then);
+    prompt_ = true;
+}
+
+void App::unsaved_popup() {
+    if (prompt_) {
+        ImGui::OpenPopup("Unsaved changes");
+        prompt_ = false;
+    }
+    if (!ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::TextUnformatted("Save changes to this project before continuing?");
+    ImGui::Dummy({0, 6});
+    if (ImGui::Button("Save", {110, 0})) {
+        if (save_all()) later(std::move(after_prompt_));
+        ImGui::CloseCurrentPopup(); // On failure the console says why and nothing else happens.
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Don't Save", {110, 0})) {
+        assets_.revert();
+        edited_name_ = project_->name;
+        later(std::move(after_prompt_));
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", {110, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        after_prompt_ = nullptr;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void App::refresh_files() {
@@ -205,7 +260,10 @@ int App::run() {
                 calm_frames_ = 0;
         }
         window_.poll(input);
-        if (input.quit) quit_ = true;
+        if (input.quit) {
+            input.quit = false;
+            leave([this] { quit_ = true; });
+        }
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
@@ -368,8 +426,10 @@ void App::workspace() {
     if (show_project_) project_panel();
     if (show_console_) console_panel();
     if (show_settings_) settings_panel();
+    assets_.draw();
     about_popup();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal)) save_settings();
+    unsaved_popup();
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal)) save_all();
 }
 
 void App::build_default_layout(unsigned dockspace) {
@@ -383,8 +443,12 @@ void App::build_default_layout(unsigned dockspace) {
     ImGui::DockBuilderDockWindow(project_window, left);
     ImGui::DockBuilderDockWindow(settings_window, right);
     ImGui::DockBuilderDockWindow(console_window, bottom);
+    // The centre holds the asset panels as tabs until the scene view arrives.
+    for (const char* id : AssetPanels::window_ids)
+        ImGui::DockBuilderDockWindow(id, center);
     ImGui::DockBuilderFinish(dockspace);
     show_project_ = show_console_ = show_settings_ = true;
+    assets_.show_materials = assets_.show_input = assets_.show_sounds = assets_.show_particles = true;
 }
 
 void App::menu_bar() {
@@ -395,17 +459,27 @@ void App::menu_bar() {
             if (const auto chosen =
                     choose_folder("Choose a Seed project folder", project_->root.parent_path()))
                 later([this, path = *chosen] { open(path); });
-        if (ImGui::MenuItem("Save Project Settings", "Cmd+S")) save_settings();
+        if (ImGui::MenuItem("Save", "Cmd+S", false, dirty())) save_all();
+        if (ImGui::MenuItem("Revert Unsaved Changes", nullptr, false, dirty())) {
+            assets_.revert();
+            edited_name_ = project_->name;
+            log(Level::info, "Reverted unsaved changes.");
+        }
         if (ImGui::MenuItem("Show Project in Finder")) open_with_system(project_->root);
         ImGui::Separator();
         if (ImGui::MenuItem("Close Project")) close = true;
-        if (ImGui::MenuItem("Quit", "Cmd+Q")) quit_ = true;
+        if (ImGui::MenuItem("Quit", "Cmd+Q")) leave([this] { quit_ = true; });
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Window")) {
         ImGui::MenuItem(project_window, nullptr, &show_project_);
         ImGui::MenuItem(console_window, nullptr, &show_console_);
         ImGui::MenuItem(settings_window, nullptr, &show_settings_);
+        ImGui::Separator();
+        ImGui::MenuItem("Materials", nullptr, &assets_.show_materials);
+        ImGui::MenuItem("Input", nullptr, &assets_.show_input);
+        ImGui::MenuItem("Sounds", nullptr, &assets_.show_sounds);
+        ImGui::MenuItem("Particles", nullptr, &assets_.show_particles);
         ImGui::Separator();
         if (ImGui::MenuItem("Reset Layout")) reset_layout_ = true;
         ImGui::EndMenu();
@@ -415,7 +489,7 @@ void App::menu_bar() {
         ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
-    if (close) later([this] { close_project(); });
+    if (close) leave([this] { close_project(); });
 }
 
 void App::project_panel() {

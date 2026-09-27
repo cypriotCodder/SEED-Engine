@@ -78,7 +78,10 @@ public:
     Audio(const Audio&) = delete;
     Audio& operator=(const Audio&) = delete;
     void play(SoundId id) {
-        const auto& sound = sounds_[id]; // Validates the ID even when audio is off.
+        play(sounds_[id]); // Validates the ID even when audio is off.
+    }
+    // Plays a sound that need not be registered, e.g. one being edited.
+    void play(const SoundDesc& sound) {
         if (!device_) return;
         const auto write = write_.load(std::memory_order_relaxed), next = (write + 1) % queue_.size();
         if (next == read_.load(std::memory_order_acquire)) return;

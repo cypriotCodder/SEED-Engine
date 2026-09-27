@@ -8,6 +8,7 @@
 #include "platform/actions.hpp"
 #include "platform/audio.hpp"
 #include "platform/window.hpp"
+#include "project/assets.hpp"
 #include "render/gpu_timer.hpp"
 #include "render/renderer.hpp"
 #include "world/world.hpp"
@@ -55,6 +56,10 @@ struct Game {
     const char* id{};         // Stable game identifier recorded in saves; never change it once saves exist.
     const char* title{};      // Window title prefix; the draw-call count is appended.
     const char* asset_pack{}; // Archive file name beside the executable; optional.
+    // A project's assets/ folder (materials, actions, sounds, particle styles made in the editor),
+    // relative to the executable unless absolute. Registered before the game's own callbacks run,
+    // so those callbacks can add more. Optional.
+    const char* project_assets{};
     std::uint64_t default_seed{};
     const char* default_save{};
     const char* usage{};    // Game options, appended to the usage message.
@@ -110,6 +115,7 @@ public:
 
 private:
     std::unique_ptr<PackStream> assets_;
+    Assets project_assets_; // Registries point at its names, so it is declared before them.
 
 public:
     Materials materials;

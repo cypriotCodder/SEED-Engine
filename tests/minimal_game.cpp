@@ -1,6 +1,7 @@
 // The smallest complete game, used to prove the engine is usable without the demo: it links only
-// seed_engine, ships no assets, and generates, edits, streams, saves and reloads a world, including
-// a saved entity with a game component.
+// seed_engine, reads its materials from a project assets folder made the way the editor writes it,
+// and generates, edits, streams, saves and reloads a world, including a saved entity with a game
+// component.
 #include "app/app.hpp"
 #include "physics/character.hpp"
 #include <cstdio>
@@ -9,6 +10,7 @@
 #include <string>
 
 namespace {
+// IDs follow the order of minimal_game_assets/materials.json; setup() checks they still match.
 enum : seed::MaterialId { meadow, pond };
 constexpr std::uint8_t flood = 1;
 
@@ -17,11 +19,6 @@ struct Beacon {
     std::uint8_t level{};
 };
 constexpr seed::WorldPosition beacon_at{{}, {8.5F, 4.5F}};
-
-void materials(void*, seed::Materials& registry) {
-    registry.add({"meadow", {90, 140, 70}});
-    registry.add({"pond", {30, 80, 120}, seed::Pattern::water});
-}
 
 // Flat meadow with a pond stripe two tiles wide at x = 20 in every chunk; pond tiles block movement.
 void terrain(void*, std::uint64_t, seed::ChunkCoord, seed::Chunk& chunk) {
@@ -57,6 +54,8 @@ const Beacon* beacon(seed::Engine& engine, seed::WorldPosition* position = nullp
 }
 
 seed::Entity setup(void*, seed::Engine& engine, seed::WorldPosition spawn) {
+    if (engine.materials.find("meadow") != meadow || engine.materials.find("pond") != pond)
+        throw std::runtime_error("materials.json no longer matches the game's material IDs");
     engine.scene.add_component<Beacon>();
     return engine.scene.create({spawn, spawn, 0}, {meadow, {0.5F, 0.5F}});
 }
@@ -136,7 +135,7 @@ int main(int argc, char** argv) {
     game.world.terrain = terrain;
     game.world.edit_bits = flood;
     game.world.apply_edit = apply_edit;
-    game.materials = materials;
+    game.project_assets = "minimal_game_assets";
     game.save_entity = save_entity;
     game.load_entity = load_entity;
     game.setup = setup;

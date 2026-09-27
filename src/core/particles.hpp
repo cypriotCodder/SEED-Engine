@@ -2,6 +2,8 @@
 #include "core/memory.hpp"
 #include "render/renderer.hpp"
 #include "world/noise.hpp"
+#include <string>
+#include <string_view>
 
 namespace seed {
 using ParticleStyleId = std::uint8_t;
@@ -9,6 +11,7 @@ using ParticleStyleId = std::uint8_t;
 // How one kind of burst looks and moves. Particles fly out in random directions, slow down, spin
 // and shrink to nothing over their life.
 struct ParticleStyle {
+    const char* name{}; // Unique; must outlive the registry (a string literal is typical).
     MaterialId material{};
     unsigned count{12};   // Particles per burst.
     float speed{1};       // Slowest launch speed, units per second.
@@ -32,12 +35,21 @@ class Particles final {
 public:
     static constexpr std::size_t style_capacity = 32;
     ParticleStyleId add_style(const ParticleStyle& style) {
+        if (!style.name || !*style.name) throw std::invalid_argument("A particle style needs a name");
+        for (std::size_t i = 0; i < style_count_; ++i)
+            if (std::string_view(styles_[i].name) == style.name)
+                throw std::invalid_argument(std::string("Duplicate particle style: ") + style.name);
         if (!style.count || style.count > 512 || !(style.life > 0) || !(style.size > 0) || style.speed < 0 ||
             style.speed_range < 0 || style.drag < 0 || style.drag > 1)
-            throw std::invalid_argument("Particle style out of range");
+            throw std::invalid_argument(std::string("Particle style out of range: ") + style.name);
         if (style_count_ == style_capacity) throw std::length_error("Too many particle styles");
         styles_[style_count_] = style;
         return static_cast<ParticleStyleId>(style_count_++);
+    }
+    ParticleStyleId find_style(std::string_view name) const {
+        for (std::size_t i = 0; i < style_count_; ++i)
+            if (styles_[i].name == name) return static_cast<ParticleStyleId>(i);
+        throw std::out_of_range("Unknown particle style: " + std::string(name));
     }
     // Emits one burst; particles beyond the pool's 512 slots are dropped.
     void burst(WorldPosition origin, ParticleStyleId id) {
