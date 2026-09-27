@@ -6,7 +6,7 @@ The local macOS build and OpenGL demonstrations have been exercised. Windows/Lin
 
 ## Build and run
 
-Use CMake 3.24+ and a C++20 compiler. GCC/Clang compile project code with `-Wall -Wextra -Wpedantic -Werror`; MSVC uses `/W4 /WX`. SDL2 2.30.11 and LZ4 1.10.0 are fetched with pinned SHA-256 checksums. On Linux, the SDL video backend also needs X11/Wayland development libraries and an OpenGL driver. Rendering requires OpenGL 4.1 and BC3/S3TC texture support.
+Use CMake 3.24+ and a C++20 compiler. GCC/Clang compile project code with `-Wall -Wextra -Wpedantic -Werror`; MSVC uses `/W4 /WX`. SDL2 2.30.11, LZ4 1.10.0 and Dear ImGui 1.92.9b (docking release, used only by the editor) are fetched with pinned SHA-256 checksums. On Linux, the SDL video backend also needs X11/Wayland development libraries and an OpenGL driver. Rendering requires OpenGL 4.1 and BC3/S3TC texture support.
 
 ```sh
 cmake --preset release
@@ -21,6 +21,16 @@ This workspace also contains a project-local CMake installation and downloaded d
 
 Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project sources; `sh tools/format.sh --check` reports unformatted files without editing them.
 
+## Seed Editor
+
+`seed_editor` (under `editor/`) is the application for building games, separate from the games themselves. It opens on a hub where you create a project or open a recent one. A project is a folder holding `project.seed.json` plus `scenes/`, `assets/` and `scripts/`; every file the editor writes is JSON text, so projects work well in git. The open project shows in a dockable workspace with a file browser, a console and project settings. The layout is saved per project in `.seed/`, which the project's `.gitignore` excludes.
+
+```sh
+./build/release/editor/seed_editor
+```
+
+The editor is at its first step. Scene editing, world authoring, play mode, Lua gameplay scripts and exporting a standalone game are the planned next steps; until they land, games are still written in C++ as described below. `-DSEED_BUILD_EDITOR=OFF` skips building it.
+
 ## Making a new game
 
 A game is an executable that links `seed_engine` and hands `seed::run` a `seed::Game`: a struct of callbacks plus a context pointer. At minimum it provides:
@@ -31,8 +41,6 @@ A game is an executable that links `seed_engine` and hands `seed::run` a `seed::
 - `setup`: creates the game's entities and returns the one the camera and streaming follow
 
 It then adds the callbacks it needs: `step` for movement, `act` for pointer input, `render` to draw, and `shutdown` for end-of-run checks. Entities made with `Engine::create_saved` are stored in the file of the chunk they stand in; the engine keeps their transform and visual, and the game's `save_entity`/`load_entity` pair writes and reads its other components. [tests/minimal_game.cpp](tests/minimal_game.cpp) is a complete game in about 150 lines, and `games/demo/` is a fuller one. [Architecture](docs/architecture.md) describes the engine/game boundary and lists what the engine still assumes about a game.
-
-Every game gets the editor: F1 opens Dear ImGui panels over the running game showing frame time, draw calls, streaming, physics, entity and save state. A game adds its own panels through `Game::editor`. Input the editor is using (a click on a panel, typing in a field) does not reach the game.
 
 Add a game as a subdirectory with its own `CMakeLists.txt`, as `games/demo/` does. `-DSEED_BUILD_DEMO=OFF` builds the engine and its tests without the demo.
 
@@ -48,7 +56,6 @@ Add a game as a subdirectory with its own `CMakeLists.txt`, as `games/demo/` doe
 | F5 | Commit a checkpoint now |
 | Escape / window close | Commit a checkpoint and quit |
 | F12 | Write a frame when `--screenshot FILE.ppm` was supplied |
-| F1 | Open or close the editor (`--editor` starts with it open) |
 
 The four stone piers support the generated timber platform. Removing all supports makes the remaining pieces fall to ground level. Ground-plane contacts use a spatial hash and oriented-box SAT; vertical support/gravity are a separate top-down model. New blocks are loose ground-level bodies, not an editor or a complete construction game.
 

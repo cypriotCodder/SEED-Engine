@@ -3,7 +3,6 @@
 #include "core/metrics.hpp"
 #include "core/particles.hpp"
 #include "core/scene.hpp"
-#include "editor/editor.hpp"
 #include "io/checkpoint.hpp"
 #include "physics/physics.hpp"
 #include "platform/actions.hpp"
@@ -29,7 +28,6 @@ struct AppOptions {
     const char* benchmark{};       // JSON report path; implies a fixed, input-free run.
     unsigned measured_frames{600}; // Benchmark frames after warmup.
     bool stream_workload{};        // Benchmark route that crosses chunk unload boundaries.
-    bool editor{};                 // Start with the editor open.
     static constexpr unsigned warmup_frames = 60;
 };
 
@@ -88,8 +86,6 @@ struct Game {
     void (*save_entity)(void*, Engine&, Entity, Bytes&){};
     void (*load_entity)(void*, Engine&, Entity, Reader&){};
     void (*shutdown)(void*, Engine&){}; // After the final checkpoint.
-    // The game's own editor panels, drawn with Dear ImGui while the editor is open. Optional.
-    void (*editor)(void*, Engine&){};
 };
 
 // The running engine. Games reach every subsystem through these members.
@@ -119,7 +115,6 @@ public:
     Materials materials;
     Window window;
     Renderer renderer;
-    Editor editor;
     GpuTimer gpu;
     Scene scene;
     Checkpoint checkpoint;

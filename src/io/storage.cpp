@@ -87,26 +87,47 @@ void write_blob(const std::filesystem::path& path, std::span<const std::uint8_t>
     header.u32(static_cast<std::uint32_t>(bytes.size()));
     header.u32(static_cast<std::uint32_t>(count));
     header.u32(crc32(bytes));
+    std::vector<std::uint8_t> file(header.data);
+    file.insert(file.end(), compressed.begin(), compressed.begin() + count);
+    replace_file(path, file);
+}
+
+void replace_file(const std::filesystem::path& path, std::span<const std::uint8_t> bytes) {
     auto temporary = path;
     temporary += ".tmp";
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        output.write(reinterpret_cast<const char*>(header.data.data()),
-                     static_cast<std::streamsize>(header.data.size()));
-        output.write(compressed.data(), count);
+        output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         output.flush();
-        if (!output) throw std::runtime_error("Cannot write compressed file: " + temporary.string());
+        if (!output) throw std::runtime_error("Cannot write file: " + temporary.string());
         output.close();
-        if (!output) throw std::runtime_error("Cannot close compressed file");
+        if (!output) throw std::runtime_error("Cannot close file: " + temporary.string());
     }
     sync_file(temporary);
 #ifdef _WIN32
     if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-        throw std::runtime_error("Cannot replace compressed file");
+        throw std::runtime_error("Cannot replace file: " + path.string());
 #else
     std::filesystem::rename(temporary, path);
     const auto parent = path.has_parent_path() ? path.parent_path() : std::filesystem::path(".");
     sync_file(parent);
 #endif
+}
+
+void write_text(const std::filesystem::path& path, std::string_view text) {
+    replace_file(path, {reinterpret_cast<const std::uint8_t*>(text.data()), text.size()});
+}
+
+std::string read_text(const std::filesystem::path& path, std::size_t limit) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("Cannot open " + path.string());
+    std::string text;
+    char buffer[4096];
+    while (input.read(buffer, sizeof(buffer)) || input.gcount() > 0) {
+        text.append(buffer, static_cast<std::size_t>(input.gcount()));
+        if (text.size() > limit) throw std::runtime_error("File too large: " + path.string());
+    }
+    if (input.bad()) throw std::runtime_error("Cannot read " + path.string());
+    return text;
 }
 } // namespace seed
