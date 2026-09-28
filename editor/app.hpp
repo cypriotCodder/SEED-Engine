@@ -6,6 +6,7 @@
 #include "play.hpp"
 #include "project.hpp"
 #include "scene_editor.hpp"
+#include "ui_test.hpp"
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -22,7 +23,8 @@ struct Options {
     std::filesystem::path create_parent; // With create_name: create this project at startup.
     std::string create_name;
     std::filesystem::path preferences; // Overrides the per-user preferences folder.
-    bool play{}; // Press Play once the project opens; with smoke, wait for the game to finish.
+    bool play{};    // Press Play once the project opens; with smoke, wait for the game to finish.
+    bool ui_test{}; // Drive the opened project's Scene view with scripted input and check it.
     std::filesystem::path export_to; // Export the opened project here (replacing), then carry on.
 };
 
@@ -112,6 +114,7 @@ private:
     AssetPanels assets_;
     SceneEditor scene_;
     PlaySession play_;
+    std::unique_ptr<UiTest> ui_test_;
     std::filesystem::path pending_export_; // Waiting for the user to allow replacing an app.
     bool export_failed_{};
     // What undo restores: every edit to the project's assets, the open scene and its settings.

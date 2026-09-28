@@ -50,6 +50,19 @@ void round_trip(const fs::path& root) {
     check(!loaded.entities[2].visual && !loaded.entities[2].light, "Component-free entities stay empty");
 }
 
+// Editor-only flags round trip, and are left out of the file when unset.
+void editor_flags() {
+    seed::SceneEntity plain;
+    plain.name = "Plain";
+    check(seed::to_json(seed::entity_json(plain)).find("editor") == std::string::npos,
+          "No editor block when unset");
+    auto flagged = plain;
+    flagged.hidden = true;
+    flagged.locked = true;
+    const auto back = seed::parse_entity(seed::entity_json(flagged));
+    check(back.hidden && back.locked && back == flagged, "Hidden and locked round trip");
+}
+
 void canonical() {
     // Offsets outside [0, 32) move into the neighbouring chunk.
     const auto scene = seed::parse_scene(seed::parse_json(
@@ -90,6 +103,7 @@ int main(int argc, char** argv) {
         fs::remove_all(argv[1]);
         round_trip(argv[1]);
         canonical();
+        editor_flags();
         problems();
         malformed();
         std::cout << "Scene file checks passed.\n";

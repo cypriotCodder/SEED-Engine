@@ -65,41 +65,87 @@ std::string SceneFile::problems(const Assets& assets) const {
     return result;
 }
 
+Json entity_json(const SceneEntity& e) {
+    auto entity = Json::object();
+    entity.set("name", e.name);
+    auto chunk = Json::array();
+    chunk.push(e.position.chunk.x);
+    chunk.push(e.position.chunk.y);
+    entity.set("chunk", chunk);
+    entity.set("position", pair(e.position.local.x, e.position.local.y));
+    entity.set("angle", json_float(e.angle));
+    if (e.visual) {
+        auto visual = Json::object();
+        visual.set("material", e.visual->material);
+        visual.set("size", pair(e.visual->size.x, e.visual->size.y));
+        entity.set("visual", visual);
+    }
+    if (e.light) {
+        auto light = Json::object();
+        auto color = Json::array();
+        for (const float c : e.light->color)
+            color.push(json_float(c));
+        light.set("color", color);
+        light.set("radius", json_float(e.light->radius));
+        light.set("intensity", json_float(e.light->intensity));
+        light.set("height", json_float(e.light->height));
+        entity.set("light", light);
+    }
+    if (!e.script.empty()) entity.set("script", e.script);
+    if (e.hidden || e.locked) {
+        auto editor = Json::object();
+        if (e.hidden) editor.set("hidden", true);
+        if (e.locked) editor.set("locked", true);
+        entity.set("editor", editor);
+    }
+    return entity;
+}
+
 Json scene_json(const SceneFile& scene) {
     auto entities = Json::array();
-    for (const auto& e : scene.entities) {
-        auto entity = Json::object();
-        entity.set("name", e.name);
-        auto chunk = Json::array();
-        chunk.push(e.position.chunk.x);
-        chunk.push(e.position.chunk.y);
-        entity.set("chunk", chunk);
-        entity.set("position", pair(e.position.local.x, e.position.local.y));
-        entity.set("angle", json_float(e.angle));
-        if (e.visual) {
-            auto visual = Json::object();
-            visual.set("material", e.visual->material);
-            visual.set("size", pair(e.visual->size.x, e.visual->size.y));
-            entity.set("visual", visual);
-        }
-        if (e.light) {
-            auto light = Json::object();
-            auto color = Json::array();
-            for (const float c : e.light->color)
-                color.push(json_float(c));
-            light.set("color", color);
-            light.set("radius", json_float(e.light->radius));
-            light.set("intensity", json_float(e.light->intensity));
-            light.set("height", json_float(e.light->height));
-            entity.set("light", light);
-        }
-        if (!e.script.empty()) entity.set("script", e.script);
-        entities.push(entity);
-    }
+    for (const auto& e : scene.entities)
+        entities.push(entity_json(e));
     auto file = Json::object();
     file.set("format", scene_format);
     file.set("entities", entities);
     return file;
+}
+
+SceneEntity parse_entity(const Json& json) {
+    SceneEntity e;
+    e.name = json.at("name").as_string();
+    const auto& chunk = json.at("chunk").items();
+    if (chunk.size() != 2) throw std::runtime_error("chunk needs two whole numbers");
+    // Chunk coordinates stay within the exactly representable range of a double.
+    e.position.chunk = {chunk[0].as_int(), chunk[1].as_int()};
+    const auto local = read_pair(json.at("position"));
+    e.position.local = {local[0], local[1]};
+    e.position.move({}); // Canonicalizes offsets outside [0, chunk_side).
+    if (const auto* angle = json.find("angle")) e.angle = static_cast<float>(angle->as_number());
+    if (const auto* visual = json.find("visual")) {
+        SceneVisual v;
+        v.material = visual->at("material").as_string();
+        const auto size = read_pair(visual->at("size"));
+        v.size = {size[0], size[1]};
+        e.visual = v;
+    }
+    if (const auto* light = json.find("light")) {
+        SceneLight l;
+        const auto& color = light->at("color").items();
+        if (color.size() != 3) throw std::runtime_error("color needs three numbers");
+        for (std::size_t c = 0; c < 3; ++c)
+            l.color[c] = static_cast<float>(color[c].as_number());
+        l.radius = static_cast<float>(light->at("radius").as_number());
+        l.intensity = static_cast<float>(light->at("intensity").as_number());
+        l.height = static_cast<float>(light->at("height").as_number());
+        e.light = l;
+    }
+    if (const auto* script = json.find("script")) e.script = script->as_string();
+    if (const auto* editor = json.find("editor")) {
+        if (const auto* hidden = editor->find("hidden")) e.hidden = hidden->as_bool();
+        if (const auto* locked = editor->find("locked")) e.locked = locked->as_bool();
+    }
+    return e;
 }
 
 SceneFile parse_scene(const Json& json) {
@@ -110,36 +156,7 @@ SceneFile parse_scene(const Json& json) {
     if (list.size() > SceneFile::capacity) throw std::runtime_error("More than 4096 entities");
     for (const auto& item : list)
         try {
-            SceneEntity e;
-            e.name = item.at("name").as_string();
-            const auto& chunk = item.at("chunk").items();
-            if (chunk.size() != 2) throw std::runtime_error("chunk needs two whole numbers");
-            // Chunk coordinates stay within the exactly representable range of a double.
-            e.position.chunk = {chunk[0].as_int(), chunk[1].as_int()};
-            const auto local = read_pair(item.at("position"));
-            e.position.local = {local[0], local[1]};
-            e.position.move({}); // Canonicalizes offsets outside [0, chunk_side).
-            if (const auto* angle = item.find("angle")) e.angle = static_cast<float>(angle->as_number());
-            if (const auto* visual = item.find("visual")) {
-                SceneVisual v;
-                v.material = visual->at("material").as_string();
-                const auto size = read_pair(visual->at("size"));
-                v.size = {size[0], size[1]};
-                e.visual = v;
-            }
-            if (const auto* light = item.find("light")) {
-                SceneLight l;
-                const auto& color = light->at("color").items();
-                if (color.size() != 3) throw std::runtime_error("color needs three numbers");
-                for (std::size_t c = 0; c < 3; ++c)
-                    l.color[c] = static_cast<float>(color[c].as_number());
-                l.radius = static_cast<float>(light->at("radius").as_number());
-                l.intensity = static_cast<float>(light->at("intensity").as_number());
-                l.height = static_cast<float>(light->at("height").as_number());
-                e.light = l;
-            }
-            if (const auto* script = item.find("script")) e.script = script->as_string();
-            scene.entities.push_back(std::move(e));
+            scene.entities.push_back(parse_entity(item));
         } catch (const std::exception& error) {
             throw std::runtime_error("Entity " + std::to_string(scene.entities.size() + 1) + ": " +
                                      error.what());

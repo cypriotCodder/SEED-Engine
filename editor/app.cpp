@@ -2,6 +2,7 @@
 #include "folder_dialog.hpp"
 #include <SDL_opengl.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
@@ -20,6 +21,7 @@ constexpr const char* console_window = "Console";
 constexpr const char* settings_window = "Project Settings";
 constexpr std::size_t file_list_limit = 5000;
 constexpr std::size_t log_limit = 2000;
+constexpr int layout_version = 2; // Bump when panels are added or removed.
 
 fs::path preferences_directory(const fs::path& override_path) {
     if (!override_path.empty()) return override_path;
@@ -99,7 +101,14 @@ App::App(Options options)
     }
     // A key or click recording an input binding is not also delivered to ImGui.
     window_.observe(this, [](void* self, const SDL_Event& event) {
-        if (!static_cast<App*>(self)->assets_.capture(event)) ImGui_ImplSDL2_ProcessEvent(&event);
+        auto& app = *static_cast<App*>(self);
+        // A UI test owns the input: real mouse, keyboard and focus changes would disturb it.
+        if (app.options_.ui_test &&
+            (event.type == SDL_MOUSEMOTION || event.type == SDL_MOUSEBUTTONDOWN ||
+             event.type == SDL_MOUSEBUTTONUP || event.type == SDL_MOUSEWHEEL || event.type == SDL_KEYDOWN ||
+             event.type == SDL_KEYUP || event.type == SDL_TEXTINPUT || event.type == SDL_WINDOWEVENT))
+            return;
+        if (!app.assets_.capture(event)) ImGui_ImplSDL2_ProcessEvent(&event);
     });
     log(Level::info, "Seed Editor started.");
 }
@@ -113,6 +122,8 @@ App::~App() {
 }
 
 void App::log(Level level, std::string text) {
+    // Automated runs have no one reading the Console, so they print it too.
+    if (options_.smoke) std::fprintf(level == Level::info ? stdout : stderr, "%s\n", text.c_str());
     if (log_.size() == log_limit) log_.erase(log_.begin());
     log_.push_back({level, clock_time(), std::move(text)});
     log_scroll_ = true;
@@ -136,7 +147,10 @@ void App::open(const fs::path& path) {
         log(Level::error, std::string("Could not load the main scene: ") + error.what());
         scene_.unload();
     }
-    layout_file_ = (user_state_directory(*project_) / "layout.ini").string();
+    // The layout file is named for the panel set it was made with: when panels are added, older
+    // layouts would leave the new ones floating, so they give way to the new default instead.
+    layout_file_ =
+        (user_state_directory(*project_) / ("layout-" + std::to_string(layout_version) + ".ini")).string();
     reset_layout_ = !fs::exists(layout_file_);
     if (!reset_layout_) ImGui::LoadIniSettingsFromDisk(layout_file_.c_str());
     ImGui::GetIO().IniFilename = layout_file_.c_str();
@@ -374,6 +388,10 @@ int App::run() {
         if (!options_.export_to.empty() && !export_app(options_.export_to, true) && options_.smoke)
             throw std::runtime_error("Export failed");
         if (options_.play) start_play();
+        if (options_.ui_test)
+            ui_test_ = std::make_unique<UiTest>(scene_, [this](bool error, const std::string& text) {
+                log(error ? Level::error : Level::info, text);
+            });
     } catch (const std::exception& error) {
         log(Level::error, error.what());
         if (options_.smoke) throw;
@@ -397,6 +415,7 @@ int App::run() {
         }
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
+        if (ui_test_) ui_test_->frame(); // After the backend's input, so scripted input wins.
         ImGui::NewFrame();
         frame();
         ImGui::Render();
@@ -408,7 +427,8 @@ int App::run() {
         ++frames_;
         if (options_.smoke && frames_ == 60 && !options_.screenshot.empty()) screenshot(options_.screenshot);
         // A smoke run with --play lasts until the game it started has finished.
-        if (options_.smoke && frames_ >= 60 && !play_.running()) quit_ = true;
+        if (options_.smoke && frames_ >= 60 && !play_.running() && (!ui_test_ || ui_test_->finished()))
+            quit_ = true;
         if (options_.smoke && play_.running()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         window_.present();
         if (pending_) {
@@ -424,6 +444,7 @@ int App::run() {
         }
         if (!options_.smoke) std::this_thread::sleep_until(frame_start + std::chrono::microseconds(16667));
     }
+    if (ui_test_ && !ui_test_->passed()) return 1;
     return options_.play && play_.last_exit() != 0 ? 1 : 0;
 }
 

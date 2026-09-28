@@ -28,6 +28,9 @@ struct SceneEntity {
     std::optional<SceneVisual> visual;
     std::optional<SceneLight> light;
     std::string script; // A file in the project's scripts/ folder, such as "player.lua"; empty for none.
+    // Editor-only: hidden entities are not drawn in the Scene view; locked ones cannot be picked
+    // there. Games ignore both.
+    bool hidden{}, locked{};
     bool operator==(const SceneEntity&) const = default;
 };
 // Whether `name` is a plain script file name: letters, digits, '_', '-' and '.', ending in ".lua".
@@ -44,6 +47,8 @@ struct SceneFile {
 };
 
 Json scene_json(const SceneFile& scene);
+Json entity_json(const SceneEntity& entity);
+SceneEntity parse_entity(const Json& json);
 SceneFile parse_scene(const Json& json);
 SceneFile load_scene(const std::filesystem::path& file);
 void save_scene(const std::filesystem::path& file, const SceneFile& scene);
