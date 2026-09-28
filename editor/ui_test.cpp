@@ -225,6 +225,10 @@ void UiTest::key(ImGuiKey key, bool command, bool shift) {
 
 void UiTest::frame() {
     if (finished()) return;
+    // ImGui's key repeat and double-click detection run on time. A stalled frame (macOS checks a
+    // freshly built app on first launch) would otherwise repeat a held key, so every test frame
+    // counts as exactly 1/60 s and the result depends only on frame counts.
+    ImGui::GetIO().DeltaTime = 1.0F / 60;
     if (waited_ < steps_[next_].wait)
         ++waited_;
     else {
