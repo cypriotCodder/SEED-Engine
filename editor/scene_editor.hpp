@@ -46,6 +46,13 @@ public:
     const std::vector<int>& selection() const { return selection_; }
     // Where a world position appears in the Scene view, in ImGui's screen coordinates.
     ImVec2 screen_of(WorldPosition position) const { return to_screen(position); }
+    // Where the Hierarchy drew things last frame, for automated UI tests: each entity's row and its
+    // Show and Lock checkboxes (x = -1 when filtered out), and the search box.
+    struct Row {
+        ImVec2 name{-1, -1}, show{-1, -1}, lock{-1, -1};
+    };
+    const std::vector<Row>& rows() const { return rows_; }
+    ImVec2 search_box() const { return search_box_; }
 
     // Draws the panels. Call once per frame between ImGui::NewFrame and ImGui::Render.
     void draw(const Assets& assets);
@@ -74,6 +81,9 @@ private:
     void hierarchy();
     void inspector(const Assets& assets);
     void scene_menu();
+    // Moves the entities in `moving` (sorted indices) to just before `target` (size() for the end),
+    // keeping their order and the selection.
+    void reorder(std::vector<int> moving, int target);
     ImVec2 to_screen(WorldPosition position) const;
     WorldPosition to_world(ImVec2 screen) const;
     int pick(ImVec2 screen) const; // Topmost pickable entity under a screen point, or -1.
@@ -157,6 +167,12 @@ private:
     Scripts scripts_;
     std::string new_script_;
     std::string new_scene_;
+    std::string search_;
+    int renaming_{-1}; // Entity whose name is being edited in the Hierarchy, or -1.
+    std::string rename_text_;
+    bool rename_focus_{};
+    std::vector<Row> rows_;
+    ImVec2 search_box_{-1, -1};
     int focus_{};
 };
 } // namespace seed::editor

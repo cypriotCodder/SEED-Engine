@@ -72,6 +72,63 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
         [this] { check(scene_.selection() == std::vector<int>{0, 1}, "Shift+click adds to the selection"); });
     key(ImGuiKey_Escape);
     add(2, [this] { check(scene_.selection().empty(), "Escape clears the selection"); });
+
+    // The Hierarchy. Rows are Player, Campfire, Crate.
+    click([this] { return row(2, 0); });
+    add(2,
+        [this] { check(scene_.selection() == std::vector<int>{2}, "clicking a Hierarchy row selects it"); });
+    key(ImGuiKey_Enter); // Rename in place.
+    add(3, [] {});
+    type("Box");
+    key(ImGuiKey_Enter);
+    add(3, [this] { check(scene_.scene().entities[2].name == "Box", "Return renames in place"); });
+
+    click([this] { return row(2, 1); }); // Hide Box.
+    add(2, [this] { check(scene_.scene().entities[2].hidden, "the Show checkbox hides an entity"); });
+    click([this] { return world_point(-2, -2); });
+    add(2, [this] { check(scene_.selection().empty(), "a hidden entity cannot be clicked in the view"); });
+
+    click([this] { return row(0, 2); }); // Lock Player.
+    click([this] { return at("Player"); });
+    add(2, [this] {
+        check(scene_.scene().entities[0].locked && scene_.selection().empty(),
+              "a locked entity cannot be picked");
+    });
+
+    // Drag Campfire's row onto Player's: Campfire moves to the top.
+    drag([this] { return row(1, 0); }, [this] { return row(0, 0); });
+    add(3, [this] {
+        const auto& e = scene_.scene().entities;
+        check(e[0].name == "Campfire" && e[1].name == "Player" && e[2].name == "Box",
+              "dragging a row reorders the scene");
+    });
+
+    // Search narrows the list.
+    click([this] { return scene_.search_box(); });
+    type("bo");
+    add(3, [this] {
+        const auto& rows = scene_.rows();
+        check(rows.size() == 3 && rows[2].name.x >= 0 && rows[0].name.x < 0 && rows[1].name.x < 0,
+              "search shows only matching entities");
+    });
+}
+
+void UiTest::type(const char* text) {
+    add(1, [=] { ImGui::GetIO().AddInputCharactersUTF8(text); });
+}
+
+ImVec2 UiTest::row(int index, int column) const {
+    const auto& rows = scene_.rows();
+    if (index < 0 || index >= static_cast<int>(rows.size())) return {-1, -1};
+    const auto& r = rows[static_cast<std::size_t>(index)];
+    return column == 0 ? r.name : column == 1 ? r.show : r.lock;
+}
+
+int UiTest::index_of(const std::string& entity) const {
+    const auto& e = scene_.scene().entities;
+    for (int i = 0; i < static_cast<int>(e.size()); ++i)
+        if (e[static_cast<std::size_t>(i)].name == entity) return i;
+    return -1;
 }
 
 void UiTest::check(bool condition, const std::string& what) {
@@ -116,10 +173,21 @@ void UiTest::click(std::function<ImVec2()> where, bool shift) {
 }
 
 void UiTest::drag(std::function<ImVec2()> from, ImVec2 by, bool shift) {
+    drag(
+        from,
+        [from, by] {
+            const auto start = from();
+            return ImVec2{start.x + by.x, start.y + by.y};
+        },
+        shift);
+}
+
+void UiTest::drag(std::function<ImVec2()> from, std::function<ImVec2()> to, bool shift) {
     // Down, then several moves over separate frames so it reads as a drag, then up.
-    auto start = std::make_shared<ImVec2>();
+    auto start = std::make_shared<ImVec2>(), end = std::make_shared<ImVec2>();
     add(1, [=, this] {
         *start = from();
+        *end = to();
         pointer_ = *start;
     });
     add(1, [=] {
@@ -130,7 +198,7 @@ void UiTest::drag(std::function<ImVec2()> from, ImVec2 by, bool shift) {
     for (int i = 1; i <= moves; ++i)
         add(1, [=, this] {
             const float t = static_cast<float>(i) / moves;
-            pointer_ = {start->x + by.x * t, start->y + by.y * t};
+            pointer_ = {start->x + (end->x - start->x) * t, start->y + (end->y - start->y) * t};
         });
     add(1, [=] {
         ImGui::GetIO().AddMouseButtonEvent(0, false);

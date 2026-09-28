@@ -31,8 +31,13 @@ private:
     ImVec2 at(const std::string& entity) const; // Screen position of a named entity.
     ImVec2 world_point(double x, double y) const;
     void click(std::function<ImVec2()> where, bool shift = false);
+    // Drags from one point to another; both are worked out when the drag starts.
+    void drag(std::function<ImVec2()> from, std::function<ImVec2()> to, bool shift = false);
     void drag(std::function<ImVec2()> from, ImVec2 by, bool shift = false);
     void key(ImGuiKey key, bool command = false, bool shift = false);
+    void type(const char* text);
+    ImVec2 row(int index, int column) const; // 0: name, 1: Show, 2: Lock.
+    int index_of(const std::string& entity) const;
     double x_of(const std::string& entity) const;
 
     SceneEditor& scene_;

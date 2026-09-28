@@ -1,9 +1,11 @@
 #include "scene_editor.hpp"
 #include "project.hpp"
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <imgui_stdlib.h>
+#include <optional>
 
 namespace seed::editor {
 namespace {
@@ -867,6 +869,27 @@ void SceneEditor::scene_menu() {
     }
 }
 
+void SceneEditor::reorder(std::vector<int> moving, int target) {
+    std::vector<SceneEntity> moved;
+    for (const int i : moving)
+        moved.push_back(edited_.entities[static_cast<std::size_t>(i)]);
+    // Remove from the back so earlier indices stay valid, counting removals before the target.
+    int before_target = 0;
+    for (auto i = moving.rbegin(); i != moving.rend(); ++i) {
+        edited_.entities.erase(edited_.entities.begin() + *i);
+        if (*i < target) ++before_target;
+    }
+    const int at = target - before_target;
+    edited_.entities.insert(edited_.entities.begin() + at, moved.begin(), moved.end());
+    // Keep the moved entities selected in their new places.
+    const int primary_offset =
+        static_cast<int>(std::find(moving.begin(), moving.end(), primary_) - moving.begin());
+    selection_.clear();
+    for (int k = 0; k < static_cast<int>(moved.size()); ++k)
+        selection_.push_back(at + k);
+    primary_ = primary_offset < static_cast<int>(moved.size()) ? at + primary_offset : selection_.back();
+}
+
 void SceneEditor::hierarchy() {
     if (!ImGui::Begin(hierarchy_id, &show_hierarchy)) {
         ImGui::End();
@@ -880,42 +903,153 @@ void SceneEditor::hierarchy() {
     ImGui::SameLine();
     if (ImGui::SmallButton("Delete")) delete_selection();
     ImGui::EndDisabled();
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##search", "Search", &search_);
+    search_box_ = {(ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2,
+                   (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2};
+    std::string needle = search_;
+    std::transform(needle.begin(), needle.end(), needle.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    const auto matches = [&](const std::string& name) {
+        if (needle.empty()) return true;
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        return lower.find(needle) != std::string::npos;
+    };
+
+    rows_.assign(edited_.entities.size(), {});
+    const auto centre = [] {
+        return ImVec2{(ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2,
+                      (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2};
+    };
     ImGui::BeginChild("entities", {0, 0}, ImGuiChildFlags_Borders);
-    for (int i = 0; i < static_cast<int>(edited_.entities.size()); ++i) {
-        const auto& e = edited_.entities[static_cast<std::size_t>(i)];
-        ImGui::PushID(i);
-        if (ImGui::Selectable(e.name.empty() ? "(unnamed)" : e.name.c_str(), is_selected(i),
-                              ImGuiSelectableFlags_AllowDoubleClick)) {
-            const auto& io = ImGui::GetIO();
-            if (io.KeyCtrl)
-                toggle(i);
-            else if (io.KeyShift && primary_ >= 0) {
-                // A range from the primary selection to here.
-                for (int k = std::min(primary_, i); k <= std::max(primary_, i); ++k)
-                    if (!is_selected(k)) toggle(k);
-                primary_ = i;
-            } else
-                select_only(i);
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) frame_selection();
+    if (ImGui::BeginTable("rows", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Show", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("Lock", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableHeadersRow();
+        std::optional<std::pair<std::vector<int>, int>> move; // Applied after the loop.
+        for (int i = 0; i < static_cast<int>(edited_.entities.size()); ++i) {
+            auto& e = edited_.entities[static_cast<std::size_t>(i)];
+            if (!matches(e.name)) continue;
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (renaming_ == i) {
+                // Return keeps the new name; Escape or clicking elsewhere drops it. On the frame the
+                // field is asked for focus it is not active yet, so that frame never cancels.
+                ImGui::SetNextItemWidth(-1);
+                const bool starting = rename_focus_;
+                if (starting) ImGui::SetKeyboardFocusHere();
+                rename_focus_ = false;
+                if (ImGui::InputText("##rename", &rename_text_,
+                                     ImGuiInputTextFlags_EnterReturnsTrue |
+                                         ImGuiInputTextFlags_AutoSelectAll)) {
+                    if (!rename_text_.empty()) e.name = rename_text_;
+                    renaming_ = -1;
+                } else if (!starting && !ImGui::IsItemActive())
+                    renaming_ = -1;
+                rows_[static_cast<std::size_t>(i)].name = centre();
+            } else {
+                if (e.hidden)
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                if (ImGui::Selectable(e.name.empty() ? "(unnamed)" : e.name.c_str(), is_selected(i),
+                                      ImGuiSelectableFlags_AllowDoubleClick |
+                                          ImGuiSelectableFlags_SpanAllColumns |
+                                          ImGuiSelectableFlags_AllowOverlap)) {
+                    const auto& io = ImGui::GetIO();
+                    if (io.KeyCtrl)
+                        toggle(i);
+                    else if (io.KeyShift && primary_ >= 0) {
+                        // A range from the primary selection to here.
+                        for (int k = std::min(primary_, i); k <= std::max(primary_, i); ++k)
+                            if (!is_selected(k) &&
+                                matches(edited_.entities[static_cast<std::size_t>(k)].name))
+                                toggle(k);
+                        primary_ = i;
+                    } else
+                        select_only(i);
+                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) frame_selection();
+                }
+                if (e.hidden) ImGui::PopStyleColor();
+                rows_[static_cast<std::size_t>(i)].name = centre();
+                // Drag a row onto another to move it (or the whole selection, if it is selected)
+                // before that row. Order is drawing order: later entities draw on top.
+                if (needle.empty() && ImGui::BeginDragDropSource()) {
+                    ImGui::SetDragDropPayload("seed.entity", &i, sizeof i);
+                    const auto count = is_selected(i) ? selection_.size() : 1;
+                    if (count > 1)
+                        ImGui::Text("%zu entities", count);
+                    else
+                        ImGui::TextUnformatted(e.name.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (needle.empty() && ImGui::BeginDragDropTarget()) {
+                    if (const auto* payload = ImGui::AcceptDragDropPayload("seed.entity")) {
+                        const int dragged = *static_cast<const int*>(payload->Data);
+                        move = std::pair{is_selected(dragged) ? selection_ : std::vector<int>{dragged}, i};
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                if (ImGui::BeginPopupContextItem()) {
+                    if (!is_selected(i)) select_only(i);
+                    if (ImGui::MenuItem("Rename", "Return")) {
+                        renaming_ = i;
+                        rename_text_ = e.name;
+                        rename_focus_ = true;
+                    }
+                    if (ImGui::MenuItem("Frame", "F")) frame_selection();
+                    if (ImGui::MenuItem("Copy", "Cmd+C")) copy_selection();
+                    if (ImGui::MenuItem("Duplicate", "Cmd+D")) duplicate_selection();
+                    if (ImGui::MenuItem("Delete", "Del")) delete_selection();
+                    ImGui::EndPopup();
+                }
+            }
+            ImGui::TableNextColumn();
+            bool shown = !e.hidden;
+            if (ImGui::Checkbox("##show", &shown)) {
+                e.hidden = !shown;
+                if (e.hidden && is_selected(i)) toggle(i); // Hidden entities leave the view's selection.
+            }
+            ImGui::SetItemTooltip("Show in the Scene view. The game always shows it.");
+            rows_[static_cast<std::size_t>(i)].show = centre();
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("##lock", &e.locked);
+            ImGui::SetItemTooltip("Locked entities cannot be picked or moved in the Scene view.");
+            rows_[static_cast<std::size_t>(i)].lock = centre();
+            ImGui::PopID();
         }
-        if (ImGui::BeginPopupContextItem()) {
-            if (!is_selected(i)) select_only(i);
-            if (ImGui::MenuItem("Frame", "F")) frame_selection();
-            if (ImGui::MenuItem("Copy", "Cmd+C")) copy_selection();
-            if (ImGui::MenuItem("Duplicate", "Cmd+D")) duplicate_selection();
-            if (ImGui::MenuItem("Delete", "Del")) delete_selection();
-            ImGui::EndPopup();
+        ImGui::EndTable();
+        // Below the last row: drop here to move to the end.
+        if (needle.empty()) {
+            ImGui::InvisibleButton("end", {std::max(1.0F, ImGui::GetContentRegionAvail().x),
+                                           std::max(8.0F, ImGui::GetContentRegionAvail().y)});
+            if (ImGui::BeginDragDropTarget()) {
+                if (const auto* payload = ImGui::AcceptDragDropPayload("seed.entity")) {
+                    const int dragged = *static_cast<const int*>(payload->Data);
+                    move = std::pair{is_selected(dragged) ? selection_ : std::vector<int>{dragged},
+                                     static_cast<int>(edited_.entities.size())};
+                }
+                ImGui::EndDragDropTarget();
+            }
         }
-        ImGui::PopID();
+        if (move) reorder(move->first, move->second);
     }
     if (edited_.entities.empty())
         ImGui::TextDisabled("Empty scene. Press Create, or right-click in the Scene view.");
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::IsAnyItemActive()) {
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::IsAnyItemActive() &&
+        renaming_ < 0) {
         if (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_Backspace)) delete_selection();
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D)) duplicate_selection();
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C)) copy_selection();
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V)) paste();
         if (ImGui::Shortcut(ImGuiKey_F)) frame_selection();
+        if ((ImGui::Shortcut(ImGuiKey_Enter) || ImGui::Shortcut(ImGuiKey_F2)) && primary_ >= 0) {
+            renaming_ = primary_;
+            rename_text_ = edited_.entities[static_cast<std::size_t>(primary_)].name;
+            rename_focus_ = true;
+        }
     }
     ImGui::EndChild();
     ImGui::End();
