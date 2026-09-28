@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <exception>
 #include <string>
@@ -239,6 +240,25 @@ void Engine::draw_entities(const View& view) {
     }
 }
 
+WorldPosition Engine::follow(WorldPosition target, float dt) {
+    // Exactly on the focus unless the game asked for smoothing or a dead zone, or after a jump
+    // too far to glide across.
+    if ((camera_smoothing <= 0 && camera_dead_zone <= 0) || !camera_placed_ ||
+        !nearby(camera_.chunk, target.chunk, 4)) {
+        camera_ = target;
+        camera_placed_ = true;
+        return camera_;
+    }
+    const auto offset = relative(target, camera_);
+    const float distance = std::sqrt(offset.x * offset.x + offset.y * offset.y);
+    if (distance <= camera_dead_zone) return camera_;
+    // Only the part outside the dead zone is followed, eased by the smoothing time.
+    const auto outside = offset * ((distance - camera_dead_zone) / distance);
+    const float share = camera_smoothing > 0 ? 1 - std::exp(-dt / camera_smoothing) : 1;
+    camera_.move(outside * share);
+    return camera_;
+}
+
 void Engine::loop(const Game& game) {
     constexpr unsigned warmup_frames = AppOptions::warmup_frames;
     const bool automated = options.smoke || options.benchmark;
@@ -300,8 +320,9 @@ void Engine::loop(const Game& game) {
             accumulator -= step;
         }
         View view;
-        view.camera = transform.position;
-        view.camera.move(relative(transform.previous, transform.position) * (1 - accumulator / step));
+        auto target = transform.position;
+        target.move(relative(transform.previous, transform.position) * (1 - accumulator / step));
+        view.camera = follow(target, dt);
         view.alpha = accumulator / step;
         window.drawable_size(view.width, view.height);
         window.logical_size(view.logical_width, view.logical_height);
@@ -309,8 +330,8 @@ void Engine::loop(const Game& game) {
             SDL_Delay(16);
             continue;
         }
-        view.zoom = (game.zoom ? game.zoom(game.context, *this) : 40.0F) * static_cast<float>(view.width) /
-                    view.logical_width;
+        view.zoom = (game.zoom ? game.zoom(game.context, *this) : camera_zoom) *
+                    static_cast<float>(view.width) / view.logical_width;
         view.pointer = view.camera;
         view.pointer.move(
             {(static_cast<float>(input.mouse_x) / view.logical_width - 0.5F) * view.width / view.zoom,

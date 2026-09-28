@@ -44,6 +44,8 @@ public:
     // lights and scripts. Without one, spawning a prefab is an error.
     using PrefabSpawner = std::function<Entity(const std::string& name, WorldPosition at, float angle)>;
     void set_prefab_spawner(PrefabSpawner spawner) { spawn_prefab_ = std::move(spawner); }
+    // The entity game.player() returns.
+    void set_player(Entity player) { player_ = player; }
     // Runs pending start() calls, then update(dt) on every live script.
     void update(float dt);
     unsigned errors() const { return errors_; }
@@ -64,6 +66,7 @@ private:
     Engine& engine_;
     ProjectFiles scripts_;
     PrefabSpawner spawn_prefab_;
+    Entity player_{};
     lua_State* lua_{};
     std::size_t memory_{};
     std::vector<Instance> instances_;

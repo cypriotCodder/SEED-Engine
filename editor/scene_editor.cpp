@@ -313,6 +313,50 @@ void SceneEditor::create_at(WorldPosition position) {
     select_only(static_cast<int>(edited_.entities.size()) - 1);
 }
 
+void SceneEditor::mark(const char* name) {
+    controls_[name] = {(ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2,
+                       (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2};
+}
+
+void SceneEditor::make_player(int index) {
+    for (int i = 0; i < static_cast<int>(edited_.entities.size()); ++i) {
+        auto& e = edited_.entities[static_cast<std::size_t>(i)];
+        if (i != index && e.character && e.character->player) {
+            e.character->player.reset();
+            log_(false, "\"" + e.name + "\" is now an NPC; the scene has one player.");
+        }
+    }
+    auto& chosen = edited_.entities[static_cast<std::size_t>(index)];
+    if (!chosen.character) chosen.character = SceneCharacter{};
+    if (!chosen.character->player) chosen.character->player = ScenePlayer{};
+}
+
+void SceneEditor::create_character(WorldPosition position, bool player, const Assets& assets) {
+    if (player)
+        for (int i = 0; i < static_cast<int>(edited_.entities.size()); ++i) {
+            const auto& e = edited_.entities[static_cast<std::size_t>(i)];
+            if (e.character && e.character->player) {
+                select_only(i);
+                frame_selection();
+                return log_(false,
+                            "This scene already has a player, \"" + e.name + "\"; it is now selected.");
+            }
+        }
+    create_at(position);
+    auto& e = edited_.entities.back();
+    int n = 1;
+    const auto taken = [&](const std::string& name) {
+        return std::any_of(edited_.entities.begin(), edited_.entities.end(),
+                           [&](const SceneEntity& other) { return &other != &e && other.name == name; });
+    };
+    e.name = player ? "Player" : "NPC";
+    while (taken(e.name))
+        e.name = (player ? "Player " : "NPC ") + std::to_string(++n);
+    if (!assets.materials.empty()) e.visual = SceneVisual{assets.materials.front().name, {0.6F, 0.6F}};
+    e.character = SceneCharacter{};
+    if (player) make_player(static_cast<int>(edited_.entities.size()) - 1);
+}
+
 void SceneEditor::duplicate_selection() {
     if (selection_.empty()) return;
     if (edited_.entities.size() + selection_.size() > SceneFile::capacity)
@@ -325,6 +369,7 @@ void SceneEditor::duplicate_selection() {
         auto copy = edited_.entities[static_cast<std::size_t>(i)];
         copy.position.move({1, -1});
         copy.hidden = copy.locked = false;
+        if (copy.character) copy.character->player.reset(); // Copies of the player are NPCs.
         edited_.entities.push_back(copy);
         copies.push_back(static_cast<int>(edited_.entities.size()) - 1);
         if (i == primary_) new_primary = copies.back();
@@ -389,6 +434,7 @@ void SceneEditor::paste() {
             e.position.move(from_centre);
         }
         e.hidden = e.locked = false;
+        if (e.character) e.character->player.reset(); // Pasted characters are NPCs.
         edited_.entities.push_back(e);
         selection_.push_back(static_cast<int>(edited_.entities.size()) - 1);
     }
@@ -397,6 +443,7 @@ void SceneEditor::paste() {
 
 void SceneEditor::draw(const Assets& assets) {
     if (!loaded()) return;
+    assets_ = &assets;
     sync(assets);
     clamp_selection();
     if (show_scene)
@@ -658,6 +705,8 @@ void SceneEditor::scene_view() {
     }
     if (ImGui::BeginPopup("view menu")) {
         if (ImGui::MenuItem("Create Entity Here")) create_at(menu_at_);
+        if (ImGui::MenuItem("Create Player Here")) create_character(menu_at_, true, *assets_);
+        if (ImGui::MenuItem("Create NPC Here")) create_character(menu_at_, false, *assets_);
         if (ImGui::MenuItem("Paste", "Cmd+V")) paste();
         if (!selection_.empty()) {
             ImGui::Separator();
@@ -732,6 +781,20 @@ void SceneEditor::overlays(ImDrawList* draw) {
             const ImU32 color = e.light ? rgba(1, 0.8F, 0.4F, 0.9F) : rgba(0.6F, 0.8F, 1, 0.9F);
             draw->AddQuadFilled({centre.x, centre.y - r}, {centre.x + r, centre.y}, {centre.x, centre.y + r},
                                 {centre.x - r, centre.y}, color);
+        }
+        if (e.character) {
+            // The collision box, and for the player what the game camera will show.
+            const auto& c = *e.character;
+            const ImVec2 half{c.collision.x / 2 * zoom_, c.collision.y / 2 * zoom_};
+            draw->AddRect({centre.x - half.x, centre.y - half.y}, {centre.x + half.x, centre.y + half.y},
+                          rgba(0.4F, 0.85F, 1, 0.8F), 0, 1.5F);
+            if (c.player) {
+                const float w = game_view_.x / c.player->zoom / 2 * zoom_,
+                            h = game_view_.y / c.player->zoom / 2 * zoom_;
+                draw->AddRect({centre.x - w, centre.y - h}, {centre.x + w, centre.y + h},
+                              rgba(1, 1, 1, 0.35F), 0, 1.0F);
+                draw->AddText({centre.x - w + 4, centre.y - h + 2}, rgba(1, 1, 1, 0.55F), "Game camera");
+            }
         }
         if (!is_selected(static_cast<int>(i))) continue;
         const auto size = extent(e);
@@ -1062,7 +1125,16 @@ void SceneEditor::hierarchy() {
         return;
     }
     scene_menu();
-    if (ImGui::SmallButton("Create")) create_at(camera_);
+    if (ImGui::SmallButton("Create")) ImGui::OpenPopup("create");
+    mark("create");
+    if (ImGui::BeginPopup("create")) {
+        if (ImGui::MenuItem("Entity")) create_at(camera_);
+        if (ImGui::MenuItem("Player")) create_character(camera_, true, *assets_);
+        mark("create player");
+        if (ImGui::MenuItem("NPC")) create_character(camera_, false, *assets_);
+        mark("create npc");
+        ImGui::EndPopup();
+    }
     ImGui::SameLine();
     ImGui::BeginDisabled(selection_.empty());
     if (ImGui::SmallButton("Duplicate")) duplicate_selection();
@@ -1221,6 +1293,80 @@ void SceneEditor::hierarchy() {
     ImGui::End();
 }
 
+void SceneEditor::character_section(SceneEntity& e, const Assets& assets) {
+    if (!e.character) return;
+    bool keep = true;
+    if (ImGui::CollapsingHeader("Character", &keep, ImGuiTreeNodeFlags_DefaultOpen)) {
+        auto& c = *e.character;
+        const auto row = [](const char* label) {
+            ImGui::TextUnformatted(label);
+            ImGui::SetNextItemWidth(-1);
+        };
+        bool is_player = c.player.has_value();
+        if (ImGui::Checkbox("This is the player", &is_player)) {
+            if (is_player)
+                make_player(primary_);
+            else
+                c.player.reset();
+        }
+        mark("is player");
+        ImGui::SetItemTooltip(
+            "The keys move the player and the camera follows it. Other characters are NPCs,\n"
+            "moved by their scripts with walk, walk_to and stop.");
+        row("Walk / run speed (tiles/s)");
+        ImGui::DragFloat2("##speeds", &c.speed, 0.1F, 0, 100, "%.1f");
+        row("Acceleration (tiles/s\xc2\xb2, 0 = instant)");
+        ImGui::DragFloat("##acceleration", &c.acceleration, 0.5F, 0, 10000, "%.1f");
+        row("Collision size");
+        ImGui::DragFloat2("##collision", &c.collision.x, 0.02F, 0.05F, 16, "%.2f");
+        ImGui::TextUnformatted("Blocked by");
+        ImGui::Checkbox("Water", &c.water);
+        ImGui::SameLine();
+        ImGui::Checkbox("Solid tiles", &c.solid);
+        ImGui::SameLine();
+        ImGui::Checkbox("Buildings", &c.buildings);
+        ImGui::Checkbox("Face the way it walks", &c.face_movement);
+        if (c.player) {
+            auto& p = *c.player;
+            ImGui::SeparatorText("Player");
+            // Actions from the Input panel, plus the defaults the game adds when they are missing.
+            std::vector<std::string> actions;
+            for (const auto& a : assets.actions)
+                actions.push_back(a.name);
+            for (const char* d : {"move_up", "move_down", "move_left", "move_right", "run"})
+                if (std::find(actions.begin(), actions.end(), d) == actions.end()) actions.emplace_back(d);
+            const auto action = [&](const char* label, std::string& value) {
+                ImGui::TextUnformatted(label);
+                ImGui::SameLine(70);
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo((std::string("##") + label).c_str(), value.c_str())) {
+                    for (const auto& a : actions)
+                        if (ImGui::Selectable(a.c_str(), a == value)) value = a;
+                    ImGui::EndCombo();
+                }
+            };
+            ImGui::Checkbox("Moves with the keys", &p.input);
+            ImGui::SetItemTooltip("Off leaves movement to the player's script (walk, walk_to, stop).");
+            ImGui::BeginDisabled(!p.input);
+            action("Up", p.up);
+            action("Down", p.down);
+            action("Left", p.left);
+            action("Right", p.right);
+            action("Run", p.run);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("move_* and run default to WASD, the arrows and Shift.");
+            row("Camera zoom (pixels per tile)");
+            ImGui::SliderFloat("##zoom", &p.zoom, 2, 512, "%.0f", ImGuiSliderFlags_Logarithmic);
+            row("Camera smoothing (seconds)");
+            ImGui::SliderFloat("##smoothing", &p.smoothing, 0, 2, p.smoothing == 0 ? "exact" : "%.2f");
+            row("Camera dead zone (tiles)");
+            ImGui::SliderFloat("##dead_zone", &p.dead_zone, 0, 16, "%.1f");
+            ImGui::Checkbox("Saved games resume where the player was", &p.resume);
+        }
+    }
+    if (!keep) e.character.reset();
+}
+
 void SceneEditor::inspector(const Assets& assets) {
     if (!ImGui::Begin(inspector_id, &show_inspector)) {
         ImGui::End();
@@ -1337,6 +1483,7 @@ void SceneEditor::inspector(const Assets& assets) {
         }
         if (!keep) e.light.reset();
     }
+    character_section(e, assets);
     const auto script_folder = folder_.parent_path() / "scripts";
     if (!e.script.empty()) {
         bool keep = true;
@@ -1365,7 +1512,7 @@ void SceneEditor::inspector(const Assets& assets) {
         if (!keep) e.script.clear();
     }
     ImGui::Dummy({0, 4});
-    const bool full = e.visual && e.light && !e.script.empty();
+    const bool full = e.visual && e.light && e.character && !e.script.empty();
     ImGui::BeginDisabled(full);
     if (ImGui::Button("Add Component", {-1, 0})) ImGui::OpenPopup("add component");
     ImGui::EndDisabled();
@@ -1375,6 +1522,7 @@ void SceneEditor::inspector(const Assets& assets) {
             if (!assets.materials.empty()) e.visual->material = assets.materials.front().name;
         }
         if (!e.light && ImGui::MenuItem("Light")) e.light = SceneLight{};
+        if (!e.character && ImGui::MenuItem("Character")) e.character = SceneCharacter{};
         if (e.script.empty() && ImGui::BeginMenu("Script")) {
             for (const auto& name : Scripts::list(script_folder))
                 if (ImGui::MenuItem(name.c_str())) e.script = name;
@@ -1425,6 +1573,15 @@ void SceneEditor::inspector(const Assets& assets) {
                 if (e.light->height != before.light->height) other.light->height = e.light->height;
             }
             if (e.script != before.script) other.script = e.script;
+            if (e.character != before.character) {
+                const auto player = other.character ? other.character->player : std::nullopt;
+                if (!e.character)
+                    other.character.reset();
+                else {
+                    other.character = e.character;
+                    other.character->player = player;
+                }
+            }
             if (e.prefab != before.prefab) other.prefab = e.prefab;
         }
     }

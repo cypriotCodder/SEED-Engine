@@ -21,12 +21,34 @@ struct SceneLight {
     float radius{6}, intensity{2}, height{2};
     bool operator==(const SceneLight&) const = default;
 };
+// The player-controlled character's settings: which actions move it, and how the camera follows it.
+struct ScenePlayer {
+    std::string up{"move_up"}, down{"move_down"}, left{"move_left"}, right{"move_right"}, run{"run"};
+    bool input{true};  // Moves with the keys; off leaves movement to its script.
+    float zoom{40};    // Camera: logical pixels per tile.
+    float smoothing{}; // Camera: seconds to catch up (0 follows exactly).
+    float dead_zone{}; // Camera: tiles the player may move before the camera does.
+    bool resume{true}; // A saved game starts where the player was, not at this position.
+    bool operator==(const ScenePlayer&) const = default;
+};
+// A character: something that walks with collisions, such as the player or an NPC. NPCs are moved
+// by their scripts (walk, walk_to, stop) under the same rules as the player.
+struct SceneCharacter {
+    float speed{5}, run_speed{8}; // Tiles per second.
+    float acceleration{};         // Tiles per second squared to reach full speed; 0 is instant.
+    Vec2 collision{0.6F, 0.6F};   // Collision box size.
+    bool water{true}, solid{true}, buildings{true}; // What blocks it.
+    bool face_movement{};                           // Turns to face the way it walks.
+    std::optional<ScenePlayer> player;              // Present on the one player-controlled character.
+    bool operator==(const SceneCharacter&) const = default;
+};
 struct SceneEntity {
     std::string name;
     WorldPosition position{}; // Canonical: local offsets in [0, chunk_side).
     float angle{};            // Radians, counter-clockwise.
     std::optional<SceneVisual> visual;
     std::optional<SceneLight> light;
+    std::optional<SceneCharacter> character;
     std::string script; // A file in the project's scripts/ folder, such as "player.lua"; empty for none.
     // The prefab this entity was placed from (prefabs/<name>.json), or empty. A placed prefab keeps
     // its own name, position and angle; its visual, light and script are the prefab's, copied here

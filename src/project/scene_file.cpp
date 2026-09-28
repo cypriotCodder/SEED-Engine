@@ -61,6 +61,11 @@ void apply_prefab(const SceneEntity& prefab, SceneEntity& placed) {
     placed.visual = prefab.visual;
     placed.light = prefab.light;
     placed.script = prefab.script;
+    // A prefab can be a character; whether this copy is the player, and its player settings, stay
+    // the copy's own.
+    const auto player = placed.character ? placed.character->player : std::nullopt;
+    placed.character = prefab.character;
+    if (placed.character) placed.character->player = player;
 }
 
 std::string SceneFile::problems(const Assets& assets) const {
@@ -69,6 +74,7 @@ std::string SceneFile::problems(const Assets& assets) const {
         result += "Entity \"" + entities[i].name + "\" (" + std::to_string(i + 1) + "): " + text + "\n";
     };
     if (entities.size() > capacity) result += "More than 4096 entities in one scene\n";
+    int players = 0;
     for (std::size_t i = 0; i < entities.size(); ++i) {
         const auto& e = entities[i];
         if (e.name.empty() || e.name.size() > 64) report(i, "Names need 1 to 64 characters");
@@ -81,6 +87,23 @@ std::string SceneFile::problems(const Assets& assets) const {
                 report(i, "Unknown material \"" + v.material + "\"");
             if (!(v.size.x > 0 && v.size.x <= 64 && v.size.y > 0 && v.size.y <= 64))
                 report(i, "Visual size must be above 0 and at most 64");
+        }
+        if (e.character) {
+            const auto& c = *e.character;
+            const auto in = [](float v, float lo, float hi) {
+                return v >= lo && v <= hi;
+            };
+            if (!in(c.speed, 0, 100) || !in(c.run_speed, 0, 100) || !in(c.acceleration, 0, 10000) ||
+                !in(c.collision.x, 0.05F, 16) || !in(c.collision.y, 0.05F, 16))
+                report(i, "Character values out of range");
+            if (c.player) {
+                ++players;
+                const auto& p = *c.player;
+                if (!in(p.zoom, 2, 512) || !in(p.smoothing, 0, 10) || !in(p.dead_zone, 0, 64))
+                    report(i, "Player camera values out of range");
+                for (const auto* action : {&p.up, &p.down, &p.left, &p.right, &p.run})
+                    if (action->empty()) report(i, "Every player action needs a name");
+            }
         }
         if (!e.prefab.empty() && !valid_prefab_name(e.prefab))
             report(i, "Prefab names use letters, digits, '_' and '-'");
@@ -95,6 +118,7 @@ std::string SceneFile::problems(const Assets& assets) const {
                 report(i, "Light values out of range");
         }
     }
+    if (players > 1) result += "Only one character can be the player; the others are NPCs\n";
     return result;
 }
 
@@ -123,6 +147,38 @@ Json entity_json(const SceneEntity& e) {
         light.set("intensity", json_float(e.light->intensity));
         light.set("height", json_float(e.light->height));
         entity.set("light", light);
+    }
+    if (e.character) {
+        const auto& c = *e.character;
+        auto character = Json::object();
+        character.set("speed", json_float(c.speed));
+        character.set("run_speed", json_float(c.run_speed));
+        character.set("acceleration", json_float(c.acceleration));
+        character.set("collision", pair(c.collision.x, c.collision.y));
+        auto blocks = Json::object();
+        blocks.set("water", c.water);
+        blocks.set("solid", c.solid);
+        blocks.set("buildings", c.buildings);
+        character.set("blocked_by", blocks);
+        character.set("face_movement", c.face_movement);
+        if (c.player) {
+            const auto& p = *c.player;
+            auto player = Json::object();
+            auto actions = Json::object();
+            actions.set("up", p.up);
+            actions.set("down", p.down);
+            actions.set("left", p.left);
+            actions.set("right", p.right);
+            actions.set("run", p.run);
+            player.set("actions", actions);
+            player.set("input", p.input);
+            player.set("zoom", json_float(p.zoom));
+            player.set("smoothing", json_float(p.smoothing));
+            player.set("dead_zone", json_float(p.dead_zone));
+            player.set("resume", p.resume);
+            character.set("player", player);
+        }
+        entity.set("character", character);
     }
     if (!e.script.empty()) entity.set("script", e.script);
     if (!e.prefab.empty()) entity.set("prefab", e.prefab);
@@ -173,6 +229,46 @@ SceneEntity parse_entity(const Json& json) {
         l.intensity = static_cast<float>(light->at("intensity").as_number());
         l.height = static_cast<float>(light->at("height").as_number());
         e.light = l;
+    }
+    if (const auto* character = json.find("character")) {
+        SceneCharacter c;
+        const auto number = [](const Json& object, const char* key, float fallback) {
+            const auto* value = object.find(key);
+            return value ? static_cast<float>(value->as_number()) : fallback;
+        };
+        c.speed = number(*character, "speed", c.speed);
+        c.run_speed = number(*character, "run_speed", c.run_speed);
+        c.acceleration = number(*character, "acceleration", c.acceleration);
+        if (const auto* collision = character->find("collision")) {
+            const auto size = read_pair(*collision);
+            c.collision = {size[0], size[1]};
+        }
+        if (const auto* blocks = character->find("blocked_by")) {
+            if (const auto* v = blocks->find("water")) c.water = v->as_bool();
+            if (const auto* v = blocks->find("solid")) c.solid = v->as_bool();
+            if (const auto* v = blocks->find("buildings")) c.buildings = v->as_bool();
+        }
+        if (const auto* face = character->find("face_movement")) c.face_movement = face->as_bool();
+        if (const auto* player = character->find("player")) {
+            ScenePlayer p;
+            if (const auto* actions = player->find("actions")) {
+                const auto name = [&](const char* key, std::string& out) {
+                    if (const auto* v = actions->find(key)) out = v->as_string();
+                };
+                name("up", p.up);
+                name("down", p.down);
+                name("left", p.left);
+                name("right", p.right);
+                name("run", p.run);
+            }
+            if (const auto* v = player->find("input")) p.input = v->as_bool();
+            p.zoom = number(*player, "zoom", p.zoom);
+            p.smoothing = number(*player, "smoothing", p.smoothing);
+            p.dead_zone = number(*player, "dead_zone", p.dead_zone);
+            if (const auto* v = player->find("resume")) p.resume = v->as_bool();
+            c.player = p;
+        }
+        e.character = c;
     }
     if (const auto* script = json.find("script")) e.script = script->as_string();
     if (const auto* prefab = json.find("prefab")) e.prefab = prefab->as_string();

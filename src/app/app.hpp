@@ -85,7 +85,7 @@ struct Game {
     void (*loaded)(void*, Engine&){};              // Once, after the first chunks are resident.
     void (*frame)(void*, Engine&, float dt){};     // Start of each frame.
     void (*step)(void*, Engine&, float dt){};      // Each fixed step, before physics runs.
-    float (*zoom)(void*, Engine&){};               // Logical pixels per world unit.
+    float (*zoom)(void*, Engine&){};               // Logical pixels per world unit; else camera_zoom.
     void (*act)(void*, Engine&, const View&){};    // Input that needs the camera, e.g. pointing.
     void (*render)(void*, Engine&, const View&){}; // Draw between renderer begin and finish.
     void (*describe)(void*, BenchmarkMetadata&){}; // Game fields of the benchmark report.
@@ -141,11 +141,18 @@ public:
     Input input;     // Raw input; prefer actions.
     Actions actions; // Engine actions (see engine_action), then the game's.
     Entity focus{};
+    // How the camera follows the focus: seconds to catch up (0 follows exactly) and a dead zone in
+    // tiles the focus may move before the camera does. Games may change both at any time.
+    float camera_smoothing{}, camera_dead_zone{};
+    float camera_zoom{40}; // Logical pixels per tile, when the game has no zoom callback.
     unsigned frames{};
 
 private:
     friend int run(const Game&, int, char**);
     void loop(const Game& game);
+    WorldPosition follow(WorldPosition target, float dt);
+    WorldPosition camera_{};
+    bool camera_placed_{};
     void update_owners();
     void restore(ChunkCoord coord, Chunk& chunk);
     bool capture(ChunkCoord coord, Chunk& chunk, bool remove);

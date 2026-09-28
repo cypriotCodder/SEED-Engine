@@ -17,7 +17,7 @@ constexpr float pi = 3.14159265F;
 UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)) {
     // The sample project: Player at (0.5, 0.5), Campfire at (3.5, 2.5) with a 0.8 visual, and a
     // 1x1 Crate at (-2, -2). The view starts at the origin, 32 pixels per tile.
-    add(10, [] {}); // Let docking and the first frames settle.
+    add(30, [] {}); // Let docking, and a new window's first-launch resizing, settle.
 
     // Click selects.
     click([this] { return at("Campfire"); });
@@ -155,6 +155,34 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
         const auto& e = scene_.scene().entities;
         check(e[0].visual && std::abs(e[0].visual->size.x - 1.6F) < 0.05F, "Cmd+Z undoes Apply");
     });
+
+    // Characters: the Create menu makes a player and an NPC; the checkbox moves the player role.
+    const auto players = [this] {
+        int count = 0;
+        for (const auto& e : scene_.scene().entities)
+            count += e.character && e.character->player;
+        return count;
+    };
+    click([this] { return scene_.control("create"); });
+    click([this] { return scene_.control("create player"); });
+    add(3, [this, players] {
+        const auto& e = scene_.scene().entities.back();
+        check(players() == 1 && e.character && e.character->player && e.visual,
+              "Create > Player adds the player");
+    });
+    click([this] { return scene_.control("create"); });
+    click([this] { return scene_.control("create npc"); });
+    add(3, [this, players] {
+        const auto& e = scene_.scene().entities.back();
+        check(players() == 1 && e.name == "NPC" && e.character && !e.character->player,
+              "Create > NPC adds an NPC");
+    });
+    click([this] { return scene_.control("is player"); });
+    add(3, [this, players] {
+        const auto& e = scene_.scene().entities.back();
+        check(players() == 1 && e.character && e.character->player,
+              "the player checkbox moves the role to the NPC");
+    });
 }
 
 void UiTest::type(const char* text) {
@@ -206,9 +234,15 @@ void UiTest::click(std::function<ImVec2()> where, bool shift) {
         *point = where();
         pointer_ = *point;
     });
-    add(1, [=] {
-        if (shift) ImGui::GetIO().AddKeyEvent(ImGuiMod_Shift, true);
-        ImGui::GetIO().AddMouseButtonEvent(0, true);
+    // The target is found again as the button goes down, and the pointer is placed first, so a
+    // layout that moved in between (a new window settling) cannot misdirect the press.
+    add(1, [=, this] {
+        *point = where();
+        pointer_ = *point;
+        auto& io = ImGui::GetIO();
+        io.AddMousePosEvent(point->x, point->y);
+        if (shift) io.AddKeyEvent(ImGuiMod_Shift, true);
+        io.AddMouseButtonEvent(0, true);
     });
     add(1, [=] {
         ImGui::GetIO().AddMouseButtonEvent(0, false);
@@ -234,9 +268,14 @@ void UiTest::drag(std::function<ImVec2()> from, std::function<ImVec2()> to, bool
         *end = to();
         pointer_ = *start;
     });
-    add(1, [=] {
-        if (shift) ImGui::GetIO().AddKeyEvent(ImGuiMod_Shift, true);
-        ImGui::GetIO().AddMouseButtonEvent(0, true);
+    add(1, [=, this] {
+        *start = from();
+        *end = to();
+        pointer_ = *start;
+        auto& io = ImGui::GetIO();
+        io.AddMousePosEvent(start->x, start->y);
+        if (shift) io.AddKeyEvent(ImGuiMod_Shift, true);
+        io.AddMouseButtonEvent(0, true);
     });
     constexpr int moves = 6;
     for (int i = 1; i <= moves; ++i)

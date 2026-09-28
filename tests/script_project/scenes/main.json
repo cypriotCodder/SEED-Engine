@@ -1,11 +1,207 @@
 {
   "format": 1,
   "entities": [
-    {"name": "Player", "chunk": [0, 0], "position": [0.5, 0.5], "angle": 0,
-     "visual": {"material": "sand", "size": [0.6, 0.6]}},
-    {"name": "Tester", "chunk": [0, 0], "position": [2.5, 1.5], "angle": 0,
-     "visual": {"material": "stone", "size": [0.5, 0.5]}, "script": "checks.lua"},
-    {"name": "Box", "chunk": [0, 0], "position": [5, 5], "angle": 0,
-     "visual": {"material": "stone", "size": [1, 1]}}
+    {
+      "name": "Player",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        0.5,
+        0.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "sand",
+        "size": [
+          0.6,
+          0.6
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false,
+        "player": {
+          "actions": {
+            "up": "move_up",
+            "down": "move_down",
+            "left": "move_left",
+            "right": "move_right",
+            "run": "run"
+          },
+          "input": true,
+          "zoom": 30,
+          "smoothing": 0,
+          "dead_zone": 0,
+          "resume": true
+        }
+      }
+    },
+    {
+      "name": "Tester",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        2.5,
+        1.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "stone",
+        "size": [
+          0.5,
+          0.5
+        ]
+      },
+      "script": "checks.lua"
+    },
+    {
+      "name": "Box",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        5,
+        5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "stone",
+        "size": [
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Walker",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        10.5,
+        0.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "stone",
+        "size": [
+          0.5,
+          0.5
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.5,
+          0.5
+        ],
+        "blocked_by": {
+          "water": false,
+          "solid": false,
+          "buildings": false
+        },
+        "face_movement": true
+      }
+    },
+    {
+      "name": "Starter",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        10.5,
+        3.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "stone",
+        "size": [
+          0.5,
+          0.5
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 10,
+        "collision": [
+          0.5,
+          0.5
+        ],
+        "blocked_by": {
+          "water": false,
+          "solid": false,
+          "buildings": false
+        },
+        "face_movement": true
+      }
+    },
+    {
+      "name": "Goer",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        12.5,
+        6.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "stone",
+        "size": [
+          0.5,
+          0.5
+        ]
+      },
+      "character": {
+        "speed": 4,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.5,
+          0.5
+        ],
+        "blocked_by": {
+          "water": false,
+          "solid": false,
+          "buildings": false
+        },
+        "face_movement": true
+      }
+    },
+    {
+      "name": "Coach",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        8,
+        8
+      ],
+      "angle": 0,
+      "script": "characters.lua"
+    }
   ]
 }

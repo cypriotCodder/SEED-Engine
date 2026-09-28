@@ -22,7 +22,7 @@ end
 
 Each attached script runs in its own environment: its globals and `local`s belong to that entity alone, and `self` is the entity. The file's top level runs when the game starts, after every scene entity exists. `start()`, if defined, runs once before the first update; `update(dt)`, if defined, runs every fixed step (60 per second; `dt` is in seconds).
 
-A player entity with a script moves itself; one without gets the built-in WASD/arrow-key movement.
+The player moves with the keys unless its Character's "Moves with the keys" is off; its script can add to that, or take over with `walk` and `walk_to`. NPCs move only through their scripts.
 
 Positions are global tile coordinates: one unit per tile, `x` to the right and `y` up, as the editor's Scene view and Inspector show them.
 
@@ -42,6 +42,16 @@ Positions are global tile coordinates: one unit per tile, `x` to the right and `
 | `e:alive()` | `false` once destroyed. |
 | `e:destroy()` | Remove it (not the entity the camera follows). |
 
+**Characters** (entities with a Character component: the player and NPCs) walk by the rules set in the Inspector (speed, acceleration, collision, what blocks them):
+
+| Method | |
+| --- | --- |
+| `e:walk(x, y [, run])` | Keep walking in this direction (length up to 1) until told otherwise. |
+| `e:walk_to(x, y [, run])` | Walk to a point and stop there; returns `true` once there. |
+| `e:stop()` | Stop at once. |
+| `e:moving()` | Whether it is walking or heading somewhere. |
+| `e:speed()`, `e:set_speed(walk [, run])` | Speeds in tiles per second. |
+
 Entities compare with `==`. Using a destroyed entity is an error, except `alive()`.
 
 **Modules**:
@@ -57,6 +67,8 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `sound.play(name)` | A sound from the Sounds panel. |
 | `particles.burst(name, x, y)` | A particle style from the Particles panel. |
 | `camera.follow(entity)` | The camera, and world streaming, follow this entity. |
+| `camera.zoom()`, `camera.set_zoom(pixels_per_tile)` | The camera's zoom, from 2 to 512. |
+| `game.player()` | The player entity. |
 | `game.time()` | Seconds of game time since the game started. |
 
 Lua's `string`, `table`, `math` and `utf8` libraries and `print` are available; `print` output appears in the editor's Console during Play.

@@ -2,6 +2,7 @@
 #include "app/app.hpp"
 #include "io/storage.hpp"
 #include "physics/character.hpp"
+#include "project/characters.hpp"
 // Lua is compiled as C++ (see CMakeLists.txt), so its errors are C++ exceptions and unwind engine
 // code correctly. Its headers are therefore included without extern "C".
 #include "lauxlib.h"
@@ -213,6 +214,83 @@ struct ScriptApi {
         engine(lua).focus = check_entity(lua, 1);
         return 0;
     }
+    static int player(lua_State* lua) {
+        auto& self = host(lua);
+        if (self.engine_.scene.alive(self.player_))
+            push_entity(lua, self.player_);
+        else
+            lua_pushnil(lua);
+        return 1;
+    }
+    static int zoom(lua_State* lua) {
+        lua_pushnumber(lua, engine(lua).camera_zoom);
+        return 1;
+    }
+    static int set_zoom(lua_State* lua) {
+        const auto value = luaL_checknumber(lua, 1);
+        if (!(value >= 2 && value <= 512)) luaL_error(lua, "zoom must be from 2 to 512 pixels per tile");
+        engine(lua).camera_zoom = static_cast<float>(value);
+        return 0;
+    }
+    // Characters.
+    static CharacterMotion& motion(lua_State* lua, Entity entity) {
+        auto* m = engine(lua).scene.components<CharacterMotion>().find(entity);
+        if (!m) luaL_error(lua, "that entity is not a character; give it a Character component");
+        return *m;
+    }
+    static int walk(lua_State* lua) {
+        auto& m = motion(lua, check_entity(lua, 1));
+        m.walk = {static_cast<float>(luaL_checknumber(lua, 2)), static_cast<float>(luaL_checknumber(lua, 3))};
+        m.running = lua_toboolean(lua, 4);
+        m.has_target = false;
+        return 0;
+    }
+    static int walk_to(lua_State* lua) {
+        const auto entity = check_entity(lua, 1);
+        auto& m = motion(lua, entity);
+        const auto target = position_at(lua, 2);
+        const auto& position = transform(lua, entity).position;
+        // True once there; otherwise it keeps walking there, step by step, until it arrives.
+        const bool there = nearby(target.chunk, position.chunk, 64) && [&] {
+            const auto gap = relative(target, position);
+            return gap.x * gap.x + gap.y * gap.y < 1e-6F;
+        }();
+        if (!there) {
+            m.target = target;
+            m.has_target = true;
+            m.walk = {};
+            m.running = lua_toboolean(lua, 4);
+        }
+        lua_pushboolean(lua, there);
+        return 1;
+    }
+    static int stop(lua_State* lua) {
+        auto& m = motion(lua, check_entity(lua, 1));
+        m.walk = {};
+        m.has_target = false;
+        m.velocity = {};
+        return 0;
+    }
+    static int speed(lua_State* lua) {
+        const auto& m = motion(lua, check_entity(lua, 1));
+        lua_pushnumber(lua, m.speed);
+        lua_pushnumber(lua, m.run_speed);
+        return 2;
+    }
+    static int set_speed(lua_State* lua) {
+        auto& m = motion(lua, check_entity(lua, 1));
+        const auto walking = luaL_checknumber(lua, 2), running = luaL_optnumber(lua, 3, m.run_speed);
+        if (!(walking >= 0 && walking <= 100 && running >= 0 && running <= 100))
+            luaL_error(lua, "speeds must be from 0 to 100 tiles per second");
+        m.speed = static_cast<float>(walking);
+        m.run_speed = static_cast<float>(running);
+        return 0;
+    }
+    static int moving(lua_State* lua) {
+        const auto& m = motion(lua, check_entity(lua, 1));
+        lua_pushboolean(lua, m.has_target || m.walk.x != 0 || m.walk.y != 0);
+        return 1;
+    }
     static int time(lua_State* lua) {
         lua_pushnumber(lua, host(lua).time_);
         return 1;
@@ -337,8 +415,12 @@ struct ScriptApi {
             {"find", guarded<find>}, {"spawn", guarded<spawn>}, {"tile", guarded<tile>}, {nullptr, nullptr}};
         static const luaL_Reg sound[] = {{"play", guarded<play>}, {nullptr, nullptr}};
         static const luaL_Reg particles[] = {{"burst", guarded<burst>}, {nullptr, nullptr}};
-        static const luaL_Reg camera[] = {{"follow", guarded<follow>}, {nullptr, nullptr}};
-        static const luaL_Reg game[] = {{"time", guarded<time>}, {nullptr, nullptr}};
+        static const luaL_Reg camera[] = {{"follow", guarded<follow>},
+                                          {"zoom", guarded<zoom>},
+                                          {"set_zoom", guarded<set_zoom>},
+                                          {nullptr, nullptr}};
+        static const luaL_Reg game[] = {
+            {"time", guarded<time>}, {"player", guarded<player>}, {nullptr, nullptr}};
         module(lua, "input", input);
         module(lua, "world", world);
         module(lua, "sound", sound);
@@ -356,6 +438,12 @@ struct ScriptApi {
                                            {"set_material", guarded<set_material>},
                                            {"alive", guarded<alive>},
                                            {"destroy", guarded<destroy>},
+                                           {"walk", guarded<walk>},
+                                           {"walk_to", guarded<walk_to>},
+                                           {"stop", guarded<stop>},
+                                           {"speed", guarded<speed>},
+                                           {"set_speed", guarded<set_speed>},
+                                           {"moving", guarded<moving>},
                                            {nullptr, nullptr}};
         luaL_newmetatable(lua, entity_type);
         luaL_newlib(lua, methods);

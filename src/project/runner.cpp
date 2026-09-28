@@ -2,17 +2,26 @@
 #include "app/app.hpp"
 #include "io/storage.hpp"
 #include "physics/character.hpp"
+#include "project/characters.hpp"
 #include "project/scene_file.hpp"
 #include "script/host.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
 
 namespace seed {
 namespace {
-constexpr float player_speed = 5;       // World units per second.
-constexpr Vec2 player_half{0.3F, 0.3F}; // Collision box half size.
-constexpr const char* move_actions[] = {"move_up", "move_down", "move_left", "move_right"};
+// The player's actions that have keys by default; a project may rebind them in its Input panel.
+struct DefaultAction {
+    const char* name;
+    SDL_Scancode keys[2];
+};
+constexpr DefaultAction default_actions[] = {{"move_up", {SDL_SCANCODE_W, SDL_SCANCODE_UP}},
+                                             {"move_down", {SDL_SCANCODE_S, SDL_SCANCODE_DOWN}},
+                                             {"move_left", {SDL_SCANCODE_A, SDL_SCANCODE_LEFT}},
+                                             {"move_right", {SDL_SCANCODE_D, SDL_SCANCODE_RIGHT}},
+                                             {"run", {SDL_SCANCODE_LSHIFT, SDL_SCANCODE_RSHIFT}}};
 
 // A light standing on a scene entity; drawn each frame at the entity's position.
 struct SceneLightComponent {
@@ -25,29 +34,33 @@ struct Runner {
     std::string id, name, title, save;
     Assets data; // For the scene's material names and the default seed.
     SceneFile scene;
-    std::array<ActionId, 4> moves{};
+    std::size_t player_index{}; // The scene entity that is the player.
+    ScenePlayer player_settings;
+    std::array<ActionId, 5> moves{}; // up, down, left, right, run
     std::unique_ptr<ScriptHost> scripts;
     Entity player{};
-    bool scripted_player{}; // A player with its own script moves itself.
 };
 
 void add_moves(void* context, Actions& actions) {
     auto& runner = *static_cast<Runner*>(context);
-    const SDL_Scancode keys[4][2] = {{SDL_SCANCODE_W, SDL_SCANCODE_UP},
-                                     {SDL_SCANCODE_S, SDL_SCANCODE_DOWN},
-                                     {SDL_SCANCODE_A, SDL_SCANCODE_LEFT},
-                                     {SDL_SCANCODE_D, SDL_SCANCODE_RIGHT}};
-    for (std::size_t i = 0; i < 4; ++i)
+    const auto& p = runner.player_settings;
+    const std::string* names[] = {&p.up, &p.down, &p.left, &p.right, &p.run};
+    for (std::size_t i = 0; i < 5; ++i)
         try {
-            runner.moves[i] = actions.find(move_actions[i]); // The project's own binding wins.
+            runner.moves[i] = actions.find(*names[i]); // The project's own binding wins.
         } catch (const std::out_of_range&) {
+            const auto found = std::find_if(std::begin(default_actions), std::end(default_actions),
+                                            [&](const DefaultAction& d) { return *names[i] == d.name; });
+            if (found == std::end(default_actions))
+                throw std::runtime_error("The player uses the action \"" + *names[i] +
+                                         "\", which is not in the project's Input panel");
             runner.moves[i] =
-                actions.add(move_actions[i], {Binding::key(keys[i][0]), Binding::key(keys[i][1])});
+                actions.add(found->name, {Binding::key(found->keys[0]), Binding::key(found->keys[1])});
         }
 }
 
-// Makes the engine entity for a scene entity: position, look, light and name. Scripts are attached
-// by the caller, once everything they might look for exists.
+// Makes the engine entity for a scene entity: position, look, light, character and name. Scripts are
+// attached by the caller, once everything they might look for exists.
 Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPosition at) {
     const Transform transform{at, at, e.angle};
     const auto entity =
@@ -56,6 +69,7 @@ Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPo
     if (e.light)
         engine.scene.components<SceneLightComponent>().add(
             entity, {e.light->color, e.light->radius, e.light->intensity, e.light->height});
+    if (e.character) engine.scene.components<CharacterMotion>().add(entity, character_motion(*e.character));
     runner.scripts->name(entity, e.name);
     return entity;
 }
@@ -63,6 +77,7 @@ Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPo
 Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
     engine.scene.add_component<SceneLightComponent>();
+    engine.scene.add_component<CharacterMotion>();
     runner.scripts = std::make_unique<ScriptHost>(engine, subfolder(runner.files, "scripts/"));
     // Scripts spawn prefabs through the same path as scene entities, lights and scripts included.
     runner.scripts->set_prefab_spawner(
@@ -72,53 +87,48 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
             if (!text) throw std::runtime_error("Unknown prefab \"" + name + "\"");
             auto prefab = parse_prefab(parse_json(*text));
             prefab.angle = angle;
+            if (prefab.character) prefab.character->player.reset(); // Spawned characters are NPCs.
             const auto entity = instantiate(runner, engine, prefab, at);
             if (!prefab.script.empty()) runner.scripts->attach(entity, prefab.script);
             return entity;
         });
     std::vector<std::pair<Entity, const SceneEntity*>> scripted;
-    const SceneEntity* player = nullptr;
-    const SceneEntity* marker = nullptr;
-    for (const auto& e : runner.scene.entities) {
-        if (e.name == "Player" && !player) {
-            player = &e;
-            continue;
-        }
-        if (e.name == "Spawn" && !marker) marker = &e;
-        const auto entity = instantiate(runner, engine, e, e.position);
+    // A saved game can put the player back where it was instead of at its scene position.
+    const bool resumed = std::filesystem::exists(engine.checkpoint.read_path("player.delta"));
+    for (std::size_t i = 0; i < runner.scene.entities.size(); ++i) {
+        const auto& e = runner.scene.entities[i];
+        const bool player = i == runner.player_index;
+        const auto at = player && resumed && runner.player_settings.resume ? spawn : e.position;
+        const auto entity = instantiate(runner, engine, e, at);
+        if (player) runner.player = entity;
         if (!e.script.empty()) scripted.emplace_back(entity, &e);
     }
-    // A saved game resumes where the player was; a new one starts at the scene's player or spawn.
-    const bool resumed = std::filesystem::exists(engine.checkpoint.read_path("player.delta"));
-    const auto at = resumed ? spawn : player ? player->position : marker ? marker->position : spawn;
-    SceneEntity look;
-    if (player)
-        look = *player;
-    else
-        look.visual = SceneVisual{engine.materials[0].name, {0.6F, 0.6F}};
-    look.name = "Player";
-    const auto entity = instantiate(runner, engine, look, at);
-    runner.player = entity;
-    runner.scripted_player = player && !player->script.empty();
-    if (runner.scripted_player) scripted.emplace_back(entity, player);
+    engine.camera_smoothing = runner.player_settings.smoothing;
+    engine.camera_dead_zone = runner.player_settings.dead_zone;
+    engine.camera_zoom = runner.player_settings.zoom;
+    runner.scripts->set_player(runner.player);
     // Scripts load once every entity exists, so their top-level code can already find the others.
     for (const auto& [e, source] : scripted)
         runner.scripts->attach(e, source->script);
-    return entity;
+    return runner.player;
 }
 
 void step(void* context, Engine& engine, float dt) {
     auto& runner = *static_cast<Runner*>(context);
+    // Characters start each step where they are, so their moves interpolate smoothly.
+    const auto owners = engine.scene.components<CharacterMotion>().owners();
+    for (const auto owner : owners)
+        if (auto* t = engine.scene.transforms.find(owner)) t->previous = t->position;
     runner.scripts->update(dt);
-    if (runner.scripted_player || !engine.scene.alive(runner.player)) return;
-    Vec2 direction{engine.actions.axis(runner.moves[2], runner.moves[3]),
-                   engine.actions.axis(runner.moves[1], runner.moves[0])};
-    if (direction.x != 0 && direction.y != 0) direction = direction * 0.70710678F;
-    auto& transform = *engine.scene.transforms.find(runner.player);
-    transform.previous = transform.position;
-    transform.position =
-        move_character(engine.world, engine.physics, transform.position, direction * (player_speed * dt),
-                       player_half, {nullptr, blocks_walking});
+    if (runner.player_settings.input && engine.scene.alive(runner.player))
+        if (auto* motion = engine.scene.components<CharacterMotion>().find(runner.player)) {
+            const auto& a = engine.actions;
+            motion->walk = {a.axis(runner.moves[2], runner.moves[3]),
+                            a.axis(runner.moves[1], runner.moves[0])};
+            motion->running = a.held(runner.moves[4]);
+            if (motion->walk.x != 0 || motion->walk.y != 0) motion->has_target = false; // Keys take over.
+        }
+    move_characters(engine, dt);
 }
 
 void render(void*, Engine& engine, const View& view) {
@@ -177,6 +187,30 @@ void load(Runner& runner, ProjectFiles files, std::filesystem::path save) {
         }
     if (const auto problems = runner.scene.problems(runner.data); !problems.empty())
         throw std::runtime_error("The main scene has problems:\n" + problems);
+    // The player is the character marked as the player. Older projects mark it by name: an entity
+    // named "Player" (moving itself if it has a script), else a new one at "Spawn" or the origin.
+    auto& entities = runner.scene.entities;
+    auto found = std::find_if(entities.begin(), entities.end(),
+                              [](const SceneEntity& e) { return e.character && e.character->player; });
+    if (found == entities.end()) {
+        found = std::find_if(entities.begin(), entities.end(),
+                             [](const SceneEntity& e) { return e.name == "Player"; });
+        if (found == entities.end()) {
+            SceneEntity player;
+            player.name = "Player";
+            const auto spawn = std::find_if(entities.begin(), entities.end(),
+                                            [](const SceneEntity& e) { return e.name == "Spawn"; });
+            if (spawn != entities.end()) player.position = spawn->position;
+            player.visual = SceneVisual{runner.data.materials.front().name, {0.6F, 0.6F}};
+            entities.push_back(player);
+            found = entities.end() - 1;
+        }
+        if (!found->character) found->character = SceneCharacter{};
+        found->character->player = ScenePlayer{};
+        found->character->player->input = found->script.empty();
+    }
+    runner.player_index = static_cast<std::size_t>(found - entities.begin());
+    runner.player_settings = *found->character->player;
     if (runner.data.materials.empty()) throw std::runtime_error("The project has no materials yet");
 }
 

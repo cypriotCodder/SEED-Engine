@@ -10,6 +10,7 @@ namespace seed {
 struct TileRule {
     void* context{};
     bool (*blocked)(void*, const Tile* tile){};
+    bool bodies{true}; // Whether building bodies block too.
 };
 
 inline bool tile_blocks(const TileRule& rule, const Tile* tile) {
@@ -19,7 +20,7 @@ inline bool tile_blocks(const TileRule& rule, const Tile* tile) {
 // Whether an axis-aligned box centred at `center` touches a blocking tile or any building body.
 inline bool box_blocked(const World& world, const Physics& physics, WorldPosition center, Vec2 half,
                         const TileRule& rule = {}) {
-    if (physics.blocks(center, half)) return true;
+    if (rule.bodies && physics.blocks(center, half)) return true;
     auto corner = center;
     corner.move(Vec2{-half.x, -half.y});
     // Every tile the box overlaps, from its lower-left corner to just inside its upper-right edge.

@@ -78,6 +78,11 @@ public:
         std::map<std::string, ImVec2> rows;
     };
     const PrefabControls& prefab_controls() const { return prefab_controls_; }
+    // Other named controls drawn last frame ("create", "create player", "create npc", "is player").
+    ImVec2 control(const std::string& name) const {
+        const auto found = controls_.find(name);
+        return found == controls_.end() ? ImVec2{-1, -1} : found->second;
+    }
 
 private:
     enum class Tool { move, rotate, scale };
@@ -95,6 +100,7 @@ private:
     void overlays(ImDrawList* draw);
     void hierarchy();
     void inspector(const Assets& assets);
+    void character_section(SceneEntity& e, const Assets& assets);
     void scene_menu();
     void prefabs_panel();
     // Places a copy of a prefab at `at`, linked to it, and selects it.
@@ -126,6 +132,10 @@ private:
     float snap_step() const; // World units; 0 when snapping is off.
 
     void create_at(WorldPosition position);
+    // Creates a character: the player (unless the scene has one, which is then selected) or an NPC.
+    void create_character(WorldPosition position, bool player, const Assets& assets);
+    // Makes `index` the scene's one player, taking the role from any other character.
+    void make_player(int index);
     void duplicate_selection();
     void delete_selection();
     void frame_selection();
@@ -185,7 +195,9 @@ private:
     std::vector<Grabbed> grabbed_; // Per selected entity, at the drag's start.
     bool box_additive_{};
 
-    WorldPosition menu_at_{}; // Where the context menu was opened.
+    WorldPosition menu_at_{};   // Where the context menu was opened.
+    const Assets* assets_{};    // This frame's assets, for creating characters from menus.
+    Vec2 game_view_{1280, 720}; // The game window's logical size, for the camera frame.
     Scripts scripts_;
     std::string new_script_;
     std::string new_scene_;
@@ -193,7 +205,9 @@ private:
     Prefabs prefabs_, saved_prefabs_;
     std::string new_prefab_;
     PrefabControls prefab_controls_;
-    int renaming_{-1}; // Entity whose name is being edited in the Hierarchy, or -1.
+    std::map<std::string, ImVec2> controls_;
+    void mark(const char* name); // Records where the last item was drawn, under `name`.
+    int renaming_{-1};           // Entity whose name is being edited in the Hierarchy, or -1.
     std::string rename_text_;
     bool rename_focus_{};
     std::vector<Row> rows_;

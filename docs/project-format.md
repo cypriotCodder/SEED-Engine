@@ -48,6 +48,8 @@ Each `<name>.json` is `{"format": 1, "entities": [...]}`, at most 4096 entities,
 - `visual`: `material` (a material name) and `size` ([w, h], above 0 and at most 64).
 - `light`: `color` ([r, g, b], 0–16), `radius` (up to 256), `intensity` (0–64) and `height` (above 0, at most 64).
 
+`character` (optional) makes the entity walk with collisions: `speed` and `run_speed` (tiles per second), `acceleration` (tiles per second squared; 0 is instant), `collision` ([w, h]), `blocked_by` (`water`, `solid`, `buildings`: true or false) and `face_movement`. One character per scene may have `player`: `actions` (`up`, `down`, `left`, `right`, `run`; action names from `assets/actions.json`, where `move_*` and `run` default to WASD, the arrows and Shift), `input` (moves with the keys; false leaves movement to its script), camera `zoom` (pixels per tile), `smoothing` (seconds) and `dead_zone` (tiles), and `resume` (a saved game starts where the player was). Other characters are NPCs, moved by their scripts. Scenes from before characters mark the player by naming an entity "Player"; that still works.
+
 `prefab` (optional) links a placed copy to `prefabs/<name>.json`; the copy's `visual`, `light` and `script` are the prefab's, stored in the scene too so games need not resolve prefabs. `editor` (optional) holds editor-only `hidden` and `locked` flags that games ignore.
 
 An entity with no components is a named marker, such as a spawn point. Material references are checked against `assets/materials.json`; the editor will not save a scene with problems.
