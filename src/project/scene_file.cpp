@@ -32,6 +32,37 @@ bool valid_script_name(std::string_view name) {
     });
 }
 
+bool valid_prefab_name(std::string_view name) {
+    return !name.empty() && name.size() <= 64 && std::all_of(name.begin(), name.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
+               c == '-';
+    });
+}
+
+Json prefab_json(const SceneEntity& entity) {
+    auto placed = entity;
+    placed.position = {};
+    placed.angle = 0;
+    placed.prefab.clear();
+    placed.hidden = placed.locked = false;
+    auto file = Json::object();
+    file.set("format", scene_format);
+    file.set("entity", entity_json(placed));
+    return file;
+}
+
+SceneEntity parse_prefab(const Json& json) {
+    if (json.at("format").as_int(1, 1000000) > scene_format)
+        throw std::runtime_error("Made by a newer editor");
+    return parse_entity(json.at("entity"));
+}
+
+void apply_prefab(const SceneEntity& prefab, SceneEntity& placed) {
+    placed.visual = prefab.visual;
+    placed.light = prefab.light;
+    placed.script = prefab.script;
+}
+
 std::string SceneFile::problems(const Assets& assets) const {
     std::string result;
     const auto report = [&](std::size_t i, const std::string& text) {
@@ -51,6 +82,8 @@ std::string SceneFile::problems(const Assets& assets) const {
             if (!(v.size.x > 0 && v.size.x <= 64 && v.size.y > 0 && v.size.y <= 64))
                 report(i, "Visual size must be above 0 and at most 64");
         }
+        if (!e.prefab.empty() && !valid_prefab_name(e.prefab))
+            report(i, "Prefab names use letters, digits, '_' and '-'");
         if (!e.script.empty() && !valid_script_name(e.script))
             report(i, "Script names are file names in scripts/ ending in .lua");
         if (e.light) {
@@ -92,6 +125,7 @@ Json entity_json(const SceneEntity& e) {
         entity.set("light", light);
     }
     if (!e.script.empty()) entity.set("script", e.script);
+    if (!e.prefab.empty()) entity.set("prefab", e.prefab);
     if (e.hidden || e.locked) {
         auto editor = Json::object();
         if (e.hidden) editor.set("hidden", true);
@@ -141,6 +175,7 @@ SceneEntity parse_entity(const Json& json) {
         e.light = l;
     }
     if (const auto* script = json.find("script")) e.script = script->as_string();
+    if (const auto* prefab = json.find("prefab")) e.prefab = prefab->as_string();
     if (const auto* editor = json.find("editor")) {
         if (const auto* hidden = editor->find("hidden")) e.hidden = hidden->as_bool();
         if (const auto* locked = editor->find("locked")) e.locked = locked->as_bool();

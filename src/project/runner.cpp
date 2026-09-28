@@ -46,10 +46,36 @@ void add_moves(void* context, Actions& actions) {
         }
 }
 
+// Makes the engine entity for a scene entity: position, look, light and name. Scripts are attached
+// by the caller, once everything they might look for exists.
+Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPosition at) {
+    const Transform transform{at, at, e.angle};
+    const auto entity =
+        e.visual ? engine.scene.create(transform, {engine.materials.find(e.visual->material), e.visual->size})
+                 : engine.scene.create(transform);
+    if (e.light)
+        engine.scene.components<SceneLightComponent>().add(
+            entity, {e.light->color, e.light->radius, e.light->intensity, e.light->height});
+    runner.scripts->name(entity, e.name);
+    return entity;
+}
+
 Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
-    auto& lights = engine.scene.add_component<SceneLightComponent>();
+    engine.scene.add_component<SceneLightComponent>();
     runner.scripts = std::make_unique<ScriptHost>(engine, subfolder(runner.files, "scripts/"));
+    // Scripts spawn prefabs through the same path as scene entities, lights and scripts included.
+    runner.scripts->set_prefab_spawner(
+        [&runner, &engine](const std::string& name, WorldPosition at, float angle) {
+            if (!valid_prefab_name(name)) throw std::invalid_argument("Invalid prefab name \"" + name + "\"");
+            const auto text = runner.files("prefabs/" + name + ".json");
+            if (!text) throw std::runtime_error("Unknown prefab \"" + name + "\"");
+            auto prefab = parse_prefab(parse_json(*text));
+            prefab.angle = angle;
+            const auto entity = instantiate(runner, engine, prefab, at);
+            if (!prefab.script.empty()) runner.scripts->attach(entity, prefab.script);
+            return entity;
+        });
     std::vector<std::pair<Entity, const SceneEntity*>> scripted;
     const SceneEntity* player = nullptr;
     const SceneEntity* marker = nullptr;
@@ -59,27 +85,19 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
             continue;
         }
         if (e.name == "Spawn" && !marker) marker = &e;
-        const Transform transform{e.position, e.position, e.angle};
-        const auto entity =
-            e.visual
-                ? engine.scene.create(transform, {engine.materials.find(e.visual->material), e.visual->size})
-                : engine.scene.create(transform);
-        if (e.light)
-            lights.add(entity, {e.light->color, e.light->radius, e.light->intensity, e.light->height});
-        runner.scripts->name(entity, e.name);
+        const auto entity = instantiate(runner, engine, e, e.position);
         if (!e.script.empty()) scripted.emplace_back(entity, &e);
     }
     // A saved game resumes where the player was; a new one starts at the scene's player or spawn.
     const bool resumed = std::filesystem::exists(engine.checkpoint.read_path("player.delta"));
-    auto at = resumed ? spawn : player ? player->position : marker ? marker->position : spawn;
-    const Visual look = player && player->visual
-                            ? Visual{engine.materials.find(player->visual->material), player->visual->size}
-                            : Visual{0, {0.6F, 0.6F}};
-    const auto entity = engine.scene.create({at, at, player ? player->angle : 0}, look);
-    if (player && player->light)
-        lights.add(entity, {player->light->color, player->light->radius, player->light->intensity,
-                            player->light->height});
-    runner.scripts->name(entity, "Player");
+    const auto at = resumed ? spawn : player ? player->position : marker ? marker->position : spawn;
+    SceneEntity look;
+    if (player)
+        look = *player;
+    else
+        look.visual = SceneVisual{engine.materials[0].name, {0.6F, 0.6F}};
+    look.name = "Player";
+    const auto entity = instantiate(runner, engine, look, at);
     runner.player = entity;
     runner.scripted_player = player && !player->script.empty();
     if (runner.scripted_player) scripted.emplace_back(entity, player);

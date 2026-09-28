@@ -63,6 +63,39 @@ void editor_flags() {
     check(back.hidden && back.locked && back == flagged, "Hidden and locked round trip");
 }
 
+// Prefab files hold one entity at the origin; placing one keeps the copy's name and placement.
+void prefabs() {
+    for (const char* good : {"torch", "Tree_2", "big-rock"})
+        check(seed::valid_prefab_name(good), good);
+    for (const char* bad : {"", "has space", "a/b", "dot.json", "\u00e9"})
+        check(!seed::valid_prefab_name(bad), bad);
+
+    seed::SceneEntity torch;
+    torch.name = "torch";
+    torch.position = {{3, 4}, {5, 6}};
+    torch.angle = 1;
+    torch.prefab = "ignored";
+    torch.visual = seed::SceneVisual{"grass", {0.5F, 1}};
+    torch.light = seed::SceneLight{};
+    torch.script = "flicker.lua";
+    const auto stored = seed::parse_prefab(seed::parse_json(seed::to_json(seed::prefab_json(torch))));
+    check(stored.position == seed::WorldPosition{} && stored.angle == 0 && stored.prefab.empty() &&
+              stored.visual == torch.visual && stored.light == torch.light && stored.script == torch.script,
+          "A prefab stores the components at the origin, without a link");
+
+    seed::SceneEntity placed;
+    placed.name = "Torch by the door";
+    placed.position = {{0, 0}, {7, 8}};
+    placed.angle = 0.5F;
+    placed.prefab = "torch";
+    seed::apply_prefab(stored, placed);
+    check(placed.name == "Torch by the door" && placed.position.local.x == 7 && placed.angle == 0.5F &&
+              placed.visual == torch.visual && placed.script == "flicker.lua" && placed.prefab == "torch",
+          "Applying a prefab keeps the copy's name, placement and link");
+    check(seed::parse_entity(seed::entity_json(placed)).prefab == "torch",
+          "The link is saved with the scene");
+}
+
 void canonical() {
     // Offsets outside [0, 32) move into the neighbouring chunk.
     const auto scene = seed::parse_scene(seed::parse_json(
@@ -104,6 +137,7 @@ int main(int argc, char** argv) {
         round_trip(argv[1]);
         canonical();
         editor_flags();
+        prefabs();
         problems();
         malformed();
         std::cout << "Scene file checks passed.\n";

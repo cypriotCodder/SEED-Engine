@@ -13,6 +13,12 @@ function start()
   local w, h = spark:size()
   assert(w == 0.5 and h == 0.5, "spawn size")
 
+  prefab_spark = world.spawn{prefab = "spark", x = 6, y = 6, name = "Prefab spark"}
+  local pw, ph = prefab_spark:size()
+  assert(math.abs(pw - 0.4) < 1e-6 and math.abs(ph - 0.4) < 1e-6 and prefab_spark:name() == "Prefab spark",
+         "prefabs spawn with their look")
+  assert(not pcall(world.spawn, {prefab = "ghost", x = 0, y = 0}), "an unknown prefab is an error")
+
   local tile = world.tile(0.5, 0.5)
   assert(tile and tile.elevation > 0 and type(tile.material) == "string", "the tile under the player is land")
   assert(world.tile(1e6, 1e6) == nil, "tiles far away are not loaded")
@@ -39,6 +45,7 @@ function update(dt)
   assert(self:position() > before, "move walks")
   if steps == 30 then
     assert(spark:angle() > 0.3, "the spawned entity's own script runs")
+    assert(prefab_spark:angle() > 0.3, "a spawned prefab's script runs")
     assert(game.time() > 0.45, "game time advances")
     print("Script checks passed.")
   end

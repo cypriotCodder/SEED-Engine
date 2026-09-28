@@ -142,6 +142,15 @@ struct ScriptApi {
         lua_getfield(lua, 1, "y");
         const auto at = position_at(lua, -2);
         lua_pop(lua, 2);
+        if (const auto prefab = text("prefab"); !prefab.empty()) {
+            // A prefab brings its own look, light and script; a name given here replaces its own.
+            auto& self = host(lua);
+            if (!self.spawn_prefab_) luaL_error(lua, "prefabs cannot be spawned here");
+            const auto entity = self.spawn_prefab_(prefab, at, static_cast<float>(number("angle", 0)));
+            if (const auto name = text("name"); !name.empty()) self.name(entity, name);
+            push_entity(lua, entity);
+            return 1;
+        }
         const Transform t{at, at, static_cast<float>(number("angle", 0))};
         const auto material = text("material");
         Vec2 size{1, 1};

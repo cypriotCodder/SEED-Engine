@@ -21,7 +21,7 @@ constexpr const char* console_window = "Console";
 constexpr const char* settings_window = "Project Settings";
 constexpr std::size_t file_list_limit = 5000;
 constexpr std::size_t log_limit = 2000;
-constexpr int layout_version = 2; // Bump when panels are added or removed.
+constexpr int layout_version = 3; // Bump when panels are added or removed.
 
 fs::path preferences_directory(const fs::path& override_path) {
     if (!override_path.empty()) return override_path;
@@ -350,6 +350,7 @@ void App::step_history(bool redo) {
     const auto& state = redo ? history_.redo() : history_.undo();
     assets_.set(state.assets);
     scene_.set(state.scene);
+    scene_.set_prefabs(state.prefabs);
     edited_name_ = state.project_name;
 }
 
@@ -603,6 +604,7 @@ void App::build_default_layout(unsigned dockspace) {
     const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.26F, nullptr, &center);
     const ImGuiID left_bottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.45F, nullptr, &left);
     ImGui::DockBuilderDockWindow(SceneEditor::hierarchy_id, left);
+    ImGui::DockBuilderDockWindow(SceneEditor::prefabs_id, left_bottom);
     ImGui::DockBuilderDockWindow(project_window, left_bottom);
     ImGui::DockBuilderDockWindow(settings_window, right);
     ImGui::DockBuilderDockWindow(SceneEditor::inspector_id, right);
@@ -615,7 +617,7 @@ void App::build_default_layout(unsigned dockspace) {
     show_project_ = show_console_ = show_settings_ = true;
     assets_.show_materials = assets_.show_input = assets_.show_sounds = assets_.show_particles =
         assets_.show_terrain = true;
-    scene_.show_scene = scene_.show_hierarchy = scene_.show_inspector = true;
+    scene_.show_scene = scene_.show_hierarchy = scene_.show_inspector = scene_.show_prefabs = true;
 }
 
 void App::menu_bar() {
@@ -653,6 +655,7 @@ void App::menu_bar() {
         ImGui::MenuItem("Scene", nullptr, &scene_.show_scene);
         ImGui::MenuItem("Hierarchy", nullptr, &scene_.show_hierarchy);
         ImGui::MenuItem("Inspector", nullptr, &scene_.show_inspector);
+        ImGui::MenuItem("Prefabs", nullptr, &scene_.show_prefabs);
         ImGui::Separator();
         ImGui::MenuItem(project_window, nullptr, &show_project_);
         ImGui::MenuItem(console_window, nullptr, &show_console_);

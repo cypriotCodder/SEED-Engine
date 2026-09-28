@@ -28,11 +28,24 @@ struct SceneEntity {
     std::optional<SceneVisual> visual;
     std::optional<SceneLight> light;
     std::string script; // A file in the project's scripts/ folder, such as "player.lua"; empty for none.
+    // The prefab this entity was placed from (prefabs/<name>.json), or empty. A placed prefab keeps
+    // its own name, position and angle; its visual, light and script are the prefab's, copied here
+    // so games load scenes without resolving prefabs.
+    std::string prefab;
     // Editor-only: hidden entities are not drawn in the Scene view; locked ones cannot be picked
     // there. Games ignore both.
     bool hidden{}, locked{};
     bool operator==(const SceneEntity&) const = default;
 };
+// Whether `name` can name a prefab: 1 to 64 letters, digits, '_' and '-'.
+bool valid_prefab_name(std::string_view name);
+// A prefab file (prefabs/<name>.json): {"format": 1, "entity": {...}} holding one entity, placed
+// at the origin.
+Json prefab_json(const SceneEntity& entity);
+SceneEntity parse_prefab(const Json& json);
+// Gives `placed` the prefab's visual, light and script, keeping its own name and placement.
+void apply_prefab(const SceneEntity& prefab, SceneEntity& placed);
+
 // Whether `name` is a plain script file name: letters, digits, '_', '-' and '.', ending in ".lua".
 bool valid_script_name(std::string_view name);
 

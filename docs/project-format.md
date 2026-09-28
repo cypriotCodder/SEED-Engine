@@ -7,6 +7,7 @@ My Game/
   project.seed.json   project identity
   assets/             data assets, one file per kind, including terrain.json
   scenes/             scenes, one file each; new projects start with main.json
+  prefabs/            reusable entities, one file each
   scripts/            (Lua gameplay scripts, planned)
   .seed/              per-user editor state such as the window layout; ignored by git
 ```
@@ -26,6 +27,10 @@ Each file is `{"format": 1, "<kind>": [...]}`. A missing file is an empty list. 
 
 Floats are written in the shortest form that reads back to the same 32-bit value.
 
+## prefabs/
+
+Each `<name>.json` is `{"format": 1, "entity": {...}}`: one entity in the scene format, placed at the origin. Names use letters, digits, `_` and `-`. Export checks every prefab and that every prefab a scene links exists.
+
 ### terrain.json
 
 `{"format": 1, "terrain": {...}}` describes the world generator. The generator version saved with worlds is a hash of these settings (without `default_seed`), so any change starts new worlds instead of mixing old saves with new terrain.
@@ -42,6 +47,8 @@ Each `<name>.json` is `{"format": 1, "entities": [...]}`, at most 4096 entities,
 
 - `visual`: `material` (a material name) and `size` ([w, h], above 0 and at most 64).
 - `light`: `color` ([r, g, b], 0–16), `radius` (up to 256), `intensity` (0–64) and `height` (above 0, at most 64).
+
+`prefab` (optional) links a placed copy to `prefabs/<name>.json`; the copy's `visual`, `light` and `script` are the prefab's, stored in the scene too so games need not resolve prefabs. `editor` (optional) holds editor-only `hidden` and `locked` flags that games ignore.
 
 An entity with no components is a named marker, such as a spawn point. Material references are checked against `assets/materials.json`; the editor will not save a scene with problems.
 

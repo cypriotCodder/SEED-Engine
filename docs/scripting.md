@@ -52,6 +52,7 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `input.axis(negative, positive)` | -1, 0 or 1 from two actions. |
 | `world.find(name)` | The first entity with that name, or `nil`. |
 | `world.spawn{x=, y=, name=, material=, size=, angle=, script=}` | A new entity; `material` gives it a visual, `size` is a number or `{w, h}`, `script` attaches a script. |
+| `world.spawn{prefab=, x=, y=, name=, angle=}` | A copy of a prefab, with its look, light and script. |
 | `world.tile(x, y)` | `{material=, object=, solid=, elevation=}` for a loaded tile (`object` is `nil` when nothing stands there), or `nil` far from the camera. Water has elevation below 0. |
 | `sound.play(name)` | A sound from the Sounds panel. |
 | `particles.burst(name, x, y)` | A particle style from the Particles panel. |

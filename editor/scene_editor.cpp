@@ -1,4 +1,5 @@
 #include "scene_editor.hpp"
+#include "io/storage.hpp"
 #include "project.hpp"
 #include <algorithm>
 #include <cctype>
@@ -67,6 +68,24 @@ void SceneEditor::load(const fs::path& project, const std::string& name) {
     folder_ = folder;
     name_ = name;
     saved_ = edited_ = std::move(scene);
+    // Prefabs belong to the project; a broken file is reported and left out.
+    prefabs_.clear();
+    std::error_code prefab_error;
+    for (const auto& entry : fs::directory_iterator(project / "prefabs", prefab_error)) {
+        const auto name = entry.path().stem().string();
+        if (entry.path().extension() != ".json" || !valid_prefab_name(name)) continue;
+        try {
+            auto prefab = parse_prefab(parse_json(read_text(entry.path())));
+            prefab.name = name;
+            prefabs_[name] = prefab;
+        } catch (const std::exception& failure) {
+            log_(true, "prefabs/" + entry.path().filename().string() + ": " + failure.what());
+        }
+    }
+    saved_prefabs_ = prefabs_;
+    // Placed copies follow their prefab, even if it changed while this scene was closed.
+    sync_prefab_copies();
+    saved_ = edited_;
     clear_selection();
     if (!edited_.entities.empty()) select_only(0);
     camera_ = {};
@@ -85,20 +104,79 @@ void SceneEditor::unload() {
     folder_.clear();
     name_.clear();
     saved_ = edited_ = {};
+    prefabs_.clear();
+    saved_prefabs_.clear();
     clear_selection();
     view_visible_ = false;
 }
 
 bool SceneEditor::save(const Assets& assets) {
     if (!dirty()) return true;
-    if (const auto problems = edited_.problems(assets); !problems.empty()) {
+    SceneFile check = edited_;
+    for (const auto& [name, prefab] : prefabs_)
+        check.entities.push_back(prefab);
+    if (const auto problems = check.problems(assets); !problems.empty()) {
         log_(true, "Scene \"" + name_ + "\" not saved. Fix these first:\n" + problems);
         return false;
     }
-    save_scene(folder_ / (name_ + ".json"), edited_);
-    saved_ = edited_;
-    log_(false, "Saved scene \"" + name_ + "\".");
+    const auto folder = folder_.parent_path() / "prefabs";
+    if (prefabs_ != saved_prefabs_) {
+        fs::create_directories(folder);
+        for (const auto& [name, prefab] : prefabs_)
+            if (!saved_prefabs_.count(name) || !(saved_prefabs_.at(name) == prefab))
+                write_text(folder / (name + ".json"), to_json(prefab_json(prefab)));
+        for (const auto& [name, prefab] : saved_prefabs_)
+            if (!prefabs_.count(name)) fs::remove(folder / (name + ".json")); // Deleted in the Prefabs panel.
+        saved_prefabs_ = prefabs_;
+        log_(false, "Saved prefabs.");
+    }
+    if (edited_ != saved_) {
+        save_scene(folder_ / (name_ + ".json"), edited_);
+        saved_ = edited_;
+        log_(false, "Saved scene \"" + name_ + "\".");
+    }
     return true;
+}
+
+void SceneEditor::sync_prefab_copies() {
+    for (auto& e : edited_.entities)
+        if (const auto found = prefabs_.find(e.prefab); !e.prefab.empty() && found != prefabs_.end())
+            apply_prefab(found->second, e);
+}
+
+void SceneEditor::place_prefab(const std::string& name, WorldPosition at) {
+    const auto found = prefabs_.find(name);
+    if (found == prefabs_.end()) return;
+    if (edited_.entities.size() >= SceneFile::capacity)
+        return log_(true, "A scene holds at most 4096 entities.");
+    auto entity = found->second;
+    entity.prefab = name;
+    entity.position = at;
+    // Named after the prefab, numbered when the name is taken.
+    const auto taken = [&](const std::string& candidate) {
+        return std::any_of(edited_.entities.begin(), edited_.entities.end(),
+                           [&](const SceneEntity& e) { return e.name == candidate; });
+    };
+    entity.name = name;
+    for (int n = 2; taken(entity.name); ++n)
+        entity.name = name + " " + std::to_string(n);
+    edited_.entities.push_back(entity);
+    select_only(static_cast<int>(edited_.entities.size()) - 1);
+}
+
+void SceneEditor::make_prefab(const std::string& name) {
+    if (primary_ < 0 || !valid_prefab_name(name) || prefabs_.count(name)) return;
+    auto& e = edited_.entities[static_cast<std::size_t>(primary_)];
+    auto prefab = e;
+    prefab.name = name;
+    prefab.position = {};
+    prefab.angle = 0;
+    prefab.prefab.clear();
+    prefab.hidden = prefab.locked = false;
+    prefabs_[name] = prefab;
+    e.prefab = name;
+    log_(false, "Made prefab \"" + name + "\" from \"" + e.name +
+                    "\"; drag it from the Prefabs panel to place copies.");
 }
 
 void SceneEditor::sync(const Assets& assets) {
@@ -327,6 +405,7 @@ void SceneEditor::draw(const Assets& assets) {
         view_visible_ = false;
     if (show_hierarchy) hierarchy();
     if (show_inspector) inspector(assets);
+    if (show_prefabs) prefabs_panel();
 }
 
 SceneEditor::Drag SceneEditor::handle_under(ImVec2 mouse) const {
@@ -502,6 +581,19 @@ void SceneEditor::scene_view() {
     ImGui::InvisibleButton("view", size,
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
                                ImGuiButtonFlags_MouseButtonMiddle);
+    // A prefab dragged from the Prefabs panel lands where it is dropped.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const auto* payload = ImGui::AcceptDragDropPayload("seed.prefab")) {
+            const std::string name(static_cast<const char*>(payload->Data),
+                                   static_cast<std::size_t>(payload->DataSize));
+            auto at = to_world(io.MousePos);
+            if (const float step = snap_step(); step > 0)
+                at = from_global(std::round(global_coordinate(at.chunk.x, at.local.x) / step) * step,
+                                 std::round(global_coordinate(at.chunk.y, at.local.y) / step) * step);
+            place_prefab(name, at);
+        }
+        ImGui::EndDragDropTarget();
+    }
     view_min_ = view_top;
     view_max_ = {view_top.x + size.x, view_top.y + size.y};
     view_visible_ = true;
@@ -869,6 +961,80 @@ void SceneEditor::scene_menu() {
     }
 }
 
+void SceneEditor::prefabs_panel() {
+    prefab_controls_.new_from_selection = {-1, -1};
+    prefab_controls_.rows.clear();
+    if (!ImGui::Begin(prefabs_id, &show_prefabs)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::BeginDisabled(primary_ < 0);
+    if (ImGui::SmallButton("New from Selection")) {
+        // Suggest the entity's name, keeping only the characters prefab names allow.
+        new_prefab_.clear();
+        for (const char c : edited_.entities[static_cast<std::size_t>(primary_)].name)
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')
+                new_prefab_ += c;
+            else if (c == ' ')
+                new_prefab_ += '_';
+        ImGui::OpenPopup("New prefab");
+    }
+    prefab_controls_.new_from_selection = {(ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2,
+                                           (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2};
+    ImGui::EndDisabled();
+    if (ImGui::BeginPopup("New prefab")) {
+        ImGui::TextUnformatted("Prefab name");
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        const bool enter = ImGui::InputText("##prefab", &new_prefab_, ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool valid = valid_prefab_name(new_prefab_), exists = prefabs_.count(new_prefab_) > 0;
+        if (!valid) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "Use letters, digits, '_' and '-'.");
+        if (exists) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "A prefab with this name exists.");
+        ImGui::BeginDisabled(!valid || exists);
+        if (ImGui::Button("Create", {200, 0}) || (enter && valid && !exists)) {
+            make_prefab(new_prefab_);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::EndPopup();
+    }
+    ImGui::BeginChild("prefabs", {0, 0}, ImGuiChildFlags_Borders);
+    std::string remove;
+    for (const auto& [name, prefab] : prefabs_) {
+        ImGui::PushID(name.c_str());
+        ImGui::Selectable(name.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick);
+        prefab_controls_.rows[name] = {(ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2,
+                                       (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2};
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            place_prefab(name, camera_);
+        ImGui::SetItemTooltip(
+            "Drag into the Scene view to place a copy, or double-click to place one at the centre.");
+        if (ImGui::BeginDragDropSource()) {
+            ImGui::SetDragDropPayload("seed.prefab", name.data(), name.size());
+            ImGui::Text("Place %s", name.c_str());
+            ImGui::EndDragDropSource();
+        }
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Place at Centre")) place_prefab(name, camera_);
+            if (ImGui::MenuItem("Delete Prefab")) remove = name;
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+    }
+    if (!remove.empty()) {
+        // Copies keep their components and simply stop following the deleted prefab.
+        for (auto& e : edited_.entities)
+            if (e.prefab == remove) e.prefab.clear();
+        prefabs_.erase(remove);
+        log_(false, "Deleted prefab \"" + remove +
+                        "\"; its copies stay as plain entities. Save to remove the file.");
+    }
+    if (prefabs_.empty())
+        ImGui::TextDisabled("Select an entity and press New from Selection to make a reusable prefab.");
+    ImGui::EndChild();
+    ImGui::End();
+}
+
 void SceneEditor::reorder(std::vector<int> moving, int target) {
     std::vector<SceneEntity> moved;
     for (const int i : moving)
@@ -1093,6 +1259,46 @@ void SceneEditor::inspector(const Assets& assets) {
     ImGui::SetNextItemWidth(-1);
     if (ImGui::DragFloat("##angle", &degrees, 1, -360, 360, "%.1f")) e.angle = degrees * pi / 180;
 
+    prefab_controls_.apply = {-1, -1};
+    if (!e.prefab.empty()) {
+        // A placed prefab: its components come from the prefab. Edits here can be applied to the
+        // prefab (and so to every copy), reverted, or kept by unlinking this copy.
+        ImGui::Separator();
+        const auto found = prefabs_.find(e.prefab);
+        if (found == prefabs_.end()) {
+            ImGui::TextColored({0.95F, 0.55F, 0.4F, 1}, "Prefab \"%s\" is missing.", e.prefab.c_str());
+            if (ImGui::Button("Unlink", {-1, 0})) e.prefab.clear();
+        } else {
+            SceneEntity as_prefab = e;
+            apply_prefab(found->second, as_prefab);
+            const bool modified = !(as_prefab == e);
+            ImGui::Text("Prefab: %s%s", e.prefab.c_str(), modified ? "  (modified)" : "");
+            const float third = (ImGui::GetContentRegionAvail().x - 2 * ImGui::GetStyle().ItemSpacing.x) / 3;
+            ImGui::BeginDisabled(!modified);
+            if (ImGui::Button("Apply", {third, 0})) {
+                auto updated = e;
+                updated.name = found->second.name;
+                updated.position = {};
+                updated.angle = 0;
+                updated.prefab.clear();
+                updated.hidden = updated.locked = false;
+                found->second = updated;
+                sync_prefab_copies();
+                log_(false, "Applied to prefab \"" + e.prefab + "\" and its copies in this scene.");
+            }
+            prefab_controls_.apply = {(ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2,
+                                      (ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) / 2};
+            ImGui::SetItemTooltip("Make these components the prefab's, for every copy.");
+            ImGui::SameLine();
+            if (ImGui::Button("Revert", {third, 0})) apply_prefab(found->second, e);
+            ImGui::SetItemTooltip("Take the prefab's components back.");
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button("Unlink", {third, 0})) e.prefab.clear();
+            ImGui::SetItemTooltip("Keep this entity as it is, no longer following the prefab.");
+        }
+    }
+
     if (e.visual) {
         bool keep = true;
         if (ImGui::CollapsingHeader("Visual", &keep, ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1219,6 +1425,7 @@ void SceneEditor::inspector(const Assets& assets) {
                 if (e.light->height != before.light->height) other.light->height = e.light->height;
             }
             if (e.script != before.script) other.script = e.script;
+            if (e.prefab != before.prefab) other.prefab = e.prefab;
         }
     }
     // This entity's problems, from the same checks that block saving.

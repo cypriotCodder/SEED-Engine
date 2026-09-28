@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "entity": {
+    "name": "spark",
+    "chunk": [0, 0],
+    "position": [0, 0],
+    "angle": 0,
+    "visual": {"material": "stone", "size": [0.4, 0.4]},
+    "script": "spinner.lua"
+  }
+}

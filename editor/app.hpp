@@ -121,10 +121,13 @@ private:
     struct Snapshot {
         Assets assets;
         SceneFile scene;
+        SceneEditor::Prefabs prefabs;
         std::string scene_name, project_name;
         bool operator==(const Snapshot&) const = default;
     };
-    Snapshot snapshot() const { return {assets_.assets(), scene_.scene(), scene_.name(), edited_name_}; }
+    Snapshot snapshot() const {
+        return {assets_.assets(), scene_.scene(), scene_.prefabs(), scene_.name(), edited_name_};
+    }
     History<Snapshot> history_;
     std::string history_scene_;
 };

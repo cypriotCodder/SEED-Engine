@@ -1,9 +1,11 @@
 #pragma once
 #include "core/ecs.hpp"
 #include "project/archive.hpp"
+#include "world/coordinates.hpp"
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -38,6 +40,10 @@ public:
     void name(Entity entity, const std::string& name);
     // Loads scripts/<file> for `entity` and runs its top level now.
     void attach(Entity entity, const std::string& file);
+    // How world.spawn{prefab = ...} makes an entity: the runner instantiates prefabs, with their
+    // lights and scripts. Without one, spawning a prefab is an error.
+    using PrefabSpawner = std::function<Entity(const std::string& name, WorldPosition at, float angle)>;
+    void set_prefab_spawner(PrefabSpawner spawner) { spawn_prefab_ = std::move(spawner); }
     // Runs pending start() calls, then update(dt) on every live script.
     void update(float dt);
     unsigned errors() const { return errors_; }
@@ -57,6 +63,7 @@ private:
 
     Engine& engine_;
     ProjectFiles scripts_;
+    PrefabSpawner spawn_prefab_;
     lua_State* lua_{};
     std::size_t memory_{};
     std::vector<Instance> instances_;

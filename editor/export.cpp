@@ -97,7 +97,7 @@ std::string export_problems(const Project& project) {
         return std::string("assets: ") + error.what() + "\n";
     }
     const auto scripts = project.root / "scripts";
-    std::set<std::string> referenced;
+    std::set<std::string> referenced, linked_prefabs;
     for (const auto& file : files_in(project.root / "scenes", ".json")) {
         const auto where = "scenes/" + file.filename().string() + ": ";
         try {
@@ -108,12 +108,29 @@ std::string export_problems(const Project& project) {
                 out += where + problems.substr(start, end - start + 1);
                 start = end + 1;
             }
-            for (const auto& e : scene.entities)
+            for (const auto& e : scene.entities) {
                 if (!e.script.empty()) referenced.insert(e.script);
+                if (!e.prefab.empty()) linked_prefabs.insert(e.prefab);
+            }
         } catch (const std::exception& error) {
             out += where + error.what() + "\n";
         }
     }
+    // Prefabs: each must load and be valid itself, and every prefab a scene links must exist.
+    for (const auto& file : files_in(project.root / "prefabs", ".json")) {
+        const auto where = "prefabs/" + file.filename().string() + ": ";
+        try {
+            SceneFile one;
+            one.entities = {parse_prefab(parse_json(read_text(file)))};
+            if (const auto problems = one.problems(assets); !problems.empty()) out += where + problems;
+            if (!one.entities[0].script.empty()) referenced.insert(one.entities[0].script);
+        } catch (const std::exception& error) {
+            out += where + error.what() + "\n";
+        }
+    }
+    for (const auto& name : linked_prefabs)
+        if (!fs::is_regular_file(project.root / "prefabs" / (name + ".json")))
+            out += "A scene uses prefab \"" + name + "\", which does not exist\n";
     for (const auto& name : referenced)
         if (!fs::is_regular_file(scripts / name))
             out += "A scene uses scripts/" + name + ", which does not exist\n";
@@ -137,7 +154,7 @@ ExportReport export_macos_app(const Project& project, const fs::path& player, co
         archive.files[path] = to_json(parse_json(read_text(project.root / path)), true);
     };
     add_json("project.seed.json");
-    for (const char* folder : {"assets", "scenes"})
+    for (const char* folder : {"assets", "scenes", "prefabs"})
         for (const auto& file : files_in(project.root / folder, ".json")) {
             const auto path = std::string(folder) + "/" + file.filename().string();
             if (!valid_project_path(path))

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <imgui.h>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -26,14 +27,19 @@ public:
     void load(const std::filesystem::path& project, const std::string& name);
     void unload();
     bool loaded() const { return !folder_.empty(); }
-    bool dirty() const { return edited_ != saved_; }
+    bool dirty() const { return edited_ != saved_ || prefabs_ != saved_prefabs_; }
     // Saves the scene; false, logging why, when it has problems.
     bool save(const Assets& assets);
     void revert() {
         edited_ = saved_;
+        prefabs_ = saved_prefabs_;
         clamp_selection();
     }
     const SceneFile& scene() const { return edited_; }
+    // The project's prefabs by name, as edited (prefabs/<name>.json); saved with the scene.
+    using Prefabs = std::map<std::string, SceneEntity>;
+    const Prefabs& prefabs() const { return prefabs_; }
+    void set_prefabs(const Prefabs& prefabs) { prefabs_ = prefabs; }
     // Replaces the edited scene, e.g. from undo.
     void set(const SceneFile& scene) {
         edited_ = scene;
@@ -59,10 +65,19 @@ public:
     // An error raised while drawing the view during ImGui's rendering, cleared by the call.
     std::string take_error() { return std::exchange(render_error_, {}); }
 
-    bool show_scene{true}, show_hierarchy{true}, show_inspector{true};
+    bool show_scene{true}, show_hierarchy{true}, show_inspector{true}, show_prefabs{true};
     static constexpr const char* scene_id = "###Scene";
     static constexpr const char* hierarchy_id = "Hierarchy";
     static constexpr const char* inspector_id = "Inspector";
+    static constexpr const char* prefabs_id = "Prefabs";
+
+    // Where the Prefabs panel and the Inspector's prefab bar drew their controls last frame, for
+    // automated UI tests.
+    struct PrefabControls {
+        ImVec2 new_from_selection{-1, -1}, apply{-1, -1};
+        std::map<std::string, ImVec2> rows;
+    };
+    const PrefabControls& prefab_controls() const { return prefab_controls_; }
 
 private:
     enum class Tool { move, rotate, scale };
@@ -81,6 +96,13 @@ private:
     void hierarchy();
     void inspector(const Assets& assets);
     void scene_menu();
+    void prefabs_panel();
+    // Places a copy of a prefab at `at`, linked to it, and selects it.
+    void place_prefab(const std::string& name, WorldPosition at);
+    // Makes a prefab from the primary entity and links that entity to it.
+    void make_prefab(const std::string& name);
+    // Copies each linked prefab's components into the scene's placed copies.
+    void sync_prefab_copies();
     // Moves the entities in `moving` (sorted indices) to just before `target` (size() for the end),
     // keeping their order and the selection.
     void reorder(std::vector<int> moving, int target);
@@ -168,6 +190,9 @@ private:
     std::string new_script_;
     std::string new_scene_;
     std::string search_;
+    Prefabs prefabs_, saved_prefabs_;
+    std::string new_prefab_;
+    PrefabControls prefab_controls_;
     int renaming_{-1}; // Entity whose name is being edited in the Hierarchy, or -1.
     std::string rename_text_;
     bool rename_focus_{};

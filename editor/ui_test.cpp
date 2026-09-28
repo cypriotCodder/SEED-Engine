@@ -111,6 +111,50 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
         check(rows.size() == 3 && rows[2].name.x >= 0 && rows[0].name.x < 0 && rows[1].name.x < 0,
               "search shows only matching entities");
     });
+
+    // Prefabs. Clear the search first; Campfire (now first) becomes a prefab.
+    click([this] { return scene_.search_box(); });
+    key(ImGuiKey_A, true);
+    key(ImGuiKey_Backspace);
+    click([this] { return at("Campfire"); });
+    click([this] { return scene_.prefab_controls().new_from_selection; });
+    add(3, [] {});
+    key(ImGuiKey_Enter); // Accept the suggested name, "Campfire".
+    add(3, [this] {
+        check(scene_.prefabs().count("Campfire") && scene_.scene().entities[0].prefab == "Campfire",
+              "New from Selection makes a prefab and links the entity");
+    });
+    // Drag it from the Prefabs panel into the view.
+    drag(
+        [this] {
+            const auto& rows = scene_.prefab_controls().rows;
+            const auto found = rows.find("Campfire");
+            return found == rows.end() ? ImVec2{-1, -1} : found->second;
+        },
+        [this] { return world_point(8, -3); });
+    add(3, [this] {
+        const auto& e = scene_.scene().entities;
+        check(e.size() == 4 && e[3].prefab == "Campfire" && e[3].name == "Campfire 2" &&
+                  std::abs(x_of("Campfire 2") - 8) < 0.05,
+              "dragging a prefab into the view places a linked copy");
+    });
+    // Widen the copy, apply it to the prefab: the original copy follows.
+    click([this] { return at("Campfire 2"); });
+    key(ImGuiKey_R);
+    drag([this] { return ImVec2{at("Campfire 2").x + 72, at("Campfire 2").y}; }, {36, 0});
+    click([this] { return scene_.prefab_controls().apply; });
+    add(3, [this] {
+        const auto& e = scene_.scene().entities;
+        check(e[3].visual && e[0].visual && std::abs(e[3].visual->size.x - 2.4F) < 0.05F &&
+                  e[0].visual->size == e[3].visual->size &&
+                  scene_.prefabs().at("Campfire").visual->size == e[3].visual->size,
+              "Apply updates the prefab and every copy");
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this] {
+        const auto& e = scene_.scene().entities;
+        check(e[0].visual && std::abs(e[0].visual->size.x - 1.6F) < 0.05F, "Cmd+Z undoes Apply");
+    });
 }
 
 void UiTest::type(const char* text) {
