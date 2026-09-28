@@ -3,6 +3,7 @@
 #include "io/storage.hpp"
 #include "physics/character.hpp"
 #include "project/characters.hpp"
+#include "project/game_settings.hpp"
 #include "project/scene_file.hpp"
 #include "script/host.hpp"
 #include <algorithm>
@@ -32,6 +33,7 @@ struct SceneLightComponent {
 struct Runner {
     ProjectFiles files;
     std::string id, name, title, save;
+    GameSettings game;
     Assets data; // For the scene's material names and the default seed.
     SceneFile scene;
     std::size_t player_index{}; // The scene entity that is the player.
@@ -177,16 +179,23 @@ void load(Runner& runner, ProjectFiles files, std::filesystem::path save) {
         throw std::runtime_error("This project was made by a newer editor");
     runner.name = json.at("name").as_string();
     runner.id = json.at("game_id").as_string();
-    runner.title = runner.name;
+    runner.game = parse_game_settings(json.find("game"));
+    if (const auto problem = runner.game.problems(); !problem.empty()) throw std::runtime_error(problem);
+    runner.title = runner.game.title.empty() ? runner.name : runner.game.title;
     runner.save = save.string();
     runner.data = load_assets(subfolder(runner.files, "assets/"));
-    if (const auto scene = runner.files("scenes/main.json")) try {
+    // The game starts in its start scene; a missing "main" is an empty scene, any other is an error.
+    const auto scene_path = "scenes/" + runner.game.start_scene + ".json";
+    const auto scene = runner.files(scene_path);
+    if (!scene && runner.game.start_scene != "main")
+        throw std::runtime_error("The start scene " + scene_path + " does not exist");
+    if (scene) try {
             runner.scene = parse_scene(parse_json(*scene));
         } catch (const std::exception& error) {
-            throw std::runtime_error(std::string("scenes/main.json: ") + error.what());
+            throw std::runtime_error(scene_path + ": " + error.what());
         }
     if (const auto problems = runner.scene.problems(runner.data); !problems.empty())
-        throw std::runtime_error("The main scene has problems:\n" + problems);
+        throw std::runtime_error("The start scene has problems:\n" + problems);
     // The player is the character marked as the player. Older projects mark it by name: an entity
     // named "Player" (moving itself if it has a script), else a new one at "Spawn" or the origin.
     auto& entities = runner.scene.entities;
@@ -222,6 +231,9 @@ int play(Runner& runner, int argc, char** argv) {
     game.title = runner.title.c_str();
     game.default_save = runner.save.c_str();
     game.default_seed = runner.data.terrain.default_seed;
+    game.window_width = runner.game.width;
+    game.window_height = runner.game.height;
+    game.fullscreen = runner.game.fullscreen;
     game.assets = &runner.data;
     game.actions = add_moves;
     game.setup = setup;

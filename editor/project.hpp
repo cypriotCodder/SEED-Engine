@@ -1,4 +1,5 @@
 #pragma once
+#include "project/game_settings.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -16,6 +17,7 @@ struct Project {
     std::string name;           // Shown in the editor and used as the default window title.
     // Stable identity recorded in the game's saves; generated once and never changed.
     std::string game_id;
+    GameSettings game; // Start scene and window.
     int format{project_format};
 };
 

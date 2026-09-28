@@ -49,6 +49,11 @@ public:
     // True while the mouse is changing the scene; an edit is finished only when this ends.
     bool busy() const { return drag_ != Drag::none && drag_ != Drag::box; }
     const std::string& name() const { return name_; }
+    const std::vector<std::string>& scene_names() const { return scene_names_; }
+    // The game window's logical size, for the Scene view's player camera frame.
+    void set_game_view(int width, int height) {
+        game_view_ = {static_cast<float>(width), static_cast<float>(height)};
+    }
     const std::vector<int>& selection() const { return selection_; }
     // Where a world position appears in the Scene view, in ImGui's screen coordinates.
     ImVec2 screen_of(WorldPosition position) const { return to_screen(position); }

@@ -20,7 +20,7 @@ T load(const char* name) {
 }
 } // namespace
 
-Window::Window(bool vsync) {
+Window::Window(bool vsync, int width, int height, bool fullscreen) {
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) fail("Initialize SDL");
     try {
@@ -29,8 +29,12 @@ Window::Window(bool vsync) {
         attribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         attribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
         attribute(SDL_GL_DOUBLEBUFFER, 1);
-        window_ = SDL_CreateWindow("Seed Engine", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
-                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+        if (width < 160 || height < 120 || width > 16384 || height > 16384)
+            throw std::invalid_argument("Window size out of range");
+        window_ =
+            SDL_CreateWindow("Seed Engine", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height,
+                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                                 (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
         if (!window_) fail("Create window");
         context_ = SDL_GL_CreateContext(window_);
         if (!context_) fail("Create OpenGL 4.1 context");

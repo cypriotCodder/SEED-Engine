@@ -1,0 +1,6 @@
+{
+  "seed_project": 1,
+  "name": "Start Scene",
+  "game_id": "start-scene-5eed0004",
+  "game": {"start_scene": "level2", "title": "Level Two", "width": 800, "height": 600, "fullscreen": false}
+}

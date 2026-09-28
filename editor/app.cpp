@@ -135,6 +135,7 @@ void App::open(const fs::path& path) {
     project_ = std::move(project);
     recent_.add(project_->root);
     edited_name_ = project_->name;
+    edited_game_ = project_->game;
     try {
         assets_.load(project_->root / "assets");
     } catch (const std::exception& error) {
@@ -183,12 +184,13 @@ void App::close_project() {
 }
 
 void App::save_settings() {
-    if (const auto problem = check_project_name(edited_name_); !problem.empty()) {
+    if (const auto problem = check_project_name(edited_name_) + edited_game_.problems(); !problem.empty()) {
         log(Level::error, "Project name not saved: " + problem);
         return;
     }
     auto updated = *project_;
     updated.name = edited_name_;
+    updated.game = edited_game_;
     save_project(updated);
     project_ = std::move(updated);
     window_.title(project_->name + " - Seed Editor");
@@ -196,14 +198,14 @@ void App::save_settings() {
 }
 
 bool App::dirty() const {
-    return project_ && (edited_name_ != project_->name || assets_.dirty() || scene_.dirty());
+    return project_ && (settings_changed() || assets_.dirty() || scene_.dirty());
 }
 
 bool App::save_all() {
     if (!project_) return true;
-    if (edited_name_ != project_->name) save_settings();
+    if (settings_changed()) save_settings();
     const bool assets = assets_.save(); // Scenes are checked against the assets, so they go first.
-    return edited_name_ == project_->name && assets && scene_.save(assets_.assets());
+    return !settings_changed() && assets && scene_.save(assets_.assets());
 }
 
 void App::leave(std::function<void()> then) {
@@ -229,6 +231,7 @@ void App::unsaved_popup() {
         assets_.revert();
         scene_.revert();
         edited_name_ = project_->name;
+        edited_game_ = project_->game;
         later(std::move(after_prompt_));
         ImGui::CloseCurrentPopup();
     }
@@ -352,6 +355,7 @@ void App::step_history(bool redo) {
     scene_.set(state.scene);
     scene_.set_prefabs(state.prefabs);
     edited_name_ = state.project_name;
+    edited_game_ = state.game;
 }
 
 void App::refresh_files() {
@@ -579,6 +583,7 @@ void App::workspace() {
     if (std::chrono::steady_clock::now() - files_scanned_ > std::chrono::seconds(2)) refresh_files();
     // Scene panels first: a dock node lists tabs in the order windows first appear, so Scene and
     // Inspector lead their nodes.
+    scene_.set_game_view(edited_game_.width, edited_game_.height);
     scene_.draw(assets_.assets());
     if (show_project_) project_panel();
     if (show_console_) console_panel();
@@ -633,6 +638,7 @@ void App::menu_bar() {
             assets_.revert();
             scene_.revert();
             edited_name_ = project_->name;
+            edited_game_ = project_->game;
             log(Level::info, "Reverted unsaved changes.");
         }
         if (ImGui::MenuItem("Show Project in Finder")) open_with_system(project_->root);
@@ -760,8 +766,7 @@ void App::settings_panel() {
     ImGui::TextUnformatted("Name");
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##project-name", &edited_name_);
-    const auto problem = check_project_name(edited_name_);
-    if (!problem.empty()) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "%s", problem.c_str());
+    const auto problem = check_project_name(edited_name_) + edited_game_.problems();
     ImGui::Dummy({0, 4});
     ImGui::TextUnformatted("Game ID");
     ImGui::TextDisabled("%s", project_->game_id.c_str());
@@ -770,14 +775,37 @@ void App::settings_panel() {
     ImGui::PushTextWrapPos(0);
     ImGui::TextDisabled("%s", project_->root.string().c_str());
     ImGui::PopTextWrapPos();
+
+    ImGui::SeparatorText("Game");
+    ImGui::TextUnformatted("Start scene");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::BeginCombo("##start", edited_game_.start_scene.c_str())) {
+        for (const auto& name : scene_.scene_names())
+            if (ImGui::Selectable(name.c_str(), name == edited_game_.start_scene))
+                edited_game_.start_scene = name;
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("The scene the game starts in, for Play and exported apps.");
+    ImGui::TextUnformatted("Window title");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##title", project_->name.c_str(), &edited_game_.title);
+    ImGui::TextUnformatted("Window size");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputInt2("##size", &edited_game_.width);
+    ImGui::Checkbox("Start fullscreen", &edited_game_.fullscreen);
+
+    if (!problem.empty()) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "%s", problem.c_str());
     ImGui::Dummy({0, 8});
-    const bool changed = edited_name_ != project_->name;
+    const bool changed = settings_changed();
     ImGui::BeginDisabled(!changed || !problem.empty());
     if (ImGui::Button("Save", {100, 0})) save_settings();
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(!changed);
-    if (ImGui::Button("Revert", {100, 0})) edited_name_ = project_->name;
+    if (ImGui::Button("Revert", {100, 0})) {
+        edited_name_ = project_->name;
+        edited_game_ = project_->game;
+    }
     ImGui::EndDisabled();
     ImGui::End();
 }

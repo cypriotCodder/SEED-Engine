@@ -36,6 +36,7 @@ Json to_json_value(const Project& project) {
     file.set("seed_project", project.format);
     file.set("name", project.name);
     file.set("game_id", project.game_id);
+    file.set("game", game_settings_json(project.game));
     return file;
 }
 
@@ -94,6 +95,8 @@ Project open_project(const fs::path& path) {
             throw std::runtime_error("Invalid name: " + problem);
         project.game_id = json.at("game_id").as_string();
         if (project.game_id.empty()) throw std::runtime_error("Empty game_id.");
+        project.game = parse_game_settings(json.find("game"));
+        if (const auto problem = project.game.problems(); !problem.empty()) throw std::runtime_error(problem);
         return project;
     } catch (const std::exception& error) {
         throw std::runtime_error("Cannot open " + file.string() + ": " + error.what());
@@ -103,6 +106,7 @@ Project open_project(const fs::path& path) {
 void save_project(const Project& project) {
     if (const auto problem = check_project_name(project.name); !problem.empty())
         throw std::invalid_argument(problem);
+    if (const auto problem = project.game.problems(); !problem.empty()) throw std::invalid_argument(problem);
     write_text(project.root / project_file_name, to_json(to_json_value(project)));
 }
 

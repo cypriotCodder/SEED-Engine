@@ -14,7 +14,7 @@ My Game/
 
 ## project.seed.json
 
-`seed_project` (format, currently 1), `name` (1–64 letters, digits, spaces, `-`, `_`) and `game_id`. The game ID is a slug of the name plus eight random hex digits, generated once. Saves record it, so it never changes, even when the project is renamed. The editor refuses projects from a newer format.
+`seed_project` (format, currently 1), `name` (1–64 letters, digits, spaces, `-`, `_`), `game_id`, and `game`: `start_scene` (the scene the game starts in, default `main`), `title` (window title; empty uses the name), `width` and `height` (logical window size, 320x240 to 7680x4320, default 1280x720) and `fullscreen`. Project files without `game` get the defaults. The game ID is a slug of the name plus eight random hex digits, generated once. Saves record it, so it never changes, even when the project is renamed. The editor refuses projects from a newer format.
 
 ## assets/
 

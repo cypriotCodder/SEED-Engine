@@ -20,7 +20,8 @@ struct Input {
 // Owns SDL video and a single GL context. All methods run on the main thread.
 class Window final {
 public:
-    explicit Window(bool vsync = true);
+    // A window of `width` x `height` logical pixels, or covering the screen when `fullscreen`.
+    explicit Window(bool vsync = true, int width = 1280, int height = 720, bool fullscreen = false);
     ~Window();
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;

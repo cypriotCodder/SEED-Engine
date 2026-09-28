@@ -102,6 +102,8 @@ private:
     // Workspace state.
     bool show_project_{true}, show_console_{true}, show_settings_{true}, show_about_{};
     std::string edited_name_;
+    GameSettings edited_game_;
+    bool settings_changed() const { return edited_name_ != project_->name || edited_game_ != project_->game; }
     std::vector<FileEntry> files_;
     std::chrono::steady_clock::time_point files_scanned_{};
     std::vector<LogLine> log_;
@@ -123,10 +125,12 @@ private:
         SceneFile scene;
         SceneEditor::Prefabs prefabs;
         std::string scene_name, project_name;
+        GameSettings game;
         bool operator==(const Snapshot&) const = default;
     };
     Snapshot snapshot() const {
-        return {assets_.assets(), scene_.scene(), scene_.prefabs(), scene_.name(), edited_name_};
+        return {assets_.assets(), scene_.scene(), scene_.prefabs(),
+                scene_.name(),    edited_name_,   edited_game_};
     }
     History<Snapshot> history_;
     std::string history_scene_;

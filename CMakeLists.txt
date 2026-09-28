@@ -78,7 +78,7 @@ function(seed_strict target)
     endif()
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
-    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/script/host.cpp src/core/metrics.cpp
+    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/project/game_settings.cpp src/script/host.cpp src/core/metrics.cpp
     src/app/app.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
@@ -189,6 +189,10 @@ if(BUILD_TESTING)
     add_test(NAME scripts COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_project" --smoke
         --save "${CMAKE_CURRENT_BINARY_DIR}/script-project-save")
     set_tests_properties(scripts PROPERTIES PASS_REGULAR_EXPRESSION "Script checks passed.*Character checks passed|Character checks passed.*Script checks passed"
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error")
+    add_test(NAME start_scene COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_scene_project"
+        --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/start-scene-save")
+    set_tests_properties(start_scene PROPERTIES PASS_REGULAR_EXPRESSION "Started in level2"
         FAIL_REGULAR_EXPRESSION "Script error|Engine error")
     add_test(NAME script_errors COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_errors" --smoke
         --save "${CMAKE_CURRENT_BINARY_DIR}/script-errors-save")

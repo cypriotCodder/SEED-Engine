@@ -63,6 +63,8 @@ struct Game {
     // Already-loaded project assets, used instead of project_assets; must outlive the Engine.
     const Assets* assets{};
     std::uint64_t default_seed{};
+    int window_width{1280}, window_height{720}; // Logical pixels.
+    bool fullscreen{};                          // Ignored by automated (--smoke) runs.
     const char* default_save{};
     const char* usage{}; // Game options, appended to the usage message.
     // How the game's world is generated and edited. Leave `terrain` unset to use the project's

@@ -56,6 +56,18 @@ void create_and_open(const fs::path& root) {
     const auto reopened = open_project(created.root);
     check(reopened.name == "Island Survival 2" && reopened.game_id == created.game_id, "Rename keeps the id");
 
+    // Game settings: defaults for new projects, round trips, and validation.
+    check(reopened.game == seed::GameSettings{}, "New projects start in main at 1280x720");
+    auto configured = reopened;
+    configured.game.start_scene = "level2";
+    configured.game.title = "Island!";
+    configured.game.width = 800;
+    configured.game.height = 600;
+    configured.game.fullscreen = true;
+    save_project(configured);
+    check(open_project(created.root).game == configured.game, "Game settings round trip");
+    configured.game.width = 10;
+    rejects([&] { save_project(configured); }, "A tiny window saved");
     rejects([&] { create_project(root, "Island Survival"); }, "Existing folder overwritten");
     rejects([&] { create_project(root, "Bad/Name"); }, "Invalid name created");
     const auto twin = create_project(root, "Island_Survival");
