@@ -46,3 +46,7 @@ Each `<name>.json` is `{"format": 1, "entities": [...]}`, at most 4096 entities,
 An entity with no components is a named marker, such as a spawn point. Material references are checked against `assets/materials.json`; the editor will not save a scene with problems.
 
 A C++ game uses a project's assets by setting `Game::project_assets` to the folder; the engine registers them before calling the game's own `materials`, `actions` and `effects` callbacks, which may add more.
+
+## Exported games
+
+An exported app carries the project as `Contents/Resources/game.seedpack`: the shared LZ4 envelope (checksummed; see [binary formats](save-format.md)) around u32 magic `0x4b415053` ("SPAK"), u32 version 1, u32 file count, then, in path order, u16 path length, path, u32 size and bytes for `project.seed.json`, `assets/*.json`, `scenes/*.json` (all JSON re-written without whitespace) and `scripts/*.lua`. Paths are relative and limited to letters, digits, `_`, `-` and `.` with `/` separators; unsafe, duplicate or out-of-order paths and trailing bytes are rejected. `seed_player` runs `game.seedpack` when it sits in the base folder SDL reports, which is `Contents/Resources` inside an app bundle.

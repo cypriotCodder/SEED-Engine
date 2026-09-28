@@ -60,6 +60,8 @@ struct Game {
     // relative to the executable unless absolute. Registered before the game's own callbacks run,
     // so those callbacks can add more. Optional.
     const char* project_assets{};
+    // Already-loaded project assets, used instead of project_assets; must outlive the Engine.
+    const Assets* assets{};
     std::uint64_t default_seed{};
     const char* default_save{};
     const char* usage{}; // Game options, appended to the usage message.

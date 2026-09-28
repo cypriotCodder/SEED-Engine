@@ -1,5 +1,6 @@
 #pragma once
 #include "asset_panels.hpp"
+#include "export.hpp"
 #include "history.hpp"
 #include "platform/window.hpp"
 #include "play.hpp"
@@ -22,6 +23,7 @@ struct Options {
     std::string create_name;
     std::filesystem::path preferences; // Overrides the per-user preferences folder.
     bool play{}; // Press Play once the project opens; with smoke, wait for the game to finish.
+    std::filesystem::path export_to; // Export the opened project here (replacing), then carry on.
 };
 
 // The Seed editor: a hub for creating and opening projects, and a dockable workspace for the open
@@ -61,6 +63,10 @@ private:
     void unsaved_popup();
     void record_history();
     void start_play();
+    std::filesystem::path player_path() const;
+    // Saves, then exports to `destination`; `replace` allows overwriting an existing app.
+    bool export_app(const std::filesystem::path& destination, bool replace);
+    void export_popup();
     void play_controls();
     void step_history(bool redo);
     void refresh_files();
@@ -106,6 +112,8 @@ private:
     AssetPanels assets_;
     SceneEditor scene_;
     PlaySession play_;
+    std::filesystem::path pending_export_; // Waiting for the user to allow replacing an app.
+    bool export_failed_{};
     // What undo restores: every edit to the project's assets, the open scene and its settings.
     struct Snapshot {
         Assets assets;

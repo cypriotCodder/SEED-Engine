@@ -21,8 +21,8 @@ struct SceneLightComponent {
 };
 
 struct Runner {
-    std::filesystem::path root;
-    std::string id, name, title, save, assets;
+    ProjectFiles files;
+    std::string id, name, title, save;
     Assets data; // For the scene's material names and the default seed.
     SceneFile scene;
     std::array<ActionId, 4> moves{};
@@ -49,7 +49,7 @@ void add_moves(void* context, Actions& actions) {
 Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
     auto& lights = engine.scene.add_component<SceneLightComponent>();
-    runner.scripts = std::make_unique<ScriptHost>(engine, runner.root / "scripts");
+    runner.scripts = std::make_unique<ScriptHost>(engine, subfolder(runner.files, "scripts/"));
     std::vector<std::pair<Entity, const SceneEntity*>> scripted;
     const SceneEntity* player = nullptr;
     const SceneEntity* marker = nullptr;
@@ -139,38 +139,30 @@ void render(void*, Engine& engine, const View& view) {
     }
 }
 
-Runner load(const std::filesystem::path& project) {
-    Runner runner;
-    runner.root = std::filesystem::weakly_canonical(std::filesystem::absolute(project));
-    const auto file = runner.root / "project.seed.json";
-    if (!std::filesystem::exists(file))
-        throw std::runtime_error("Not a Seed project: " + runner.root.string());
-    const auto json = parse_json(read_text(file, 1024 * 1024));
+// Reads a project through `files`. `save` is where its games are saved unless --save says otherwise.
+void load(Runner& runner, ProjectFiles files, std::filesystem::path save) {
+    runner.files = std::move(files);
+    const auto project = runner.files("project.seed.json");
+    if (!project) throw std::runtime_error("Not a Seed project: no project.seed.json");
+    const auto json = parse_json(*project);
     if (json.at("seed_project").as_int(1, 1000000) > 1)
         throw std::runtime_error("This project was made by a newer editor");
     runner.name = json.at("name").as_string();
     runner.id = json.at("game_id").as_string();
     runner.title = runner.name;
-    runner.save = (runner.root / ".seed" / "save").string();
-    runner.assets = (runner.root / "assets").string();
-    runner.data = load_assets(runner.root / "assets");
-    const auto scene_file = runner.root / "scenes" / "main.json";
-    if (std::filesystem::exists(scene_file)) runner.scene = load_scene(scene_file);
+    runner.save = save.string();
+    runner.data = load_assets(subfolder(runner.files, "assets/"));
+    if (const auto scene = runner.files("scenes/main.json")) try {
+            runner.scene = parse_scene(parse_json(*scene));
+        } catch (const std::exception& error) {
+            throw std::runtime_error(std::string("scenes/main.json: ") + error.what());
+        }
     if (const auto problems = runner.scene.problems(runner.data); !problems.empty())
         throw std::runtime_error("The main scene has problems:\n" + problems);
     if (runner.data.materials.empty()) throw std::runtime_error("The project has no materials yet");
-    return runner;
 }
-} // namespace
 
-int run_project(const std::filesystem::path& project, int argc, char** argv) {
-    Runner runner;
-    try {
-        runner = load(project);
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "Engine error: %s\n", error.what());
-        return 1;
-    }
+int play(Runner& runner, int argc, char** argv) {
     Game game;
     game.context = &runner;
     game.id = runner.id.c_str();
@@ -178,7 +170,7 @@ int run_project(const std::filesystem::path& project, int argc, char** argv) {
     game.title = runner.title.c_str();
     game.default_save = runner.save.c_str();
     game.default_seed = runner.data.terrain.default_seed;
-    game.project_assets = runner.assets.c_str();
+    game.assets = &runner.data;
     game.actions = add_moves;
     game.setup = setup;
     game.step = step;
@@ -193,5 +185,42 @@ int run_project(const std::filesystem::path& project, int argc, char** argv) {
             throw std::runtime_error(std::to_string(errors) + " script error(s); see above");
     };
     return run(game, argc, argv);
+}
+} // namespace
+
+int run_project(const std::filesystem::path& project, int argc, char** argv) {
+    Runner runner;
+    try {
+        const auto root = std::filesystem::weakly_canonical(std::filesystem::absolute(project));
+        if (!std::filesystem::is_directory(root))
+            throw std::runtime_error("Not a Seed project: " + root.string());
+        load(runner, folder_files(root), root / ".seed" / "save");
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "Engine error: %s\n", error.what());
+        return 1;
+    }
+    return play(runner, argc, argv);
+}
+
+int run_archive(const std::filesystem::path& archive, int argc, char** argv) {
+    Runner runner;
+    try {
+        const auto files = ProjectArchive::read(archive).reader();
+        // An exported game saves in the player's Application Support folder, under its game ID.
+        const auto project = files("project.seed.json");
+        if (!project) throw std::runtime_error("The game archive has no project.seed.json");
+        const auto id = parse_json(*project).at("game_id").as_string();
+        if (!valid_project_path(id) || id.find('/') != std::string::npos)
+            throw std::runtime_error("Invalid game ID");
+        char* base = SDL_GetPrefPath("Seed", id.c_str());
+        if (!base) throw std::runtime_error(std::string("Cannot find a folder for saves: ") + SDL_GetError());
+        const std::filesystem::path saves = std::filesystem::path(base) / "save";
+        SDL_free(base);
+        load(runner, files, saves);
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "Engine error: %s: %s\n", archive.string().c_str(), error.what());
+        return 1;
+    }
+    return play(runner, argc, argv);
 }
 } // namespace seed

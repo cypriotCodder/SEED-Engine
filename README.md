@@ -31,6 +31,7 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 - **Materials**, **Input**, **Sounds** and **Particles** panels that edit the project's data assets, with validation as you type. Input bindings are recorded by pressing the key or button; sounds can be played while you tune them.
 - **Scripts**: Lua 5.4 gameplay scripts attached to entities with the Inspector's Script component, checked for syntax as you work. See [scripting](docs/scripting.md).
 - **Play** (Cmd+P) saves the project and runs it as a real game in its own window, with the game's output in the Console; **Stop** or closing the game window returns to editing. Every Play starts a fresh world, so the project's saves are untouched.
+- **File → Export macOS App…** builds a standalone `<Name>.app`: the player, the project checked and packed into one compressed `game.seedpack`, an `Info.plist`, and the licences of the libraries a game contains. The executable is stripped and the app signed ad hoc so it runs on this Mac. Exported games save in `~/Library/Application Support/Seed/<game id>/`. Export refuses projects with problems, including script syntax errors and missing scripts.
 - Cmd+Z and Shift+Cmd+Z undo and redo any edit in these panels (100 steps, per scene). Cmd+S saves; closing or quitting with unsaved changes asks first.
 
 Projects are folders of JSON text files, described in [the project format](docs/project-format.md). `seed_player` runs a project with no game code: its assets and terrain, its main scene, and a player (the scene entity named `Player`, or one at a `Spawn` marker) moved with the `move_up`/`move_down`/`move_left`/`move_right` actions, which default to WASD and the arrow keys. `seed_player --project tests/sample_project` runs the sample project. A C++ game can still use a project's assets by setting `Game::project_assets`, as [tests/minimal_game.cpp](tests/minimal_game.cpp) does for materials.
@@ -39,7 +40,7 @@ Projects are folders of JSON text files, described in [the project format](docs/
 ./build/release/editor/seed_editor
 ```
 
-Exporting a standalone game is the planned next step. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
+Distributing to other Macs needs a Developer ID signature and notarization, which export does not do yet. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
 
 ## Making a new game
 

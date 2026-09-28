@@ -77,7 +77,8 @@ Json json_float(float value);
 
 // Parses strict RFC 8259 JSON: no comments, no trailing commas, at most 128 levels of nesting.
 Json parse_json(std::string_view text);
-// Writes JSON with two-space indentation and a trailing newline. Numbers use the shortest text
-// that reads back to the same double; non-finite numbers are rejected.
-std::string to_json(const Json& value);
+// Writes JSON with two-space indentation and a trailing newline, or with no whitespace at all
+// when `compact`. Numbers use the shortest text that reads back to the same double; non-finite
+// numbers are rejected.
+std::string to_json(const Json& value, bool compact = false);
 } // namespace seed

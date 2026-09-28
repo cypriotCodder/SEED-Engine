@@ -10,4 +10,7 @@ namespace seed {
 // block movement. `argc`/`argv` carry the engine's options (--smoke, --save, --seed, ...).
 // Returns the process exit code, like seed::run.
 int run_project(const std::filesystem::path& project, int argc, char** argv);
+// Runs an exported game's archive (game.seedpack) the same way. Saves go to the player's
+// Application Support folder unless --save says otherwise.
+int run_archive(const std::filesystem::path& archive, int argc, char** argv);
 } // namespace seed

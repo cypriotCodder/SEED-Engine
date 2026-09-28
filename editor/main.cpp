@@ -19,13 +19,16 @@ int main(int argc, char** argv) {
             else if (arg == "--create" && i + 2 < argc) {
                 options.create_parent = argv[++i];
                 options.create_name = argv[++i];
-            } else if (arg == "--play")
+            } else if (arg == "--export" && i + 1 < argc)
+                options.export_to = argv[++i];
+            else if (arg == "--play")
                 options.play = true;
             else if (arg == "--preferences" && i + 1 < argc)
                 options.preferences = argv[++i];
             else
-                throw std::invalid_argument("Usage: seed_editor [--open PROJECT] [--create PARENT NAME] "
-                                            "[--preferences DIR] [--play] [--smoke] [--screenshot FILE.ppm]");
+                throw std::invalid_argument(
+                    "Usage: seed_editor [--open PROJECT] [--create PARENT NAME] "
+                    "[--preferences DIR] [--export DIR] [--play] [--smoke] [--screenshot FILE.ppm]");
         }
         return seed::editor::App(options).run();
     } catch (const std::exception& error) {

@@ -20,12 +20,17 @@ std::filesystem::path asset_path(const char* name) {
 }
 
 Assets load_project_assets(const Game& game) {
-    if (!game.project_assets) return {};
-    std::filesystem::path folder = game.project_assets;
-    if (folder.is_relative()) folder = asset_path(game.project_assets);
-    if (!std::filesystem::is_directory(folder))
-        throw std::runtime_error("Project assets folder not found: " + folder.string());
-    auto assets = load_assets(folder);
+    Assets assets;
+    if (game.assets)
+        assets = *game.assets;
+    else if (game.project_assets) {
+        std::filesystem::path folder = game.project_assets;
+        if (folder.is_relative()) folder = asset_path(game.project_assets);
+        if (!std::filesystem::is_directory(folder))
+            throw std::runtime_error("Project assets folder not found: " + folder.string());
+        assets = load_assets(folder);
+    } else
+        return {};
     if (const auto problems = assets.problems(); !problems.empty())
         throw std::runtime_error("The project's assets have problems:\n" + problems);
     return assets;
@@ -51,7 +56,7 @@ Sounds register_effects(const Game& game, const Assets& assets, const Materials&
 WorldGenerator world_generator(const Game& game, const Assets& assets, const Materials& materials,
                                std::unique_ptr<Terrain>& terrain) {
     if (game.world.terrain) return game.world;
-    if (!game.project_assets)
+    if (!game.project_assets && !game.assets)
         throw std::invalid_argument("A game needs world.terrain or project assets with a terrain");
     terrain = std::make_unique<Terrain>(assets.terrain, materials);
     return terrain->generator();

@@ -4,6 +4,7 @@
 #include "io/json.hpp"
 #include "platform/actions.hpp"
 #include "platform/audio.hpp"
+#include "project/archive.hpp"
 #include "project/terrain.hpp"
 #include <filesystem>
 #include <string>
@@ -70,6 +71,8 @@ Binding parse_binding(std::string_view name); // Throws for an unknown name.
 // actions.json, sounds.json, particles.json and terrain.json. A missing file is an empty list
 // (for terrain: no terrain).
 Assets load_assets(const std::filesystem::path& folder);
+// The same, reading "<kind>.json" through `files` (a folder or an exported game's archive).
+Assets load_assets(const ProjectFiles& files);
 // Writes the files whose contents changed since `previous` (all of them if null), atomically.
 void save_assets(const std::filesystem::path& folder, const Assets& assets, const Assets* previous = nullptr);
 Json assets_json(const Assets& assets, std::string_view kind);

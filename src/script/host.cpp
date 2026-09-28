@@ -360,7 +360,7 @@ struct ScriptApi {
     }
 };
 
-ScriptHost::ScriptHost(Engine& engine, std::filesystem::path scripts)
+ScriptHost::ScriptHost(Engine& engine, ProjectFiles scripts)
     : engine_(engine), scripts_(std::move(scripts)), names_(entity_capacity) {
     lua_ = lua_newstate(ScriptApi::allocate, this);
     if (!lua_) throw std::bad_alloc();
@@ -393,7 +393,9 @@ void ScriptHost::attach(Entity entity, const std::string& file) {
     Instance instance{entity, LUA_NOREF, file};
     std::string source;
     try {
-        source = read_text(scripts_ / file, 1024 * 1024);
+        auto text = scripts_(file);
+        if (!text) throw std::runtime_error("not found");
+        source = std::move(*text);
     } catch (const std::exception& error) {
         instances_.push_back(instance);
         return fail(instances_.back(), "scripts/" + file + ": " + error.what());

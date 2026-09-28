@@ -1,6 +1,9 @@
+#include "export.hpp"
 #include "io/json.hpp"
 #include "io/storage.hpp"
 #include "project.hpp"
+#include "project/archive.hpp"
+#include "project/scene_file.hpp"
 #include "scripts.hpp"
 #include "starter.hpp"
 #include <chrono>
@@ -148,6 +151,55 @@ void scripts(const fs::path& root) {
     check(checker.syntax_error(folder / "enemy.lua").empty(), "A fixed script is checked again");
     check(!checker.syntax_error(folder / "missing.lua").empty(), "A missing script is reported");
 }
+// Exporting builds a signed, self-contained app from a ready project, refuses broken ones, and
+// replaces an existing app only when asked.
+void exporting(const fs::path& root) {
+    fs::create_directories(root);
+    fs::copy(SEED_SAMPLE_PROJECT, root / "Sample", fs::copy_options::recursive);
+    const auto project = open_project(root / "Sample");
+    check(export_problems(project).empty(), "The sample project is ready to export");
+    const auto report = export_macos_app(project, SEED_PLAYER_PATH, root / "out", false);
+    const auto contents = report.app / "Contents";
+    check(report.app == root / "out" / "Sample Island.app", "App named after the project");
+    check(report.stripped && report.signed_app, "The executable is stripped and the app signed");
+    check(fs::is_regular_file(contents / "MacOS" / "Sample Island"), "Executable in place");
+    check((fs::status(contents / "MacOS" / "Sample Island").permissions() & fs::perms::owner_exec) !=
+              fs::perms::none,
+          "Executable is executable");
+    const auto plist = seed::read_text(contents / "Info.plist");
+    check(plist.find("<string>games.seed.sample-island-5eed0001</string>") != std::string::npos,
+          "Bundle identifier");
+    for (const char* license : {"SDL2.txt", "LZ4.txt", "Lua.txt"})
+        check(fs::is_regular_file(contents / "Resources" / "licenses" / license), license);
+    check(!fs::exists(root / "out" / ".Sample Island.app.partial"), "No partial app left behind");
+
+    const auto archive = seed::ProjectArchive::read(contents / "Resources" / seed::ProjectArchive::file_name);
+    check(archive.files.size() == report.files && archive.files.count("scenes/main.json") &&
+              archive.files.count("assets/terrain.json") && archive.files.count("project.seed.json"),
+          "The archive holds the project's files");
+    check(archive.files.at("scenes/main.json").find('\n') == std::string::npos, "JSON is compacted");
+    check(seed::load_assets(seed::subfolder(archive.reader(), "assets/")) ==
+              seed::load_assets(root / "Sample" / "assets"),
+          "The archive's assets match the project's");
+
+    rejects([&] { export_macos_app(project, SEED_PLAYER_PATH, root / "out", false); },
+            "Existing app replaced unasked");
+    export_macos_app(project, SEED_PLAYER_PATH, root / "out", true);
+
+    // A broken script or a missing one stops the export, and nothing is written.
+    fs::create_directories(root / "Sample" / "scripts");
+    seed::write_text(root / "Sample" / "scripts" / "broken.lua", "function (\n");
+    check(export_problems(project).find("broken.lua:1:") != std::string::npos, "Syntax errors stop exports");
+    rejects([&] { export_macos_app(project, SEED_PLAYER_PATH, root / "out2", false); },
+            "Broken project exported");
+    check(!fs::exists(root / "out2" / "Sample Island.app"), "No app from a broken project");
+    fs::remove(root / "Sample" / "scripts" / "broken.lua");
+    auto scene = seed::load_scene(root / "Sample" / "scenes" / "main.json");
+    scene.entities[0].script = "ghost.lua";
+    seed::save_scene(root / "Sample" / "scenes" / "main.json", scene);
+    check(export_problems(project).find("scripts/ghost.lua, which does not exist") != std::string::npos,
+          "Missing scripts stop exports");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -162,6 +214,7 @@ int main(int argc, char** argv) {
         recent(root);
         starter(root);
         scripts(root / "script-checks");
+        exporting(root / "export");
         std::cout << "Editor project checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

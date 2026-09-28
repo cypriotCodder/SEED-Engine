@@ -293,8 +293,9 @@ void write_string(std::string& out, const std::string& value) {
     out += '"';
 }
 
-void write(std::string& out, const Json& value, int indent) {
+void write(std::string& out, const Json& value, int indent, bool compact) {
     const auto newline = [&](int level) {
+        if (compact) return;
         out += '\n';
         out.append(static_cast<std::size_t>(level) * 2, ' ');
     };
@@ -326,7 +327,7 @@ void write(std::string& out, const Json& value, int indent) {
         for (std::size_t i = 0; i < items.size(); ++i) {
             if (i) out += ',';
             newline(indent + 1);
-            write(out, items[i], indent + 1);
+            write(out, items[i], indent + 1, compact);
         }
         newline(indent);
         out += ']';
@@ -343,8 +344,8 @@ void write(std::string& out, const Json& value, int indent) {
             if (i) out += ',';
             newline(indent + 1);
             write_string(out, members[i].first);
-            out += ": ";
-            write(out, members[i].second, indent + 1);
+            out += compact ? ":" : ": ";
+            write(out, members[i].second, indent + 1, compact);
         }
         newline(indent);
         out += '}';
@@ -442,10 +443,10 @@ Json parse_json(std::string_view text) {
     return Parser(text).document();
 }
 
-std::string to_json(const Json& value) {
+std::string to_json(const Json& value, bool compact) {
     std::string out;
-    write(out, value, 0);
-    out += '\n';
+    write(out, value, 0, compact);
+    if (!compact) out += '\n';
     return out;
 }
 } // namespace seed

@@ -262,12 +262,17 @@ Json assets_json(const Assets& assets, std::string_view kind) {
 }
 
 Assets load_assets(const std::filesystem::path& folder) {
+    return load_assets(folder_files(folder));
+}
+
+Assets load_assets(const ProjectFiles& files) {
     Assets assets;
     for (const char* kind : kinds) {
-        const auto path = folder / (std::string(kind) + ".json");
-        if (!std::filesystem::exists(path)) continue;
+        const auto name = std::string(kind) + ".json";
+        const auto text = files(name);
+        if (!text) continue;
         try {
-            const auto file = parse_json(read_text(path, 4 * 1024 * 1024));
+            const auto file = parse_json(*text);
             const std::string_view k = kind;
             if (k == "materials") assets.materials = read_list<MaterialAsset>(file, kind, read_material);
             if (k == "actions") assets.actions = read_list<ActionAsset>(file, kind, read_action);
@@ -279,7 +284,7 @@ Assets load_assets(const std::filesystem::path& folder) {
                 assets.terrain = parse_terrain(file.at("terrain"));
             }
         } catch (const std::exception& error) {
-            throw std::runtime_error(path.string() + ": " + error.what());
+            throw std::runtime_error(name + ": " + error.what());
         }
     }
     return assets;

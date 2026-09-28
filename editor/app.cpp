@@ -236,13 +236,63 @@ void App::start_play() {
     std::filesystem::remove_all(save);
     std::vector<std::string> arguments{"--project", project_->root.string(), "--save", save.string()};
     if (options_.smoke) arguments.push_back("--smoke");
+    play_.start(player_path(), arguments);
+    log(Level::info, "Playing \"" + project_->name + "\". Close the game window or press Stop to return.");
+}
+
+std::filesystem::path App::player_path() const {
     // seed_player sits beside the editor when installed; in a build tree CMake records its path.
     char* base = SDL_GetBasePath();
     auto player = std::filesystem::path(base ? base : "") / "seed_player";
     SDL_free(base);
-    if (!std::filesystem::exists(player)) player = SEED_PLAYER_PATH;
-    play_.start(player, arguments);
-    log(Level::info, "Playing \"" + project_->name + "\". Close the game window or press Stop to return.");
+    return std::filesystem::exists(player) ? player : std::filesystem::path(SEED_PLAYER_PATH);
+}
+
+bool App::export_app(const std::filesystem::path& destination, bool replace) {
+    if (!project_) return false;
+    if (dirty() && !save_all()) {
+        log(Level::error, "Export needs the project saved; see the problems above.");
+        return false;
+    }
+    const auto target = destination / (project_->name + ".app");
+    if (std::filesystem::exists(target) && !replace) {
+        pending_export_ = destination; // export_popup asks first.
+        return false;
+    }
+    try {
+        const auto report = export_macos_app(*project_, player_path(), destination, replace);
+        log(Level::info, "Exported " + report.app.string() + " (" + std::to_string(report.files) +
+                             " project files, " + std::to_string((report.archive_bytes + 1023) / 1024) +
+                             " KB of game data).");
+        if (!report.signed_app) log(Level::warning, report.signing);
+        if (!report.stripped)
+            log(Level::warning, "strip was not found; the game keeps its debugging symbols.");
+        if (!options_.smoke) open_with_system(destination); // Show it in Finder.
+        return true;
+    } catch (const std::exception& error) {
+        log(Level::error, error.what());
+        return false;
+    }
+}
+
+void App::export_popup() {
+    if (!pending_export_.empty() && !ImGui::IsPopupOpen("Replace app?")) ImGui::OpenPopup("Replace app?");
+    if (!ImGui::BeginPopupModal("Replace app?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::Text("%s.app already exists in that folder.", project_ ? project_->name.c_str() : "");
+    ImGui::TextUnformatted("Replace it with this export?");
+    ImGui::Dummy({0, 6});
+    if (ImGui::Button("Replace", {110, 0})) {
+        const auto destination = pending_export_;
+        pending_export_.clear();
+        ImGui::CloseCurrentPopup();
+        later([this, destination] { export_app(destination, true); });
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", {110, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        pending_export_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void App::play_controls() {
@@ -321,6 +371,8 @@ int App::run() {
     try {
         if (!options_.create_name.empty()) create(options_.create_parent, options_.create_name);
         if (!options_.open.empty()) open(options_.open);
+        if (!options_.export_to.empty() && !export_app(options_.export_to, true) && options_.smoke)
+            throw std::runtime_error("Export failed");
         if (options_.play) start_play();
     } catch (const std::exception& error) {
         log(Level::error, error.what());
@@ -512,6 +564,7 @@ void App::workspace() {
     assets_.draw();
     about_popup();
     unsaved_popup();
+    export_popup();
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal)) step_history(false);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal))
         step_history(true);
@@ -560,6 +613,11 @@ void App::menu_bar() {
             log(Level::info, "Reverted unsaved changes.");
         }
         if (ImGui::MenuItem("Show Project in Finder")) open_with_system(project_->root);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Export macOS App...", nullptr, false, folder_dialog_available()))
+            if (const auto chosen =
+                    choose_folder("Choose where to put the exported app", project_->root.parent_path()))
+                later([this, destination = *chosen] { export_app(destination, false); });
         ImGui::Separator();
         if (ImGui::MenuItem("Close Project")) close = true;
         if (ImGui::MenuItem("Quit", "Cmd+Q")) leave([this] { quit_ = true; });

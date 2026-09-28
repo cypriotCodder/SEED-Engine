@@ -1,6 +1,15 @@
 # The Seed editor: a separate application for creating and building game projects. Games never link
 # it or Dear ImGui.
-add_library(seed_editor_core STATIC project.cpp starter.cpp scripts.cpp)
+# The licences a shipped game must carry, embedded so the editor can export them from anywhere.
+set(seed_licenses_source "${CMAKE_CURRENT_BINARY_DIR}/game_licenses.cpp")
+set(seed_licenses_body "namespace seed::editor {\nextern const char* const game_licenses[][2] = {\n")
+foreach(seed_license SDL2 LZ4 Lua)
+    file(READ "${CMAKE_SOURCE_DIR}/licenses/${seed_license}.txt" seed_license_text)
+    string(APPEND seed_licenses_body "    {\"${seed_license}.txt\", R\"SEEDLICENSE(${seed_license_text})SEEDLICENSE\"},\n")
+endforeach()
+string(APPEND seed_licenses_body "    {nullptr, nullptr}};\n} // namespace seed::editor\n")
+file(GENERATE OUTPUT "${seed_licenses_source}" CONTENT "${seed_licenses_body}")
+add_library(seed_editor_core STATIC project.cpp starter.cpp scripts.cpp export.cpp "${seed_licenses_source}")
 seed_strict(seed_editor_core)
 target_include_directories(seed_editor_core PUBLIC .)
 target_link_libraries(seed_editor_core PUBLIC seed_engine PRIVATE seed_lua)
@@ -27,6 +36,9 @@ if(BUILD_TESTING)
     add_executable(seed_editor_project_tests tests/project_tests.cpp)
     seed_strict(seed_editor_project_tests)
     target_link_libraries(seed_editor_project_tests PRIVATE seed_editor_core)
+    add_dependencies(seed_editor_project_tests seed_player)
+    target_compile_definitions(seed_editor_project_tests PRIVATE SEED_PLAYER_PATH="$<TARGET_FILE:seed_player>"
+        SEED_SAMPLE_PROJECT="${CMAKE_SOURCE_DIR}/tests/sample_project")
     add_executable(seed_editor_history_tests tests/history_tests.cpp)
     seed_strict(seed_editor_history_tests)
     target_include_directories(seed_editor_history_tests PRIVATE .)
@@ -49,4 +61,12 @@ if(BUILD_TESTING)
         --open "${seed_editor_smoke}/Sample")
     set_tests_properties(editor_play_copy PROPERTIES DEPENDS editor_smoke_open)
     set_tests_properties(editor_play PROPERTIES DEPENDS editor_play_copy)
+    # Exports the copied sample project through the editor, then runs the exported app itself: the
+    # player must find and load its game.seedpack from the bundle.
+    set(seed_exported "${seed_editor_smoke}/Export/Sample Island.app/Contents/MacOS/Sample Island")
+    add_test(NAME editor_export COMMAND seed_editor --smoke --preferences "${seed_editor_smoke}/preferences"
+        --open "${seed_editor_smoke}/Sample" --export "${seed_editor_smoke}/Export")
+    add_test(NAME exported_game COMMAND "${seed_exported}" --smoke --save "${seed_editor_smoke}/exported-save")
+    set_tests_properties(editor_export PROPERTIES DEPENDS editor_play TIMEOUT 120)
+    set_tests_properties(exported_game PROPERTIES DEPENDS editor_export TIMEOUT 120)
 endif()

@@ -1,5 +1,6 @@
 #pragma once
 #include "core/ecs.hpp"
+#include "project/archive.hpp"
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -27,7 +28,8 @@ public:
     static constexpr std::size_t memory_limit = 64 * 1024 * 1024;
     static constexpr double call_budget_seconds = 0.25;
 
-    ScriptHost(Engine& engine, std::filesystem::path scripts);
+    // `scripts` reads the project's scripts/ folder, by file name.
+    ScriptHost(Engine& engine, ProjectFiles scripts);
     ~ScriptHost();
     ScriptHost(const ScriptHost&) = delete;
     ScriptHost& operator=(const ScriptHost&) = delete;
@@ -54,7 +56,7 @@ private:
     void forget(Entity entity);
 
     Engine& engine_;
-    std::filesystem::path scripts_;
+    ProjectFiles scripts_;
     lua_State* lua_{};
     std::size_t memory_{};
     std::vector<Instance> instances_;
