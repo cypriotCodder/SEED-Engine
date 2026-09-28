@@ -73,6 +73,7 @@ bool valid_script_name(std::string_view name);
 
 struct SceneFile {
     static constexpr std::size_t capacity = 4096; // Entities per scene.
+    std::string terrain{"main"};                  // The project terrain this scene's world is generated from.
     std::vector<SceneEntity> entities;
     bool operator==(const SceneFile&) const = default;
 

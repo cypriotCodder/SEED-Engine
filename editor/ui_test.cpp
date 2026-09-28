@@ -183,6 +183,19 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
         check(players() == 1 && e.character && e.character->player,
               "the player checkbox moves the role to the NPC");
     });
+
+    // The Terrain object: selecting it, then New > Starter Island makes a terrain the scene uses.
+    click([this] { return scene_.control("terrain row"); });
+    add(2, [this] {
+        check(scene_.terrain_selected() && scene_.selection().empty(), "the Terrain row selects the terrain");
+    });
+    click([this] { return scene_.control("terrain new"); });
+    click([this] { return scene_.control("terrain new starter"); });
+    add(3, [] {});
+    key(ImGuiKey_Enter); // Accept the suggested name, "island".
+    add(3, [this] {
+        check(scene_.scene().terrain == "island", "New > Starter Island makes a terrain the scene uses");
+    });
 }
 
 void UiTest::type(const char* text) {

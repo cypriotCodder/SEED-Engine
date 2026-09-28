@@ -1,6 +1,7 @@
 #include "scene_editor.hpp"
 #include "io/storage.hpp"
 #include "project.hpp"
+#include "starter.hpp"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -181,20 +182,23 @@ void SceneEditor::make_prefab(const std::string& name) {
 
 void SceneEditor::sync(const Assets& assets) {
     const bool materials_changed = !(assets.materials == rendered_ && (renderer_ || rendered_.empty()));
-    if (materials_changed || assets.terrain != compiled_terrain_) {
+    // The scene's own terrain; a name the project lacks shows flat ground.
+    const auto found = assets.terrains.find(edited_.terrain);
+    const TerrainAsset terrain = found == assets.terrains.end() ? TerrainAsset{} : found->second;
+    if (materials_changed || terrain != compiled_terrain_) {
         // Recompile the terrain against the preview's material order.
-        compiled_terrain_ = assets.terrain;
+        compiled_terrain_ = terrain;
         terrain_.reset();
         terrain_error_.clear();
         cache_.cells.clear();
-        if (assets.terrain.enabled() && !assets.materials.empty()) try {
+        if (terrain.enabled() && !assets.materials.empty()) try {
                 Materials registry;
                 Assets names;
                 names.materials = assets.materials;
                 for (auto& m : names.materials)
                     m.texture.clear();
                 names.register_materials(registry);
-                terrain_ = std::make_unique<Terrain>(assets.terrain, registry);
+                terrain_ = std::make_unique<Terrain>(terrain, registry);
             } catch (const std::exception&) {
                 terrain_error_ = "Terrain not shown: fix the problems in the Terrain panel.";
             }
@@ -254,9 +258,11 @@ bool SceneEditor::is_selected(int index) const {
 void SceneEditor::select_only(int index) {
     selection_ = {index};
     primary_ = index;
+    terrain_selected_ = false;
 }
 
 void SceneEditor::toggle(int index) {
+    terrain_selected_ = false;
     const auto at = std::lower_bound(selection_.begin(), selection_.end(), index);
     if (at != selection_.end() && *at == index) {
         selection_.erase(at);
@@ -441,8 +447,8 @@ void SceneEditor::paste() {
     primary_ = selection_.back();
 }
 
-void SceneEditor::draw(const Assets& assets) {
-    if (!loaded()) return;
+bool SceneEditor::draw(Assets& assets) {
+    if (!loaded()) return false;
     assets_ = &assets;
     sync(assets);
     clamp_selection();
@@ -451,8 +457,129 @@ void SceneEditor::draw(const Assets& assets) {
     else
         view_visible_ = false;
     if (show_hierarchy) hierarchy();
-    if (show_inspector) inspector(assets);
+    bool changed = false;
+    if (show_inspector) {
+        if (terrain_selected_)
+            changed = terrain_inspector(assets);
+        else
+            inspector(assets);
+    }
     if (show_prefabs) prefabs_panel();
+    return changed;
+}
+
+bool SceneEditor::terrain_inspector(Assets& assets) {
+    if (!ImGui::Begin(inspector_id, &show_inspector)) {
+        ImGui::End();
+        return false;
+    }
+    bool changed = false;
+    auto& terrains = assets.terrains;
+    const auto found = terrains.find(edited_.terrain);
+    ImGui::TextColored({0.45F, 0.9F, 0.65F, 1}, "Terrain");
+    ImGui::TextDisabled("The ground this scene's world is generated from.");
+    ImGui::TextUnformatted("Terrain used by this scene");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::BeginCombo("##terrain", edited_.terrain.c_str())) {
+        for (const auto& [name, terrain] : terrains)
+            if (ImGui::Selectable(name.c_str(), name == edited_.terrain)) edited_.terrain = name;
+        ImGui::EndCombo();
+    }
+    mark("terrain choice");
+    if (found == terrains.end())
+        ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "\"%s\" does not exist yet, so the ground is flat.",
+                           edited_.terrain.c_str());
+
+    // New, copy and rename share one name popup. It is opened below, at this window's level: a
+    // popup opened from inside the New menu would belong to that menu and never appear.
+    bool ask = false;
+    const auto ask_name = [&](int action, const std::string& suggestion) {
+        terrain_action_ = action;
+        terrain_name_ = suggestion;
+        for (int n = 2; terrains.count(terrain_name_); ++n)
+            terrain_name_ = suggestion + "_" + std::to_string(n);
+        ask = true;
+    };
+    if (ImGui::Button("New")) ImGui::OpenPopup("new terrain");
+    mark("terrain new");
+    if (ImGui::BeginPopup("new terrain")) {
+        if (ImGui::MenuItem("Starter Island")) ask_name(1, "island");
+        mark("terrain new starter");
+        if (ImGui::MenuItem("Blank")) ask_name(0, "terrain");
+        mark("terrain new blank");
+        if (found != terrains.end() && ImGui::MenuItem("Copy of This Terrain")) ask_name(2, edited_.terrain);
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(found == terrains.end());
+    if (ImGui::Button("Rename")) ask_name(3, edited_.terrain + "_renamed");
+    ImGui::SameLine();
+    if (ImGui::Button("Delete")) ImGui::OpenPopup("delete terrain");
+    ImGui::EndDisabled();
+    if (ask) ImGui::OpenPopup("terrain name");
+    if (ImGui::BeginPopup("terrain name")) {
+        const char* titles[] = {"New blank terrain", "New starter island", "Copy of this terrain",
+                                "Rename terrain"};
+        ImGui::TextUnformatted(titles[terrain_action_]);
+        ImGui::SetNextItemWidth(220);
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        const bool enter = ImGui::InputText("##name", &terrain_name_, ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool valid = valid_terrain_name(terrain_name_), taken = terrains.count(terrain_name_) > 0;
+        if (!valid) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "Use letters, digits, '_' and '-'.");
+        if (taken) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "A terrain with this name exists.");
+        ImGui::BeginDisabled(!valid || taken);
+        if (ImGui::Button("OK", {220, 0}) || (enter && valid && !taken)) {
+            const auto old_name = edited_.terrain;
+            switch (terrain_action_) {
+            case 0:
+                terrains[terrain_name_] = {};
+                break;
+            case 1:
+                starter_island(assets, terrain_name_);
+                break;
+            case 2:
+                terrains[terrain_name_] = terrains.at(old_name);
+                break;
+            default:
+                terrains[terrain_name_] = terrains.at(old_name);
+                terrains.erase(old_name);
+                log_(false, "Renamed terrain \"" + old_name + "\" to \"" + terrain_name_ +
+                                "\". Other scenes that used it need it picked again.");
+            }
+            edited_.terrain = terrain_name_; // The new terrain is the one this scene uses.
+            changed = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        mark("terrain name ok");
+        ImGui::EndPopup();
+    }
+    if (ImGui::BeginPopup("delete terrain")) {
+        ImGui::Text("Delete the terrain \"%s\"?", edited_.terrain.c_str());
+        ImGui::TextDisabled("Scenes that use it get flat ground until another is picked.");
+        if (ImGui::Button("Delete", {110, 0})) {
+            terrains.erase(edited_.terrain);
+            edited_.terrain = terrains.empty() ? "main" : terrains.begin()->first;
+            changed = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", {110, 0})) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    if (const auto current = terrains.find(edited_.terrain); current != terrains.end()) {
+        const auto& t = current->second;
+        ImGui::SeparatorText("Summary");
+        ImGui::Text("%s, %.0f chunks across", t.island ? "Island" : "Endless world", t.radius * 2);
+        ImGui::Text("Seed %llu", static_cast<unsigned long long>(t.default_seed));
+        ImGui::Text("%zu fields, %zu rules", t.fields.size(), t.rules.size());
+        if (ImGui::Button("Edit Fields and Rules", {-1, 0}) && open_terrain_editor) open_terrain_editor();
+        ImGui::SetItemTooltip(
+            "Opens the Terrain panel: shape, noise fields and the rules that pick materials.");
+    }
+    ImGui::End();
+    return changed;
 }
 
 SceneEditor::Drag SceneEditor::handle_under(ImVec2 mouse) const {
@@ -1125,6 +1252,12 @@ void SceneEditor::hierarchy() {
         return;
     }
     scene_menu();
+    // The scene's terrain is an object too: selecting it shows its settings in the Inspector.
+    if (ImGui::Selectable(("Terrain: " + edited_.terrain).c_str(), terrain_selected_)) {
+        clear_selection();
+        terrain_selected_ = true;
+    }
+    mark("terrain row");
     if (ImGui::SmallButton("Create")) ImGui::OpenPopup("create");
     mark("create");
     if (ImGui::BeginPopup("create")) {

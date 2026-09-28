@@ -6,7 +6,7 @@
 namespace seed {
 namespace {
 constexpr int assets_format = 1;
-constexpr const char* kinds[] = {"materials", "actions", "sounds", "particles", "terrain"};
+constexpr const char* kinds[] = {"materials", "actions", "sounds", "particles"};
 constexpr const char* pattern_names[] = {"speckle", "water", "planks", "round"};
 constexpr const char* mouse_names[] = {"Mouse Left", "Mouse Middle", "Mouse Right", "Mouse X1", "Mouse X2"};
 
@@ -238,13 +238,41 @@ std::string Assets::problems() const {
     check_all(result, "Sound", sounds, [&](const auto& s) { sound_registry.add(s.desc()); });
     check_all(result, "Particle style", particles,
               [&](const auto& p) { add_particle(material_registry, particle_registry, p); });
-    const auto terrain_problems = terrain.problems(material_names());
-    for (std::size_t start = 0; start < terrain_problems.size();) {
-        const auto end = terrain_problems.find('\n', start);
-        result += "Terrain: " + terrain_problems.substr(start, end - start + 1);
-        start = end + 1;
+    const auto add_terrain_problems = [&](const std::string& label, const TerrainAsset& t) {
+        const auto found = t.problems(material_names());
+        for (std::size_t start = 0; start < found.size();) {
+            const auto end = found.find('\n', start);
+            result += label + found.substr(start, end - start + 1);
+            start = end + 1;
+        }
+    };
+    add_terrain_problems("Terrain: ", terrain);
+    for (const auto& [name, t] : terrains) {
+        if (!valid_terrain_name(name))
+            result += "Terrain \"" + name + "\": names use letters, digits, '_' and '-'\n";
+        add_terrain_problems("Terrain \"" + name + "\": ", t);
     }
     return result;
+}
+
+bool valid_terrain_name(std::string_view name) {
+    return !name.empty() && name.size() <= 64 && std::all_of(name.begin(), name.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
+               c == '-';
+    });
+}
+
+Json terrain_file_json(const TerrainAsset& terrain) {
+    auto file = Json::object();
+    file.set("format", assets_format);
+    file.set("terrain", terrain_json(terrain));
+    return file;
+}
+
+TerrainAsset parse_terrain_file(const Json& file) {
+    if (file.at("format").as_int(1, 1000000) > assets_format)
+        throw std::runtime_error("Made by a newer editor");
+    return parse_terrain(file.at("terrain"));
 }
 
 Json assets_json(const Assets& assets, std::string_view kind) {
@@ -252,17 +280,34 @@ Json assets_json(const Assets& assets, std::string_view kind) {
     if (kind == "actions") return file_of("actions", assets.actions, write_action);
     if (kind == "sounds") return file_of("sounds", assets.sounds, write_sound);
     if (kind == "particles") return file_of("particles", assets.particles, write_particle);
-    if (kind == "terrain") {
-        auto file = Json::object();
-        file.set("format", assets_format);
-        file.set("terrain", terrain_json(assets.terrain));
-        return file;
-    }
     throw std::invalid_argument("Unknown asset kind");
 }
 
+TerrainAsset load_terrain(const ProjectFiles& files, const std::string& name) {
+    if (!valid_terrain_name(name)) throw std::runtime_error("Invalid terrain name \"" + name + "\"");
+    auto text = files("terrains/" + name + ".json");
+    // Projects from before named terrains kept their one terrain in terrain.json.
+    if (!text && name == "main") text = files("terrain.json");
+    if (!text) return {};
+    try {
+        return parse_terrain_file(parse_json(*text));
+    } catch (const std::exception& error) {
+        throw std::runtime_error("terrains/" + name + ".json: " + error.what());
+    }
+}
+
 Assets load_assets(const std::filesystem::path& folder) {
-    return load_assets(folder_files(folder));
+    auto assets = load_assets(folder_files(folder));
+    // Every terrain in terrains/, or the old single terrain.json as "main".
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(folder / "terrains", error)) {
+        const auto name = entry.path().stem().string();
+        if (entry.path().extension() == ".json" && valid_terrain_name(name))
+            assets.terrains[name] = load_terrain(folder_files(folder), name);
+    }
+    if (assets.terrains.empty() && std::filesystem::exists(folder / "terrain.json"))
+        assets.terrains["main"] = load_terrain(folder_files(folder), "main");
+    return assets;
 }
 
 Assets load_assets(const ProjectFiles& files) {
@@ -278,11 +323,6 @@ Assets load_assets(const ProjectFiles& files) {
             if (k == "actions") assets.actions = read_list<ActionAsset>(file, kind, read_action);
             if (k == "sounds") assets.sounds = read_list<SoundAsset>(file, kind, read_sound);
             if (k == "particles") assets.particles = read_list<ParticleAsset>(file, kind, read_particle);
-            if (k == "terrain") {
-                if (file.at("format").as_int(1, 1000000) > assets_format)
-                    throw std::runtime_error("Made by a newer editor");
-                assets.terrain = parse_terrain(file.at("terrain"));
-            }
         } catch (const std::exception& error) {
             throw std::runtime_error(name + ": " + error.what());
         }
@@ -297,5 +337,19 @@ void save_assets(const std::filesystem::path& folder, const Assets& assets, cons
         if (previous && assets_json(*previous, kind) == file) continue;
         write_text(folder / (std::string(kind) + ".json"), to_json(file));
     }
+    // Terrains: changed ones rewritten, removed ones deleted. The old single terrain.json has moved
+    // to terrains/main.json once terrains are saved.
+    const auto terrains = folder / "terrains";
+    for (const auto& [name, terrain] : assets.terrains) {
+        if (previous && previous->terrains.count(name) && previous->terrains.at(name) == terrain &&
+            std::filesystem::exists(terrains / (name + ".json")))
+            continue;
+        std::filesystem::create_directories(terrains);
+        write_text(terrains / (name + ".json"), to_json(terrain_file_json(terrain)));
+    }
+    if (previous)
+        for (const auto& [name, terrain] : previous->terrains)
+            if (!assets.terrains.count(name)) std::filesystem::remove(terrains / (name + ".json"));
+    if (!assets.terrains.empty()) std::filesystem::remove(folder / "terrain.json");
 }
 } // namespace seed

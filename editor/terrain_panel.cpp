@@ -80,21 +80,47 @@ bool bound(const char* id, float& value, float open) {
 } // namespace
 
 void AssetPanels::terrain() {
-    auto& t = edited_.terrain;
-    const auto title = std::string("Terrain") + (t != saved_.terrain ? " *" : "") + "###Terrain";
+    // The panel edits the terrain of the scene being edited (see set_terrain).
+    const auto found = edited_.terrains.find(terrain_name_);
+    const bool edited =
+        found == edited_.terrains.end()
+            ? saved_.terrains.count(terrain_name_) > 0
+            : !saved_.terrains.count(terrain_name_) || saved_.terrains.at(terrain_name_) != found->second;
+    const auto title = "Terrain: " + terrain_name_ + (edited ? " *" : "") + "###Terrain";
     if (!ImGui::Begin(title.c_str(), &show_terrain)) {
         ImGui::End();
         return;
     }
+    if (found == edited_.terrains.end()) {
+        ImGui::TextWrapped(
+            "This scene uses the terrain \"%s\", which does not exist yet, so its ground is flat. "
+            "Create it, or pick another terrain by selecting Terrain in the Hierarchy.",
+            terrain_name_.c_str());
+        if (ImGui::Button("Create Starter Island", {-1, 32})) {
+            starter_island(edited_, terrain_name_);
+            refresh();
+        }
+        if (ImGui::Button("Create Blank Terrain", {-1, 0})) {
+            edited_.terrains[terrain_name_] = {};
+            refresh();
+        }
+        ImGui::End();
+        return;
+    }
+    auto& t = found->second;
     problems("Terrain");
     const auto before = t;
     const auto before_materials = edited_.materials;
 
     if (!t.enabled()) {
-        ImGui::TextWrapped(
-            "This project has no terrain yet: every tile is the first material. Start from the "
-            "starter island, or add fields and rules yourself.");
-        if (ImGui::Button("Create Starter Island", {-1, 32})) starter_island(edited_);
+        ImGui::TextWrapped("This terrain has no rules yet: every tile is the first material. Start from the "
+                           "starter island, or add fields and rules yourself.");
+        if (ImGui::Button("Make It a Starter Island", {-1, 32})) {
+            starter_island(edited_, terrain_name_);
+            refresh();
+            ImGui::End();
+            return;
+        }
         ImGui::Separator();
     }
     // World shape and preview seed.

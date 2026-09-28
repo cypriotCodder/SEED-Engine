@@ -7,6 +7,7 @@
 #include "project/archive.hpp"
 #include "project/terrain.hpp"
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,9 @@ struct Assets {
     std::vector<ActionAsset> actions;
     std::vector<SoundAsset> sounds;
     std::vector<ParticleAsset> particles;
+    // Every terrain of the project by name (assets/terrains/<name>.json); each scene picks one.
+    std::map<std::string, TerrainAsset> terrains;
+    // The terrain a running game generates its world from: its start scene's choice.
     TerrainAsset terrain;
     bool operator==(const Assets&) const = default;
     std::vector<std::string> material_names() const;
@@ -68,11 +72,18 @@ std::string binding_name(const Binding& binding);
 Binding parse_binding(std::string_view name); // Throws for an unknown name.
 
 // Project files live in the project's assets/ folder, one per kind: materials.json,
-// actions.json, sounds.json, particles.json and terrain.json. A missing file is an empty list
-// (for terrain: no terrain).
+// actions.json, sounds.json and particles.json, plus terrains/<name>.json. A missing file is an
+// empty list. A folder's load fills `terrains`, reading an older project's single terrain.json as
+// the terrain "main".
 Assets load_assets(const std::filesystem::path& folder);
-// The same, reading "<kind>.json" through `files` (a folder or an exported game's archive).
+// The same, reading "<kind>.json" through `files` (a folder or an exported game's archive);
+// terrains are loaded one at a time with load_terrain, as a game needs only one.
 Assets load_assets(const ProjectFiles& files);
+// One terrain by name from an assets folder reader; empty (no terrain) when it does not exist.
+TerrainAsset load_terrain(const ProjectFiles& assets, const std::string& name);
+bool valid_terrain_name(std::string_view name); // Letters, digits, '_' and '-', 1 to 64.
+Json terrain_file_json(const TerrainAsset& terrain);
+TerrainAsset parse_terrain_file(const Json& file);
 // Writes the files whose contents changed since `previous` (all of them if null), atomically.
 void save_assets(const std::filesystem::path& folder, const Assets& assets, const Assets* previous = nullptr);
 Json assets_json(const Assets& assets, std::string_view kind);

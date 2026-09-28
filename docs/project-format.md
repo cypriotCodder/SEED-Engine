@@ -31,9 +31,9 @@ Floats are written in the shortest form that reads back to the same 32-bit value
 
 Each `<name>.json` is `{"format": 1, "entity": {...}}`: one entity in the scene format, placed at the origin. Names use letters, digits, `_` and `-`. Export checks every prefab and that every prefab a scene links exists.
 
-### terrain.json
+### terrains/<name>.json
 
-`{"format": 1, "terrain": {...}}` describes the world generator. The generator version saved with worlds is a hash of these settings (without `default_seed`), so any change starts new worlds instead of mixing old saves with new terrain.
+Each terrain is `{"format": 1, "terrain": {...}}`, describing a world generator; a project can have several, and each scene names the one it uses (scene field `terrain`, default `main`). Projects from before named terrains kept one `assets/terrain.json`; it loads as `main` and moves to `terrains/main.json` when the editor saves. The generator version saved with worlds is a hash of these settings (without `default_seed`), so any change starts new worlds instead of mixing old saves with new terrain.
 
 - `island` (true: a disc of land in endless ocean; false: endless), `radius` (chunks; also the unit of `distance` terms), `coast` (island falloff as a fraction of the radius), `warp` (domain warp in tiles, 0 to 256) and `warp_wavelength`, `default_seed` (the world the editor previews and the game's default).
 - `fields`: up to 8 of `{name, base, terms}`; one must be `elevation` (the tile height: below 0 is water; on islands the coast lowers it near the rim). A field is `base` plus the sum of its terms, each `{type, wavelength, amplitude, warped}`: `perlin` (smooth noise in -1..1, power-of-two wavelength up to 1024), `fractal` (octaves from 128 down to 8), `ridged` (1 - 2|perlin|, crests), `distance` (0 at the centre, 1 at the rim), `spot` (exp(-(d/wavelength)^2), a bump at the centre). `warped` samples at the domain-warped position. Each term has its own noise stream, derived from its field's name and position in the list.
@@ -43,7 +43,7 @@ A game with `Game::project_assets` set and no `world.terrain` callback generates
 
 ## scenes/
 
-Each `<name>.json` is `{"format": 1, "entities": [...]}`, at most 4096 entities, drawn in list order (later entries on top). An entity has `name` (1–64 characters; need not be unique), `chunk` ([x, y], whole numbers), `position` ([x, y] within the chunk; offsets outside 0–32 are moved into the right chunk on load), `angle` (radians) and optional components:
+Each `<name>.json` is `{"format": 1, "terrain": "<name>", "entities": [...]}`, at most 4096 entities, drawn in list order (later entries on top). An entity has `name` (1–64 characters; need not be unique), `chunk` ([x, y], whole numbers), `position` ([x, y] within the chunk; offsets outside 0–32 are moved into the right chunk on load), `angle` (radians) and optional components:
 
 - `visual`: `material` (a material name) and `size` ([w, h], above 0 and at most 64).
 - `light`: `color` ([r, g, b], 0–16), `radius` (up to 256), `intensity` (0–64) and `height` (above 0, at most 64).

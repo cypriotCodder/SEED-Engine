@@ -194,6 +194,7 @@ void load(Runner& runner, ProjectFiles files, std::filesystem::path save) {
         } catch (const std::exception& error) {
             throw std::runtime_error(scene_path + ": " + error.what());
         }
+    runner.data.terrain = load_terrain(subfolder(runner.files, "assets/"), runner.scene.terrain);
     if (const auto problems = runner.scene.problems(runner.data); !problems.empty())
         throw std::runtime_error("The start scene has problems:\n" + problems);
     // The player is the character marked as the player. Older projects mark it by name: an entity

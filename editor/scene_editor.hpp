@@ -65,8 +65,12 @@ public:
     const std::vector<Row>& rows() const { return rows_; }
     ImVec2 search_box() const { return search_box_; }
 
-    // Draws the panels. Call once per frame between ImGui::NewFrame and ImGui::Render.
-    void draw(const Assets& assets);
+    // Draws the panels. Call once per frame between ImGui::NewFrame and ImGui::Render. Returns true
+    // when it changed `assets` (the Terrain object creates, renames and deletes terrains).
+    bool draw(Assets& assets);
+    // Called to bring up the full terrain editor (the Terrain panel).
+    std::function<void()> open_terrain_editor;
+    bool terrain_selected() const { return terrain_selected_; }
     // An error raised while drawing the view during ImGui's rendering, cleared by the call.
     std::string take_error() { return std::exchange(render_error_, {}); }
 
@@ -106,6 +110,11 @@ private:
     void hierarchy();
     void inspector(const Assets& assets);
     void character_section(SceneEntity& e, const Assets& assets);
+    // The Inspector for the scene's Terrain object; returns true when it changed `assets`.
+    bool terrain_inspector(Assets& assets);
+    bool terrain_selected_{};
+    std::string terrain_name_; // Name being typed in the new/rename terrain popup.
+    int terrain_action_{};     // What that popup does: 0 blank, 1 starter island, 2 copy, 3 rename.
     void scene_menu();
     void prefabs_panel();
     // Places a copy of a prefab at `at`, linked to it, and selects it.

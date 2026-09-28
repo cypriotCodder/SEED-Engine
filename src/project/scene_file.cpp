@@ -75,6 +75,8 @@ std::string SceneFile::problems(const Assets& assets) const {
     };
     if (entities.size() > capacity) result += "More than 4096 entities in one scene\n";
     int players = 0;
+    if (!valid_prefab_name(terrain))
+        result += "The scene's terrain needs a name of letters, digits, '_' and '-'\n";
     for (std::size_t i = 0; i < entities.size(); ++i) {
         const auto& e = entities[i];
         if (e.name.empty() || e.name.size() > 64) report(i, "Names need 1 to 64 characters");
@@ -197,6 +199,7 @@ Json scene_json(const SceneFile& scene) {
         entities.push(entity_json(e));
     auto file = Json::object();
     file.set("format", scene_format);
+    file.set("terrain", scene.terrain);
     file.set("entities", entities);
     return file;
 }
@@ -283,6 +286,7 @@ SceneFile parse_scene(const Json& json) {
     if (json.at("format").as_int(1, 1000000) > scene_format)
         throw std::runtime_error("Made by a newer editor");
     SceneFile scene;
+    if (const auto* terrain = json.find("terrain")) scene.terrain = terrain->as_string();
     const auto& list = json.at("entities").items();
     if (list.size() > SceneFile::capacity) throw std::runtime_error("More than 4096 entities");
     for (const auto& item : list)

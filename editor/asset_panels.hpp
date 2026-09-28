@@ -20,6 +20,12 @@ public:
     void unload();
     bool dirty() const { return edited_ != saved_; }
     const Assets& assets() const { return edited_; }
+    // Write access for other panels (the scene editor creates, renames and deletes terrains);
+    // call changed() after changing anything through it.
+    Assets& edit() { return edited_; }
+    void changed() { refresh(); }
+    // The terrain the Terrain panel edits: the one the open scene uses.
+    void set_terrain(const std::string& name) { terrain_name_ = name; }
     // Replaces the edited assets, e.g. from undo; selections stay where they still fit.
     void set(const Assets& assets);
     // Saves the kinds that changed. Returns false, logging why, when the assets have problems.
@@ -52,5 +58,6 @@ private:
     int material_{-1}, action_{-1}, sound_{-1}, particle_{-1}; // Selected rows.
     int rule_{-1}, field_{-1};
     int capturing_{-1}; // Action waiting for a key or button press, or -1.
+    std::string terrain_name_{"main"};
 };
 } // namespace seed::editor

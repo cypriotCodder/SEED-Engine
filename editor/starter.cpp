@@ -39,7 +39,7 @@ TerrainRule rule(const char* name, const char* material, std::vector<TerrainCond
 
 } // namespace
 
-void starter_island(Assets& assets) {
+void starter_island(Assets& assets, const std::string& terrain) {
     const MaterialAsset wanted[] = {
         material("deep_water", 22, 58, 98, Pattern::water, 10),
         material("water", 34, 92, 132, Pattern::water, 12),
@@ -58,7 +58,7 @@ void starter_island(Assets& assets) {
             assets.materials.size() < Materials::capacity)
             assets.materials.push_back(m);
     using K = TerrainTerm::Kind;
-    TerrainAsset& t = assets.terrain;
+    TerrainAsset& t = assets.terrains[terrain];
     t = {};
     t.island = true;
     t.radius = 64;

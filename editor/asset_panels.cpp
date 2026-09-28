@@ -40,8 +40,8 @@ void AssetPanels::load(const std::filesystem::path& folder) {
     action_ = first(edited_.actions);
     sound_ = first(edited_.sounds);
     particle_ = first(edited_.particles);
-    rule_ = first(edited_.terrain.rules);
-    field_ = first(edited_.terrain.fields);
+    // The Terrain panel keeps its row selections in range for whichever terrain it shows.
+    rule_ = field_ = 0;
     capturing_ = -1;
     refresh();
     if (!problems_.empty()) log_(true, "The project's assets have problems:\n" + problems_);

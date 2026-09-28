@@ -124,21 +124,54 @@ void recent(const fs::path& root) {
 void starter(const fs::path& root) {
     const auto project = create_project(root, "Starter Island");
     seed::Assets assets;
-    starter_island(assets);
+    starter_island(assets, "main");
     check(assets.problems().empty(), "Starter island assets are valid");
-    starter_island(assets);
+    starter_island(assets, "main");
     check(assets.materials.size() == 10, "Applying the starter again adds no duplicate materials");
     seed::save_assets(project.root / "assets", assets);
     check(seed::load_assets(project.root / "assets") == assets, "Starter assets read back unchanged");
 
     seed::Materials registry;
     assets.register_materials(registry);
-    const seed::Terrain terrain(assets.terrain, registry);
+    const seed::Terrain terrain(assets.terrains.at("main"), registry);
     const auto centre = terrain.sample(1, {{}, {0.5F, 0.5F}});
     check(centre.elevation > 0.3F, "Spawn is on land");
     const auto sea = terrain.sample(1, {{200, 0}, {0, 0}});
     check(sea.material == registry.find("deep_water"), "Past the rim is deep water");
 }
+// A project's terrains: an older project's single terrain.json becomes "main" and moves to
+// terrains/main.json on save; terrains are added and removed as files.
+void terrains(const fs::path& root) {
+    const auto folder = root / "assets";
+    fs::create_directories(folder);
+    seed::Assets old;
+    starter_island(old, "main");
+    seed::write_text(folder / "terrain.json",
+                     seed::to_json(seed::terrain_file_json(old.terrains.at("main"))));
+    seed::write_text(folder / "materials.json", seed::to_json(seed::assets_json(old, "materials")));
+    auto loaded = seed::load_assets(folder);
+    check(loaded.terrains.size() == 1 && loaded.terrains.at("main") == old.terrains.at("main"),
+          "An old terrain.json loads as the terrain \"main\"");
+    check(seed::load_terrain(seed::folder_files(folder), "main") == old.terrains.at("main"),
+          "Games find the old terrain too");
+
+    auto previous = loaded;
+    loaded.terrains["desert"] = {};
+    seed::save_assets(folder, loaded, &previous);
+    check(fs::exists(folder / "terrains" / "main.json") && fs::exists(folder / "terrains" / "desert.json") &&
+              !fs::exists(folder / "terrain.json"),
+          "Saving moves the old file and writes each terrain");
+    auto fewer = loaded;
+    fewer.terrains.erase("desert");
+    seed::save_assets(folder, fewer, &loaded);
+    check(!fs::exists(folder / "terrains" / "desert.json"), "A deleted terrain's file is removed");
+    check(seed::load_assets(folder).terrains == fewer.terrains, "Terrains read back unchanged");
+    check(seed::load_terrain(seed::folder_files(folder), "nowhere") == seed::TerrainAsset{},
+          "A missing terrain is flat ground");
+    fewer.terrains["bad name"] = {};
+    check(!fewer.problems().empty(), "Terrain names are checked");
+}
+
 // New scripts start from a template that compiles; syntax errors name the line, and edits are
 // noticed.
 void scripts(const fs::path& root) {
@@ -190,9 +223,13 @@ void exporting(const fs::path& root) {
               archive.files.count("assets/terrain.json") && archive.files.count("project.seed.json"),
           "The archive holds the project's files");
     check(archive.files.at("scenes/main.json").find('\n') == std::string::npos, "JSON is compacted");
-    check(seed::load_assets(seed::subfolder(archive.reader(), "assets/")) ==
-              seed::load_assets(root / "Sample" / "assets"),
-          "The archive's assets match the project's");
+    // Games load their one terrain by name; everything else loads as a whole.
+    auto from_folder = seed::load_assets(root / "Sample" / "assets");
+    const auto folder_terrains = from_folder.terrains;
+    from_folder.terrains.clear();
+    const auto packed = seed::subfolder(archive.reader(), "assets/");
+    check(seed::load_assets(packed) == from_folder, "The archive's assets match the project's");
+    check(seed::load_terrain(packed, "main") == folder_terrains.at("main"), "The archive's terrain matches");
 
     rejects([&] { export_macos_app(project, SEED_PLAYER_PATH, root / "out", false); },
             "Existing app replaced unasked");
@@ -225,6 +262,7 @@ int main(int argc, char** argv) {
         bad_projects(root);
         recent(root);
         starter(root);
+        terrains(root / "terrains");
         scripts(root / "script-checks");
         exporting(root / "export");
         std::cout << "Editor project checks passed.\n";

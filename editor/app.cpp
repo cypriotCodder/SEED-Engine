@@ -110,6 +110,10 @@ App::App(Options options)
             return;
         if (!app.assets_.capture(event)) ImGui_ImplSDL2_ProcessEvent(&event);
     });
+    scene_.open_terrain_editor = [this] {
+        assets_.show_terrain = true;
+        ImGui::SetWindowFocus("###Terrain");
+    };
     log(Level::info, "Seed Editor started.");
 }
 
@@ -584,7 +588,8 @@ void App::workspace() {
     // Scene panels first: a dock node lists tabs in the order windows first appear, so Scene and
     // Inspector lead their nodes.
     scene_.set_game_view(edited_game_.width, edited_game_.height);
-    scene_.draw(assets_.assets());
+    if (scene_.draw(assets_.edit())) assets_.changed();
+    assets_.set_terrain(scene_.scene().terrain); // The Terrain panel edits this scene's terrain.
     if (show_project_) project_panel();
     if (show_console_) console_panel();
     if (show_settings_) settings_panel();

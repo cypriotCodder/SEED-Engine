@@ -108,6 +108,10 @@ std::string export_problems(const Project& project) {
                 out += where + problems.substr(start, end - start + 1);
                 start = end + 1;
             }
+            // "main" missing just means flat ground (a new project); any other name is a mistake,
+            // usually a terrain renamed while another scene used it.
+            if (scene.terrain != "main" && !assets.terrains.count(scene.terrain))
+                out += where + "uses the terrain \"" + scene.terrain + "\", which does not exist\n";
             for (const auto& e : scene.entities) {
                 if (!e.script.empty()) referenced.insert(e.script);
                 if (!e.prefab.empty()) linked_prefabs.insert(e.prefab);
@@ -154,7 +158,7 @@ ExportReport export_macos_app(const Project& project, const fs::path& player, co
         archive.files[path] = to_json(parse_json(read_text(project.root / path)), true);
     };
     add_json("project.seed.json");
-    for (const char* folder : {"assets", "scenes", "prefabs"})
+    for (const char* folder : {"assets", "assets/terrains", "scenes", "prefabs"})
         for (const auto& file : files_in(project.root / folder, ".json")) {
             const auto path = std::string(folder) + "/" + file.filename().string();
             if (!valid_project_path(path))
