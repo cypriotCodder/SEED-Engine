@@ -3,6 +3,7 @@
 #include "project/archive.hpp"
 #include "project/scene_file.hpp"
 #include "scripts.hpp"
+#include "textures.hpp"
 #include <algorithm>
 #include <fcntl.h>
 #include <set>
@@ -142,6 +143,12 @@ std::string export_problems(const Project& project) {
     for (const auto& file : files_in(scripts, ".lua"))
         if (const auto error = checker.syntax_error(file); !error.empty()) out += "scripts/" + error + "\n";
     if (assets.materials.empty()) out += "The project has no materials\n";
+    const auto textures = list_textures(project.root);
+    for (const auto& material : assets.materials)
+        if (!material.texture.empty() &&
+            std::find(textures.begin(), textures.end(), material.texture) == textures.end())
+            out += "Material \"" + material.name + "\" uses texture \"" + material.texture +
+                   "\", which is not in assets/textures\n";
     return out;
 }
 
@@ -186,6 +193,10 @@ ExportReport export_macos_app(const Project& project, const fs::path& player, co
         write_text(contents / "Info.plist", info_plist(project));
         const auto pack = contents / "Resources" / ProjectArchive::file_name;
         archive.write(pack);
+        // Compressed textures go beside the archive, where the game looks for them.
+        cook_textures(project.root);
+        if (fs::is_regular_file(texture_pack(project.root)))
+            fs::copy_file(texture_pack(project.root), contents / "Resources" / "game.pak");
         for (const auto* license = game_licenses; (*license)[0]; ++license)
             write_text(contents / "Resources" / "licenses" / (*license)[0], (*license)[1]);
         report.files = archive.files.size();

@@ -1,4 +1,6 @@
 #include "asset_panels.hpp"
+#include "folder_dialog.hpp"
+#include "textures.hpp"
 #include "widgets.hpp"
 #include <algorithm>
 #include <cmath>
@@ -153,8 +155,45 @@ void AssetPanels::materials() {
             field("Variation");
             changed |= ImGui::SliderInt("##variation", &m.variation, 1, 128);
             ImGui::SetItemTooltip("How much each pixel's brightness varies.");
-            field("Texture (optional)");
-            changed |= ImGui::InputTextWithHint("##texture", "Generated from the settings above", &m.texture);
+            // A texture from the project's textures, drawn instead of the generated tile.
+            const auto project = folder_.parent_path();
+            field("Texture");
+            ImGui::SetNextItemWidth(-110);
+            if (ImGui::BeginCombo("##texture", m.texture.empty() ? "None (generated)" : m.texture.c_str())) {
+                if (ImGui::Selectable("None (generated)", m.texture.empty())) {
+                    m.texture.clear();
+                    changed = true;
+                }
+                for (const auto& name : list_textures(project))
+                    if (ImGui::Selectable(name.c_str(), name == m.texture)) {
+                        m.texture = name;
+                        changed = true;
+                    }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Import...", {-1, 0}))
+                if (const auto chosen = choose_image("Choose an image to use as a texture")) try {
+                        m.texture = import_texture(project, *chosen);
+                        changed = true;
+                        textures_changed_ = true;
+                        log_(false, "Imported texture \"" + m.texture + "\" into assets/textures.");
+                    } catch (const std::exception& error) {
+                        log_(true, error.what());
+                    }
+            ImGui::SetItemTooltip("Copy a PNG, JPG or TGA image into the project's textures.");
+            if (!m.texture.empty()) {
+                const auto names = list_textures(project);
+                if (std::find(names.begin(), names.end(), m.texture) == names.end())
+                    ImGui::TextColored({0.95F, 0.55F, 0.4F, 1}, "No image named \"%s\" in assets/textures.",
+                                       m.texture.c_str());
+                field("Tiles per texture copy");
+                changed |= ImGui::SliderFloat("##scale", &m.texture_scale, 1, 64, "%.0f",
+                                              ImGuiSliderFlags_Logarithmic);
+                ImGui::SetItemTooltip(
+                    "On the ground, one copy of the texture spans this many tiles and repeats\n"
+                    "seamlessly. 1 shows the whole texture on every tile.");
+            }
             ImGui::TextDisabled("ID %d", material_);
         } else
             ImGui::TextDisabled("Select a material.");

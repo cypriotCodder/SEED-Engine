@@ -65,6 +65,9 @@ private:
     void unsaved_popup();
     void record_history();
     void start_play();
+    // Re-cooks the project's textures if their files changed; tells the preview when the pack did.
+    void update_textures(bool always);
+    std::string texture_error_;
     std::filesystem::path player_path() const;
     // Saves, then exports to `destination`; `replace` allows overwriting an existing app.
     bool export_app(const std::filesystem::path& destination, bool replace);

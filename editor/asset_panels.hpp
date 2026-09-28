@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <utility>
 
 namespace seed::editor {
 
@@ -26,6 +27,8 @@ public:
     void changed() { refresh(); }
     // The terrain the Terrain panel edits: the one the open scene uses.
     void set_terrain(const std::string& name) { terrain_name_ = name; }
+    // True once after a texture was imported, so the texture pack is rebuilt straight away.
+    bool take_textures_changed() { return std::exchange(textures_changed_, false); }
     // Replaces the edited assets, e.g. from undo; selections stay where they still fit.
     void set(const Assets& assets);
     // Saves the kinds that changed. Returns false, logging why, when the assets have problems.
@@ -59,5 +62,6 @@ private:
     int rule_{-1}, field_{-1};
     int capturing_{-1}; // Action waiting for a key or button press, or -1.
     std::string terrain_name_{"main"};
+    bool textures_changed_{};
 };
 } // namespace seed::editor

@@ -68,6 +68,11 @@ public:
     // Draws the panels. Call once per frame between ImGui::NewFrame and ImGui::Render. Returns true
     // when it changed `assets` (the Terrain object creates, renames and deletes terrains).
     bool draw(Assets& assets);
+    // The project's cooked texture pack changed (or appeared, or went away): the preview reloads it.
+    void set_texture_pack(const std::filesystem::path& pack) {
+        pack_path_ = pack;
+        ++pack_version_;
+    }
     // Called to bring up the full terrain editor (the Terrain panel).
     std::function<void()> open_terrain_editor;
     bool terrain_selected() const { return terrain_selected_; }
@@ -167,6 +172,8 @@ private:
     // Preview renderer and the materials it was built from (textures replaced by generated tiles).
     std::unique_ptr<Renderer> renderer_;
     std::vector<MaterialAsset> rendered_;
+    std::filesystem::path pack_path_;
+    int pack_version_{}, rendered_pack_version_{-1};
     // Terrain preview: the compiled terrain, and sampled tiles cached for the area around the view.
     // Zoomed out, one sample stands for a block of tiles so the sprite count stays bounded.
     void draw_terrain(float half_w, float half_h);

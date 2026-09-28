@@ -2,6 +2,7 @@
 #include "core/jobs.hpp"
 #include "io/binary.hpp"
 #include "io/storage.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -42,6 +43,10 @@ public:
     }
     Pack(const Pack&) = delete;
     Pack& operator=(const Pack&) = delete;
+    bool has(std::string_view name) const {
+        return std::any_of(entries_.begin(), entries_.end(),
+                           [&](const TextureAsset& e) { return e.name == name; });
+    }
     const TextureAsset& texture(std::string_view name) const {
         for (const auto& entry : entries_)
             if (entry.name == name) return entry;

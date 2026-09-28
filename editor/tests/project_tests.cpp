@@ -1,3 +1,4 @@
+#include "assets/pack.hpp"
 #include "export.hpp"
 #include "io/json.hpp"
 #include "io/storage.hpp"
@@ -6,6 +7,8 @@
 #include "project/scene_file.hpp"
 #include "scripts.hpp"
 #include "starter.hpp"
+#include "textures.hpp"
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -249,6 +252,66 @@ void exporting(const fs::path& root) {
     check(export_problems(project).find("scripts/ghost.lua, which does not exist") != std::string::npos,
           "Missing scripts stop exports");
 }
+// An uncompressed 32-bit TGA, top row first, every pixel `bgra`.
+void write_tga(const fs::path& file, int width, int height, std::array<unsigned char, 4> bgra) {
+    std::string bytes(18, '\0');
+    bytes[2] = 2;
+    bytes[12] = char(width), bytes[14] = char(height);
+    bytes[16] = 32, bytes[17] = 0x28;
+    for (int i = 0; i < width * height; ++i)
+        bytes.append(reinterpret_cast<const char*>(bgra.data()), 4);
+    seed::write_text(file, bytes);
+}
+
+// Imported images are copied under a free name, cooked into the project's texture pack only when
+// they change, and shipped with exported games; materials may not name missing textures.
+void textures(const fs::path& root) {
+    fs::create_directories(root);
+    fs::copy(SEED_SAMPLE_PROJECT, root / "Sample", fs::copy_options::recursive);
+    const auto project = open_project(root / "Sample");
+    check(!cook_textures(project.root) && !fs::exists(texture_pack(project.root)), "No textures, no pack");
+    write_tga(root / "Stone Wall.tga", 6, 5, {10, 20, 30, 255});
+    rejects([&] { import_texture(project.root, root / "missing.tga"); }, "A missing image imported");
+    seed::write_text(root / "junk.png", "not an image");
+    rejects([&] { import_texture(project.root, root / "junk.png"); }, "An undecodable image imported");
+    check(import_texture(project.root, root / "Stone Wall.tga") == "Stone_Wall", "Names are cleaned");
+    check(import_texture(project.root, root / "Stone Wall.tga") == "Stone_Wall_2",
+          "Taken names are numbered");
+    check(list_textures(project.root) == std::vector<std::string>{"Stone_Wall", "Stone_Wall_2"},
+          "Textures listed");
+    const auto image = read_texture(texture_folder(project.root) / "Stone_Wall.tga", "x");
+    check(image.width == 8 && image.height == 4 && image.rgba.size() == 8 * 4 * 4 && image.rgba[0] == 30 &&
+              image.rgba[3] == 255,
+          "Images are resampled to multiples of four as RGBA");
+
+    check(cook_textures(project.root), "Cooking writes the pack");
+    check(!cook_textures(project.root), "An unchanged pack is not cooked again");
+    {
+        const seed::Pack pack(texture_pack(project.root));
+        check(pack.has("Stone_Wall") && pack.texture("Stone_Wall_2").width == 8,
+              "The pack holds each texture");
+    }
+
+    auto assets = seed::load_assets(project.root / "assets");
+    const auto previous = assets;
+    assets.materials[0].texture = "Stone_Wall";
+    assets.materials[0].texture_scale = 4;
+    seed::save_assets(project.root / "assets", assets, &previous);
+    check(seed::load_assets(project.root / "assets") == assets, "Texture and scale read back");
+    auto bad = assets;
+    bad.materials[0].texture_scale = 0;
+    check(!bad.problems().empty(), "Texture scales are checked");
+
+    const auto report = export_macos_app(project, SEED_PLAYER_PATH, root / "out", false);
+    check(fs::is_regular_file(report.app / "Contents" / "Resources" / "game.pak"), "Exports ship the pack");
+    fs::remove(texture_folder(project.root) / "Stone_Wall.tga");
+    check(export_problems(project).find("\"Stone_Wall\", which is not in assets/textures") !=
+              std::string::npos,
+          "Missing textures stop exports");
+    fs::remove(texture_folder(project.root) / "Stone_Wall_2.tga");
+    check(cook_textures(project.root) && !fs::exists(texture_pack(project.root)),
+          "The pack goes with the last texture");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -265,6 +328,7 @@ int main(int argc, char** argv) {
         terrains(root / "terrains");
         scripts(root / "script-checks");
         exporting(root / "export");
+        textures(root / "textures");
         std::cout << "Editor project checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

@@ -13,6 +13,7 @@
 namespace seed {
 namespace {
 std::filesystem::path asset_path(const char* name) {
+    if (std::filesystem::path(name).is_absolute()) return name;
     char* base = SDL_GetBasePath();
     if (!base) throw std::runtime_error("Cannot determine executable asset directory");
     const auto path = std::filesystem::path(base) / name;

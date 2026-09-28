@@ -1,4 +1,4 @@
-#include "assets/bc3.hpp"
+#include "assets/pack_writer.hpp"
 #include "io/binary.hpp"
 #include "io/storage.hpp"
 #include <cmath>
@@ -57,29 +57,15 @@ Image flame() {
 int main(int argc, char** argv) {
     try {
         if (argc < 3) throw std::runtime_error("Usage: seed_cook OUTPUT.pak (--builtin | INPUT.tga ...)");
-        seed::Bytes out;
-        out.u32(0x4b504453);
-        out.u32(1);
         const bool builtin = std::string_view(argv[2]) == "--builtin";
         if ((builtin && argc != 3) || argc - 2 > 64) throw std::runtime_error("Invalid cooker arguments");
-        out.u32(builtin ? 1 : static_cast<std::uint32_t>(argc - 2));
-        std::set<std::string> names;
+        std::vector<seed::PackImage> images;
         for (int i = 2; i < argc; ++i) {
+            auto image = builtin ? flame() : read_tga(argv[i]);
             const auto name = builtin ? std::string("flame") : std::filesystem::path(argv[i]).stem().string();
-            if (name.empty() || name.size() > 128 || !names.insert(name).second)
-                throw std::runtime_error("Invalid or duplicate asset name");
-            const auto image = builtin ? flame() : read_tga(argv[i]);
-            const auto blocks = seed::encode_bc3(image.pixels, image.width, image.height);
-            out.u16(static_cast<std::uint16_t>(name.size()));
-            out.data.insert(out.data.end(), name.begin(), name.end());
-            out.u8(1);
-            out.u16(static_cast<std::uint16_t>(image.width));
-            out.u16(static_cast<std::uint16_t>(image.height));
-            out.u32(static_cast<std::uint32_t>(blocks.size()));
-            out.u32(seed::crc32(blocks));
-            out.data.insert(out.data.end(), blocks.begin(), blocks.end());
+            images.push_back({name, image.width, image.height, std::move(image.pixels)});
         }
-        seed::write_blob(argv[1], out.data);
+        seed::write_blob(argv[1], seed::pack_payload(images));
         std::cout << "Cooked " << argv[1] << " (" << std::filesystem::file_size(argv[1]) << " bytes).\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

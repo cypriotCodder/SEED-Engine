@@ -33,6 +33,7 @@ struct SceneLightComponent {
 struct Runner {
     ProjectFiles files;
     std::string id, name, title, save;
+    std::string pack; // The project's texture pack, if it has one.
     GameSettings game;
     Assets data; // For the scene's material names and the default seed.
     SceneFile scene;
@@ -147,7 +148,10 @@ void render(void*, Engine& engine, const View& view) {
                 const float px = offset.x + static_cast<float>(x) + 0.5F,
                             py = offset.y + static_cast<float>(y) + 0.5F;
                 if (std::abs(px) > half_w || std::abs(py) > half_h) continue;
-                engine.renderer.sprite(tile.material, px, py);
+                // Ground textures continue across tiles, placed by the tile's world position.
+                engine.renderer.ground(tile.material, px, py,
+                                       global_coordinate(coord.x, static_cast<float>(x)),
+                                       global_coordinate(coord.y, static_cast<float>(y)));
                 if (tile.object != no_object)
                     engine.renderer.sprite(static_cast<MaterialId>(tile.object - 1), px, py);
             }
@@ -170,7 +174,9 @@ void render(void*, Engine& engine, const View& view) {
 }
 
 // Reads a project through `files`. `save` is where its games are saved unless --save says otherwise.
-void load(Runner& runner, ProjectFiles files, std::filesystem::path save) {
+void load(Runner& runner, ProjectFiles files, std::filesystem::path save, std::filesystem::path pack) {
+    // Textures arrive already compressed: the editor packs them (see editor/textures.hpp).
+    if (!pack.empty() && std::filesystem::exists(pack)) runner.pack = pack.string();
     runner.files = std::move(files);
     const auto project = runner.files("project.seed.json");
     if (!project) throw std::runtime_error("Not a Seed project: no project.seed.json");
@@ -236,6 +242,7 @@ int play(Runner& runner, int argc, char** argv) {
     game.window_height = runner.game.height;
     game.fullscreen = runner.game.fullscreen;
     game.assets = &runner.data;
+    if (!runner.pack.empty()) game.asset_pack = runner.pack.c_str();
     game.actions = add_moves;
     game.setup = setup;
     game.step = step;
@@ -259,7 +266,7 @@ int run_project(const std::filesystem::path& project, int argc, char** argv) {
         const auto root = std::filesystem::weakly_canonical(std::filesystem::absolute(project));
         if (!std::filesystem::is_directory(root))
             throw std::runtime_error("Not a Seed project: " + root.string());
-        load(runner, folder_files(root), root / ".seed" / "save");
+        load(runner, folder_files(root), root / ".seed" / "save", root / ".seed" / "textures.pak");
     } catch (const std::exception& error) {
         std::fprintf(stderr, "Engine error: %s\n", error.what());
         return 1;
@@ -281,7 +288,7 @@ int run_archive(const std::filesystem::path& archive, int argc, char** argv) {
         if (!base) throw std::runtime_error(std::string("Cannot find a folder for saves: ") + SDL_GetError());
         const std::filesystem::path saves = std::filesystem::path(base) / "save";
         SDL_free(base);
-        load(runner, files, saves);
+        load(runner, files, saves, archive.parent_path() / "game.pak");
     } catch (const std::exception& error) {
         std::fprintf(stderr, "Engine error: %s: %s\n", archive.string().c_str(), error.what());
         return 1;

@@ -21,7 +21,8 @@ struct MaterialAsset {
     std::array<int, 3> color{128, 128, 128};
     Pattern pattern{Pattern::speckle};
     int variation{23};
-    std::string texture; // Optional packed texture name; empty uses the generated tile.
+    std::string texture;    // A texture from assets/textures, by name; empty uses the generated tile.
+    float texture_scale{1}; // Tiles one copy of the texture covers on the ground.
     bool operator==(const MaterialAsset&) const = default;
 };
 struct ActionAsset {

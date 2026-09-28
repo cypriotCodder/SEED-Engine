@@ -21,6 +21,9 @@ struct MaterialDesc {
     int variation{23}; // Per-pixel noise range; must be positive.
     // Optional packed BC3 texture drawn instead of the generated tile, without a normal map.
     const char* texture{};
+    // How many tiles one copy of the texture covers when drawn with Renderer::ground, so
+    // it repeats seamlessly across neighbouring tiles. 1 draws the whole texture on every tile.
+    float texture_scale{1};
 };
 
 // The game's materials, registered once at startup before the renderer and world generation
@@ -32,6 +35,8 @@ public:
     MaterialId add(const MaterialDesc& desc) {
         if (!desc.name || !*desc.name) throw std::invalid_argument("A material needs a name");
         if (desc.variation <= 0) throw std::invalid_argument("Material variation must be positive");
+        if (!(desc.texture_scale >= 1 && desc.texture_scale <= 256))
+            throw std::invalid_argument("Material texture scale must be from 1 to 256 tiles");
         for (int c : desc.color)
             if (c < 0 || c > 255) throw std::invalid_argument("Material colour out of range");
         for (std::size_t i = 0; i < size_; ++i)

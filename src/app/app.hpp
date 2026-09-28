@@ -55,7 +55,7 @@ struct Game {
     const char* name{};       // Executable name, used in the usage message.
     const char* id{};         // Stable game identifier recorded in saves; never change it once saves exist.
     const char* title{};      // Window title prefix; the draw-call count is appended.
-    const char* asset_pack{}; // Archive file name beside the executable; optional.
+    const char* asset_pack{}; // Texture pack beside the executable, or an absolute path; optional.
     // A project's assets/ folder (materials, actions, sounds, particle styles made in the editor),
     // relative to the executable unless absolute. Registered before the game's own callbacks run,
     // so those callbacks can add more. Optional.

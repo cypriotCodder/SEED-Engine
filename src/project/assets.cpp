@@ -22,7 +22,7 @@ std::string get_string(const Json& object, std::string_view key) {
 // Registration of single entries. Names point into the asset, which must outlive the registry.
 void add_material(Materials& out, const MaterialAsset& material) {
     out.add({material.name.c_str(), material.color, material.pattern, material.variation,
-             material.texture.empty() ? nullptr : material.texture.c_str()});
+             material.texture.empty() ? nullptr : material.texture.c_str(), material.texture_scale});
 }
 void add_action(Actions& out, const ActionAsset& action) {
     out.add(action.name.c_str(), action.bindings);
@@ -88,6 +88,7 @@ MaterialAsset read_material(const Json& entry) {
     if (const auto* variation = entry.find("variation"))
         material.variation = static_cast<int>(variation->as_int(1, 255));
     material.texture = get_string(entry, "texture");
+    material.texture_scale = get_float(entry, "texture_scale", 1);
     return material;
 }
 ActionAsset read_action(const Json& entry) {
@@ -134,7 +135,10 @@ Json write_material(const MaterialAsset& material) {
     entry.set("color", color);
     entry.set("pattern", pattern_names[static_cast<int>(material.pattern)]);
     entry.set("variation", material.variation);
-    if (!material.texture.empty()) entry.set("texture", material.texture);
+    if (!material.texture.empty()) {
+        entry.set("texture", material.texture);
+        entry.set("texture_scale", json_float(material.texture_scale));
+    }
     return entry;
 }
 Json write_action(const ActionAsset& action) {

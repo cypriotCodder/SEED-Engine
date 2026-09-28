@@ -241,8 +241,13 @@ Renderer::Renderer(const Pack& pack, const Materials& registry)
                                      static_cast<GLsizei>(image.blocks.size()), image.blocks.data());
             gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            // A texture spread over several tiles repeats, so its edges meet seamlessly; one drawn
+            // whole on each sprite is clamped, so its edges do not bleed into each other.
+            const float scale = registry[static_cast<MaterialId>(m)].texture_scale;
+            texture_scales_[m] = scale;
+            const GLint wrap = scale > 1 ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
+            gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
         }
         std::vector<std::uint8_t> normal_pixels(pixels.size());
         for (int m = 0; m < materials; ++m)
@@ -441,6 +446,20 @@ void Renderer::sprite(MaterialId material, float x, float y, float width, float 
         sprite.u1 = sprite.v1 = 1;
     }
 }
+void Renderer::ground(MaterialId material, float x, float y, double gx, double gy) {
+    sprite(material, x, y);
+    if (material >= material_count_ || !textures_[material] || texture_scales_[material] <= 1) return;
+    // The part of the texture over this tile: its world position modulo the texture's span. Packed
+    // images store their bottom row first, so v runs upwards like world y.
+    const double scale = texture_scales_[material];
+    const double u = gx / scale - std::floor(gx / scale), v = gy / scale - std::floor(gy / scale);
+    auto& s = sprites_[size_ - 1];
+    s.u0 = static_cast<float>(u);
+    s.u1 = static_cast<float>(u + 1 / scale);
+    s.v0 = static_cast<float>(v);
+    s.v1 = static_cast<float>(v + 1 / scale);
+}
+
 void Renderer::flush() {
     if (!size_) return;
     gl_.BindBuffer(GL_ARRAY_BUFFER, buffer_);

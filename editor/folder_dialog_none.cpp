@@ -10,4 +10,7 @@ bool folder_dialog_available() {
 std::optional<std::filesystem::path> choose_folder(const char*, const std::filesystem::path&) {
     return std::nullopt;
 }
+std::optional<std::filesystem::path> choose_image(const char*) {
+    return std::nullopt;
+}
 } // namespace seed::editor

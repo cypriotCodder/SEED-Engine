@@ -1,5 +1,6 @@
 #include "app.hpp"
 #include "folder_dialog.hpp"
+#include "textures.hpp"
 #include <SDL_opengl.h>
 #include <algorithm>
 #include <cstdio>
@@ -163,6 +164,7 @@ void App::open(const fs::path& path) {
     history_.reset(snapshot());
     history_scene_ = scene_.name();
     refresh_files();
+    update_textures(true);
     log(Level::info, "Opened project \"" + project_->name + "\" at " + project_->root.string());
 }
 
@@ -247,11 +249,24 @@ void App::unsaved_popup() {
     ImGui::EndPopup();
 }
 
+void App::update_textures(bool always) {
+    try {
+        if (cook_textures(project_->root) || always) scene_.set_texture_pack(texture_pack(project_->root));
+    } catch (const std::exception& error) {
+        // Reported once per change: the failing file stays, so avoid repeating it every scan.
+        if (error.what() != texture_error_) log(Level::error, std::string("Textures: ") + error.what());
+        texture_error_ = error.what();
+        return;
+    }
+    texture_error_.clear();
+}
+
 void App::start_play() {
     if (!project_ || play_.running()) return;
     // The game runs the files on disk, so unsaved edits are saved first.
     if (dirty() && !save_all())
         return log(Level::error, "Play needs the project saved; see the problems above.");
+    update_textures(false); // The game loads the cooked pack.
     // Every Play starts a new world; the project's real saves are never touched.
     const auto save = user_state_directory(*project_) / "play";
     std::filesystem::remove_all(save);
@@ -584,7 +599,11 @@ void App::workspace() {
     }
     ImGui::DockSpaceOverViewport(dockspace, ImGui::GetMainViewport(),
                                  ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoCloseButton);
-    if (std::chrono::steady_clock::now() - files_scanned_ > std::chrono::seconds(2)) refresh_files();
+    if (std::chrono::steady_clock::now() - files_scanned_ > std::chrono::seconds(2)) {
+        refresh_files();
+        update_textures(false); // Picks up images added or edited outside the editor.
+    }
+    if (assets_.take_textures_changed()) update_textures(false);
     // Scene panels first: a dock node lists tabs in the order windows first appear, so Scene and
     // Inspector lead their nodes.
     scene_.set_game_view(edited_game_.width, edited_game_.height);

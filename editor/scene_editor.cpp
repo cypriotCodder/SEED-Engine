@@ -181,7 +181,8 @@ void SceneEditor::make_prefab(const std::string& name) {
 }
 
 void SceneEditor::sync(const Assets& assets) {
-    const bool materials_changed = !(assets.materials == rendered_ && (renderer_ || rendered_.empty()));
+    const bool materials_changed = !(assets.materials == rendered_ && (renderer_ || rendered_.empty())) ||
+                                   pack_version_ != rendered_pack_version_;
     // The scene's own terrain; a name the project lacks shows flat ground.
     const auto found = assets.terrains.find(edited_.terrain);
     const TerrainAsset terrain = found == assets.terrains.end() ? TerrainAsset{} : found->second;
@@ -208,15 +209,19 @@ void SceneEditor::sync(const Assets& assets) {
     renderer_.reset();
     renderer_error_.clear();
     if (rendered_.empty()) return;
-    // The editor has no asset pack yet, so textured materials preview as their generated tile.
-    Assets preview;
-    preview.materials = rendered_;
-    for (auto& material : preview.materials)
-        material.texture.clear();
+    rendered_pack_version_ = pack_version_;
     try {
+        // The preview draws the project's cooked textures; a material whose texture is not cooked
+        // (a missing file, or not yet imported) previews as its generated tile.
+        const auto pack = !pack_path_.empty() && fs::exists(pack_path_) ? std::make_unique<Pack>(pack_path_)
+                                                                        : std::make_unique<Pack>();
+        Assets preview;
+        preview.materials = rendered_;
+        for (auto& material : preview.materials)
+            if (!material.texture.empty() && !pack->has(material.texture)) material.texture.clear();
         Materials registry;
         preview.register_materials(registry);
-        renderer_ = std::make_unique<Renderer>(Pack{}, registry);
+        renderer_ = std::make_unique<Renderer>(*pack, registry);
         game_lighting_ = renderer_->lighting;
     } catch (const std::exception& error) {
         renderer_error_ = error.what(); // Usually a material being edited; fixed on the next change.
@@ -1101,7 +1106,12 @@ void SceneEditor::draw_terrain(float half_w, float half_h) {
                 cache_.cells[static_cast<std::size_t>((y - cache_.y0) * cache_.columns + (x - cache_.x0))];
             const float cx = origin.x + (static_cast<float>(x) + 0.5F) * size;
             const float cy = origin.y + (static_cast<float>(y) + 0.5F) * size;
-            renderer_->sprite(cell.ground, cx, cy, size, size);
+            if (block == 1)
+                renderer_->ground(cell.ground, cx, cy,
+                                  global_coordinate(cache_.origin.x, static_cast<float>(x)),
+                                  global_coordinate(cache_.origin.y, static_cast<float>(y)));
+            else
+                renderer_->sprite(cell.ground, cx, cy, size, size);
             // Objects show only up close: zoomed out, a block's one sample would blow a single tree
             // up to the size of the whole block.
             if (block == 1 && cell.object != no_object)

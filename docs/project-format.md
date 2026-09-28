@@ -20,7 +20,11 @@ My Game/
 
 Each file is `{"format": 1, "<kind>": [...]}`. A missing file is an empty list. **List order is registration order and so decides each entry's ID.** Tiles store material IDs, so moving a material changes what existing saved worlds show; particle styles refer to materials by name and are unaffected. Every entry is validated with the same checks the running engine uses; the editor will not save invalid assets, and a game refuses to start with them.
 
-- `materials.json`: `name`, `color` ([r, g, b], 0–255), `pattern` (`speckle`, `water`, `planks`, `round`), `variation` (1–255), optional `texture` (a name in the game's asset pack). At most 64.
+- `materials.json`: `name`, `color` ([r, g, b], 0–255), `pattern` (`speckle`, `water`, `planks`, `round`), `variation` (1–255), optional `texture` (an image in `assets/textures`, by file name without the extension) and `texture_scale` (1–256: how many tiles one copy of the texture covers on the ground; 1 draws the whole image on each tile). At most 64.
+
+### textures/
+
+PNG, JPG or TGA images, named with letters, digits, `_` and `-`. The editor resamples each to sides that are multiples of four (at most 4096), compresses them to BC3 and writes `.seed/textures.pak`; it rebuilds the pack only when a file is added, removed or changed. Play uses that pack, and an export ships it as `Contents/Resources/game.pak`, so games never decode images. Exports stop when a material names a missing texture.
 - `actions.json`: `name` and `bindings`, up to four input names: an SDL key name such as `"W"`, `"Space"` or `"Left Shift"`, or `"Mouse Left"`, `"Mouse Middle"`, `"Mouse Right"`, `"Mouse X1"`, `"Mouse X2"`. The engine's `quit`, `checkpoint` and `screenshot` actions come first and their names are reserved. At most 61.
 - `sounds.json`: `name`, `frequency` (Hz), `variation` (Hz), `gain` (0–1), `decay` (volume multiplier per sample at 48 kHz, below 1), `tone` (0 noise to 1 pure tone). At most 32.
 - `particles.json`: `name`, `material` (a material name), `count` (1–512), `speed`, `speed_range`, `life`, `size`, `drag` (0–1), `spin`, `shade`. At most 32.

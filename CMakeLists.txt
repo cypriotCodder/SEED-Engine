@@ -62,6 +62,14 @@ if(NOT WIN32)
     target_compile_definitions(seed_lua PRIVATE LUA_USE_POSIX)
 endif()
 
+# stb_image decodes PNG, JPG and TGA files the editor imports as textures. Editor only: games get
+# textures already compressed in their asset pack.
+FetchContent_Declare(stb
+    URL https://raw.githubusercontent.com/nothings/stb/013ac3beddff3dbffafd5177e7972067cd2b5083/stb_image.h
+    URL_HASH SHA256=594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3
+    DOWNLOAD_NO_EXTRACT TRUE)
+FetchContent_MakeAvailable(stb)
+
 function(seed_strict target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)

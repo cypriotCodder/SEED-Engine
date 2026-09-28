@@ -39,6 +39,10 @@ public:
     void begin(int width, int height, float camera_x, float camera_y, float pixels_per_unit);
     void sprite(MaterialId material, float x, float y, float width = 1, float height = 1, float angle = 0,
                 float shade = 1);
+    // A ground tile whose lower-left corner is at global tile coordinates (gx, gy), drawn at
+    // (x, y) like sprite(). A textured material shows the part of its texture that falls on this
+    // tile, so the texture continues across neighbouring tiles; other materials draw as sprite().
+    void ground(MaterialId material, float x, float y, double gx, double gy);
     void flush();
     void finish();
     // Where finish() places the frame in the window's framebuffer, in pixels from its bottom-left
@@ -69,8 +73,9 @@ private:
     void resize_targets(int width, int height);
     Gl gl_;
     GLuint vao_{}, buffer_{}, program_{}, atlas_{};
-    std::array<GLuint, Materials::capacity> textures_{}; // Per material; 0 draws from the atlas.
-    GLuint bound_{};                                     // Texture currently bound for sprites.
+    std::array<GLuint, Materials::capacity> textures_{};      // Per material; 0 draws from the atlas.
+    std::array<float, Materials::capacity> texture_scales_{}; // Tiles per texture copy.
+    GLuint bound_{};                                          // Texture currently bound for sprites.
     std::size_t material_count_{};
     float atlas_width_{};
     struct Light {
