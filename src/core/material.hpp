@@ -24,6 +24,11 @@ struct MaterialDesc {
     // How many tiles one copy of the texture covers when drawn with Renderer::ground, so
     // it repeats seamlessly across neighbouring tiles. 1 draws the whole texture on every tile.
     float texture_scale{1};
+    // Walking speed on this ground, as a multiple of a character's own speed (0.1 to 4).
+    float speed{1};
+    // Labels for scripts, separated by spaces, such as "slippery hurts"; the engine gives them no
+    // meaning. Null for none.
+    const char* tags{};
 };
 
 // The game's materials, registered once at startup before the renderer and world generation
@@ -37,6 +42,9 @@ public:
         if (desc.variation <= 0) throw std::invalid_argument("Material variation must be positive");
         if (!(desc.texture_scale >= 1 && desc.texture_scale <= 256))
             throw std::invalid_argument("Material texture scale must be from 1 to 256 tiles");
+        if (!(desc.speed >= 0.1F && desc.speed <= 4))
+            throw std::invalid_argument("Material speed must be from 0.1 to 4");
+        if (desc.tags) check_tags(desc.tags);
         for (int c : desc.color)
             if (c < 0 || c > 255) throw std::invalid_argument("Material colour out of range");
         for (std::size_t i = 0; i < size_; ++i)
@@ -57,7 +65,36 @@ public:
     }
     std::size_t size() const { return size_; }
 
+    // Whether the material's tags include `tag`.
+    bool tagged(MaterialId id, std::string_view tag) const {
+        std::string_view tags = (*this)[id].tags ? (*this)[id].tags : "";
+        while (!tags.empty()) {
+            const auto end = tags.find(' ');
+            if (tags.substr(0, end) == tag) return true;
+            if (end == std::string_view::npos) break;
+            tags.remove_prefix(end + 1);
+        }
+        return false;
+    }
+
 private:
+    // At most 8 tags of letters, digits, '_' and '-', one space apart.
+    static void check_tags(std::string_view tags) {
+        std::size_t count = 0, length = 0;
+        for (std::size_t i = 0; i <= tags.size(); ++i) {
+            const char c = i < tags.size() ? tags[i] : ' ';
+            if (c == ' ') {
+                if (!length)
+                    throw std::invalid_argument("Material tags are words separated by single spaces");
+                if (++count > 8) throw std::invalid_argument("A material has at most 8 tags");
+                length = 0;
+            } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                       c == '_' || c == '-') {
+                if (++length > 32) throw std::invalid_argument("Material tags are at most 32 characters");
+            } else
+                throw std::invalid_argument("Material tags use letters, digits, '_' and '-'");
+        }
+    }
     std::array<MaterialDesc, capacity> entries_{};
     std::size_t size_{};
 };

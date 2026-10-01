@@ -48,6 +48,22 @@ void round_trip(const fs::path& root) {
     const auto loaded = seed::load_scene(root / "scenes" / "main.json");
     check(loaded == scene, "Scene reads back unchanged, including far chunk coordinates");
     check(!loaded.entities[2].visual && !loaded.entities[2].light, "Component-free entities stay empty");
+    const auto paint_file = root / "scenes" / "main.paint";
+    check(!fs::exists(paint_file), "A scene without paint has no paint file");
+
+    // Painted terrain is kept beside the scene, and removed with the last painted tile.
+    auto painted = scene;
+    const auto name = assets().materials.front().name;
+    painted.paint.set(-40, 7, {seed::paint_ground, painted.paint.material(name), 0, false, 0});
+    check(painted.problems(assets()).empty(), "Painting a known material is valid");
+    seed::save_scene(root / "scenes" / "main.json", painted);
+    check(fs::exists(paint_file) && seed::load_scene(root / "scenes" / "main.json") == painted,
+          "Paint reads back with its scene");
+    seed::save_scene(root / "scenes" / "main.json", scene);
+    check(!fs::exists(paint_file), "Clearing the paint removes its file");
+    painted.paint.set(1, 1, {seed::paint_ground, painted.paint.material("lava"), 0, false, 0});
+    check(painted.problems(assets()).find("\"lava\"") != std::string::npos,
+          "Unknown painted materials reported");
 }
 
 // Editor-only flags round trip, and are left out of the file when unset.

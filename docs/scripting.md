@@ -20,7 +20,7 @@ end
 
 ## How scripts run
 
-Each attached script runs in its own environment: its globals and `local`s belong to that entity alone, and `self` is the entity. The file's top level runs when the game starts, after every scene entity exists. `start()`, if defined, runs once before the first update; `update(dt)`, if defined, runs every fixed step (60 per second; `dt` is in seconds).
+Each attached script runs in its own environment: its globals and `local`s belong to that entity alone, and `self` is the entity. The file's top level runs when the game starts, after every scene entity exists. `start()`, if defined, runs once before the first update; `update(dt)`, if defined, runs every fixed step (60 per second; `dt` is in seconds). On a character, `on_surface(material)`, if defined, runs when it steps onto a different ground material, and once when it first stands on loaded ground.
 
 The player moves with the keys unless its Character's "Moves with the keys" is off; its script can add to that, or take over with `walk` and `walk_to`. NPCs move only through their scripts.
 
@@ -64,6 +64,7 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `world.spawn{x=, y=, name=, material=, size=, angle=, script=}` | A new entity; `material` gives it a visual, `size` is a number or `{w, h}`, `script` attaches a script. |
 | `world.spawn{prefab=, x=, y=, name=, angle=}` | A copy of a prefab, with its look, light and script. |
 | `world.tile(x, y)` | `{material=, object=, solid=, elevation=}` for a loaded tile (`object` is `nil` when nothing stands there), or `nil` far from the camera. Water has elevation below 0. |
+| `world.surface(x, y)` | `{material=, speed=, tags={...}}`: the ground material at a loaded tile, how fast characters walk on it (a multiple of their own speed, applied by the engine) and its tags from the Materials panel, or `nil` far from the camera. |
 | `sound.play(name)` | A sound from the Sounds panel. |
 | `particles.burst(name, x, y)` | A particle style from the Particles panel. |
 | `camera.follow(entity)` | The camera, and world streaming, follow this entity. |

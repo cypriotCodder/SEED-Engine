@@ -302,8 +302,18 @@ void textures(const fs::path& root) {
     bad.materials[0].texture_scale = 0;
     check(!bad.problems().empty(), "Texture scales are checked");
 
+    // Painted terrain ships beside its scene.
+    auto scene = seed::load_scene(project.root / "scenes" / "main.json");
+    scene.paint.set(3, 3, {seed::paint_ground, scene.paint.material(assets.materials[0].name), 0, false, 0});
+    seed::save_scene(project.root / "scenes" / "main.json", scene);
+
     const auto report = export_macos_app(project, SEED_PLAYER_PATH, root / "out", false);
     check(fs::is_regular_file(report.app / "Contents" / "Resources" / "game.pak"), "Exports ship the pack");
+    const auto archive =
+        seed::ProjectArchive::read(report.app / "Contents" / "Resources" / seed::ProjectArchive::file_name);
+    check(archive.files.count("scenes/main.paint") &&
+              seed::decode_paint(archive.files.at("scenes/main.paint")) == scene.paint,
+          "Exports ship painted terrain");
     fs::remove(texture_folder(project.root) / "Stone_Wall.tga");
     check(export_problems(project).find("\"Stone_Wall\", which is not in assets/textures") !=
               std::string::npos,

@@ -8,9 +8,11 @@
 #include "lauxlib.h"
 #include "lua.h"
 #include "lualib.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <string_view>
 
 namespace seed {
 bool blocks_walking(void*, const Tile* tile) {
@@ -196,6 +198,32 @@ struct ScriptApi {
         lua_setfield(lua, -2, "solid");
         lua_pushnumber(lua, t->elevation);
         lua_setfield(lua, -2, "elevation");
+        return 1;
+    }
+
+    // What the ground at a point is for walking: its material, speed and tags.
+    static int surface(lua_State* lua) {
+        auto& e = engine(lua);
+        const auto* t = e.world.tile(position_at(lua, 1));
+        if (!t) {
+            lua_pushnil(lua);
+            return 1;
+        }
+        const auto& m = e.materials[t->material];
+        lua_createtable(lua, 0, 3);
+        lua_pushstring(lua, m.name);
+        lua_setfield(lua, -2, "material");
+        lua_pushnumber(lua, m.speed);
+        lua_setfield(lua, -2, "speed");
+        lua_newtable(lua);
+        std::string_view tags = m.tags ? m.tags : "";
+        for (int n = 1; !tags.empty(); ++n) {
+            const auto end = std::min(tags.find(' '), tags.size());
+            lua_pushlstring(lua, tags.data(), end);
+            lua_rawseti(lua, -2, n);
+            tags.remove_prefix(std::min(end + 1, tags.size()));
+        }
+        lua_setfield(lua, -2, "tags");
         return 1;
     }
 
@@ -411,8 +439,11 @@ struct ScriptApi {
                                          {"released", guarded<released>},
                                          {"axis", guarded<axis>},
                                          {nullptr, nullptr}};
-        static const luaL_Reg world[] = {
-            {"find", guarded<find>}, {"spawn", guarded<spawn>}, {"tile", guarded<tile>}, {nullptr, nullptr}};
+        static const luaL_Reg world[] = {{"find", guarded<find>},
+                                         {"spawn", guarded<spawn>},
+                                         {"tile", guarded<tile>},
+                                         {"surface", guarded<surface>},
+                                         {nullptr, nullptr}};
         static const luaL_Reg sound[] = {{"play", guarded<play>}, {nullptr, nullptr}};
         static const luaL_Reg particles[] = {{"burst", guarded<burst>}, {nullptr, nullptr}};
         static const luaL_Reg camera[] = {{"follow", guarded<follow>},
@@ -552,6 +583,17 @@ void ScriptHost::call(Instance& instance, const char* function, int arguments) {
             }
     }
     lua_settop(lua, base);
+}
+
+void ScriptHost::surfaces() {
+    auto& motions = engine_.scene.components<CharacterMotion>();
+    for (std::size_t i = 0; i < instances_.size(); ++i) {
+        if (instances_[i].failed || !engine_.scene.alive(instances_[i].entity)) continue;
+        const auto* motion = motions.find(instances_[i].entity);
+        if (!motion || !motion->surface_changed) continue;
+        lua_pushstring(lua_, engine_.materials[static_cast<MaterialId>(motion->surface)].name);
+        call(instances_[i], "on_surface", 1);
+    }
 }
 
 void ScriptHost::update(float dt) {

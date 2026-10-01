@@ -196,6 +196,38 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
     add(3, [this] {
         check(scene_.scene().terrain == "island", "New > Starter Island makes a terrain the scene uses");
     });
+
+    // Painting: the Paint tool, the ground brush, one stroke across the view; undo takes it back.
+    click([this] { return scene_.control("paint tool"); });
+    click([this] { return scene_.control("brush Ground"); });
+    drag([this] { return world_point(2.5, 6.5); }, [this] { return world_point(8.5, 6.5); });
+    add(3, [this] {
+        const auto& paint = scene_.scene().paint;
+        const auto* tile = paint.find(5, 6);
+        check(tile && (tile->mask & paint_ground) && paint.find(8, 6) && !paint.find(5, 9) &&
+                  paint.tiles() >= 15,
+              "a stroke of the ground brush paints the tiles it passes over");
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this] { check(scene_.scene().paint.empty(), "Cmd+Z takes back the whole stroke"); });
+    click([this] { return scene_.control("brush Raise"); });
+    drag([this] { return world_point(3.5, 3.5); }, ImVec2{0, 0});
+    add(3, [this] {
+        const auto* tile = scene_.scene().paint.find(3, 3);
+        check(tile && tile->mask == paint_height, "the raise brush paints height alone");
+    });
+
+    // A shared material made unique from the Inspector changes only the selected entity.
+    click([this] { return scene_.control("done painting"); });
+    click([this] { return row(index_of("Player"), 0); });
+    add(2, [] {});
+    click([this] { return scene_.control("make unique"); });
+    add(3, [this] {
+        const auto& e = scene_.scene().entities[static_cast<std::size_t>(index_of("Player"))];
+        check(e.visual && e.visual->material.size() > 2 &&
+                  e.visual->material.compare(e.visual->material.size() - 2, 2, "_2") == 0,
+              "Make Unique gives the entity its own copy of the material");
+    });
 }
 
 void UiTest::type(const char* text) {

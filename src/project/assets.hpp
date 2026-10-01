@@ -23,6 +23,8 @@ struct MaterialAsset {
     int variation{23};
     std::string texture;    // A texture from assets/textures, by name; empty uses the generated tile.
     float texture_scale{1}; // Tiles one copy of the texture covers on the ground.
+    float speed{1};         // Walking speed on this ground, times the character's own (0.1 to 4).
+    std::string tags;       // Words for scripts, separated by spaces, such as "slippery hurts".
     bool operator==(const MaterialAsset&) const = default;
 };
 struct ActionAsset {
@@ -51,8 +53,10 @@ struct Assets {
     std::vector<ParticleAsset> particles;
     // Every terrain of the project by name (assets/terrains/<name>.json); each scene picks one.
     std::map<std::string, TerrainAsset> terrains;
-    // The terrain a running game generates its world from: its start scene's choice.
+    // The terrain a running game generates its world from: its start scene's choice, and the
+    // tiles that scene paints over it.
     TerrainAsset terrain;
+    TerrainPaint paint;
     bool operator==(const Assets&) const = default;
     std::vector<std::string> material_names() const;
 

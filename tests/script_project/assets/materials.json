@@ -100,6 +100,21 @@
       ],
       "pattern": "round",
       "variation": 30
+    },
+    {
+      "name": "test_mud",
+      "color": [
+        90,
+        70,
+        50
+      ],
+      "pattern": "speckle",
+      "variation": 18,
+      "speed": 0.5,
+      "tags": [
+        "sticky",
+        "slow"
+      ]
     }
   ]
 }

@@ -74,6 +74,7 @@ std::string SceneFile::problems(const Assets& assets) const {
         result += "Entity \"" + entities[i].name + "\" (" + std::to_string(i + 1) + "): " + text + "\n";
     };
     if (entities.size() > capacity) result += "More than 4096 entities in one scene\n";
+    result += paint.problems(assets.material_names());
     int players = 0;
     if (!valid_prefab_name(terrain))
         result += "The scene's terrain needs a name of letters, digits, '_' and '-'\n";
@@ -299,9 +300,17 @@ SceneFile parse_scene(const Json& json) {
     return scene;
 }
 
+std::filesystem::path paint_file(const std::filesystem::path& scene_file) {
+    auto file = scene_file;
+    return file.replace_extension(".paint");
+}
+
 SceneFile load_scene(const std::filesystem::path& file) {
     try {
-        return parse_scene(parse_json(read_text(file, 16 * 1024 * 1024)));
+        auto scene = parse_scene(parse_json(read_text(file, 16 * 1024 * 1024)));
+        if (const auto paint = paint_file(file); std::filesystem::exists(paint))
+            scene.paint = decode_paint(read_text(paint, 64 * 1024 * 1024));
+        return scene;
     } catch (const std::exception& error) {
         throw std::runtime_error(file.string() + ": " + error.what());
     }
@@ -310,5 +319,9 @@ SceneFile load_scene(const std::filesystem::path& file) {
 void save_scene(const std::filesystem::path& file, const SceneFile& scene) {
     std::filesystem::create_directories(file.parent_path());
     write_text(file, to_json(scene_json(scene)));
+    if (scene.paint.empty())
+        std::filesystem::remove(paint_file(file));
+    else
+        write_text(paint_file(file), encode_paint(scene.paint));
 }
 } // namespace seed

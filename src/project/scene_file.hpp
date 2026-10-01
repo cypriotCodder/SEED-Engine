@@ -75,6 +75,7 @@ struct SceneFile {
     static constexpr std::size_t capacity = 4096; // Entities per scene.
     std::string terrain{"main"};                  // The project terrain this scene's world is generated from.
     std::vector<SceneEntity> entities;
+    TerrainPaint paint; // Tiles painted over the terrain, saved beside the scene as <name>.paint.
     bool operator==(const SceneFile&) const = default;
 
     // Every problem found, one per line, checking material names against `assets`; empty when
@@ -86,6 +87,8 @@ Json scene_json(const SceneFile& scene);
 Json entity_json(const SceneEntity& entity);
 SceneEntity parse_entity(const Json& json);
 SceneFile parse_scene(const Json& json);
+// Files: scenes/<name>.json, and scenes/<name>.paint when the scene paints its terrain.
+std::filesystem::path paint_file(const std::filesystem::path& scene_file);
 SceneFile load_scene(const std::filesystem::path& file);
 void save_scene(const std::filesystem::path& file, const SceneFile& scene);
 } // namespace seed

@@ -32,6 +32,8 @@ seed::Assets sample() {
                         material("crate", {150, 110, 60})};
     assets.materials[1].pattern = seed::Pattern::water;
     assets.materials[1].variation = 12;
+    assets.materials[1].speed = 0.5F;
+    assets.materials[1].tags = "wet slow";
     assets.materials[2].pattern = seed::Pattern::planks;
     assets.materials[2].texture = "crate.bc3";
     assets.actions = {{"jump", {seed::Binding::key(SDL_SCANCODE_SPACE)}},
@@ -76,6 +78,10 @@ void registration() {
     check(materials.size() == 3 && materials.find("crate") == 2, "Materials registered in file order");
     check(std::string_view(materials[2].texture) == "crate.bc3" && !materials[0].texture,
           "Texture names kept");
+    check(materials[1].speed == 0.5F && materials[0].speed == 1, "Ground speeds kept");
+    check(materials.tagged(1, "wet") && materials.tagged(1, "slow") && !materials.tagged(1, "we") &&
+              !materials.tagged(0, "wet"),
+          "Tags are whole words");
     seed::Actions actions;
     seed::add_engine_actions(actions);
     assets.register_actions(actions);
@@ -95,7 +101,13 @@ void problems() {
     auto assets = sample();
     assets.materials.push_back(material("grass", {1, 2, 3})); // Duplicate name.
     assets.materials.push_back(material("hot", {300, 0, 0})); // Colour out of range.
-    assets.actions.push_back({"quit", {}});                   // Clashes with an engine action.
+    assets.materials.push_back(material("ice", {200, 220, 255}));
+    assets.materials.back().speed = 9; // Above 4.
+    assets.materials.push_back(material("lava", {255, 80, 0}));
+    assets.materials.back().tags = "hot  burns"; // Two spaces.
+    assets.materials.push_back(material("goo", {0, 255, 0}));
+    assets.materials.back().tags = "sticky!";
+    assets.actions.push_back({"quit", {}}); // Clashes with an engine action.
     seed::SoundAsset loud;
     loud.name = "loud";
     loud.gain = 2; // Above 1.
@@ -105,10 +117,11 @@ void problems() {
     dust.material = "sand"; // Unknown material.
     assets.particles.push_back(dust);
     const auto report = assets.problems();
-    for (const char* expected : {"Material \"grass\"", "Material \"hot\"", "Action \"quit\"",
-                                 "Sound \"loud\"", "Particle style \"dust\""})
+    for (const char* expected :
+         {"Material \"grass\"", "Material \"hot\"", "Material \"ice\"", "Material \"lava\"",
+          "Material \"goo\"", "Action \"quit\"", "Sound \"loud\"", "Particle style \"dust\""})
         check(report.find(expected) != std::string::npos, expected);
-    check(std::count(report.begin(), report.end(), '\n') == 5, "One line per problem");
+    check(std::count(report.begin(), report.end(), '\n') == 8, "One line per problem");
 }
 
 void bad_files(const fs::path& root) {

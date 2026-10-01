@@ -36,7 +36,10 @@ void move_characters(Engine& engine, float dt) {
         auto& m = values[i];
         auto* transform = engine.scene.transforms.find(owners[i]);
         if (!transform) continue;
-        const float top = m.running ? m.run_speed : m.speed;
+        m.surface_changed = false;
+        const auto* ground = engine.world.tile(transform->position);
+        const float footing = ground ? engine.materials[ground->material].speed : 1;
+        const float top = (m.running ? m.run_speed : m.speed) * footing;
         Vec2 direction = m.walk;
         float limit = top * dt; // How far this step may go.
         bool arriving = false;
@@ -84,6 +87,15 @@ void move_characters(Engine& engine, float dt) {
             m.velocity = {};
         }
         if (m.face_movement && length_of(moved) > 1e-4F) transform->angle = std::atan2(moved.y, moved.x);
+    }
+    // What each character now stands on, for scripts' on_surface.
+    for (std::size_t i = 0; i < owners.size(); ++i) {
+        auto& m = values[i];
+        const auto* transform = engine.scene.transforms.find(owners[i]);
+        const auto* ground = transform ? engine.world.tile(transform->position) : nullptr;
+        const std::int16_t surface = ground ? std::int16_t{ground->material} : CharacterMotion::no_surface;
+        if (ground && surface != m.surface) m.surface_changed = true;
+        if (ground) m.surface = surface;
     }
 }
 } // namespace seed

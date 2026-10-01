@@ -48,6 +48,9 @@ public:
     void set_player(Entity player) { player_ = player; }
     // Runs pending start() calls, then update(dt) on every live script.
     void update(float dt);
+    // Calls on_surface(material) on each scripted character that stepped onto a different ground
+    // material in the last move_characters (or first stood on one). Call right after it.
+    void surfaces();
     unsigned errors() const { return errors_; }
 
 private:

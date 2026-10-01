@@ -111,6 +111,12 @@ App::App(Options options)
             return;
         if (!app.assets_.capture(event)) ImGui_ImplSDL2_ProcessEvent(&event);
     });
+    scene_.open_material = [this](const std::string& name) {
+        assets_.select_material(name);
+    };
+    scene_.textures_changed = [this] {
+        update_textures(false);
+    };
     scene_.open_terrain_editor = [this] {
         assets_.show_terrain = true;
         ImGui::SetWindowFocus("###Terrain");

@@ -111,6 +111,70 @@ void versions() {
         throw std::logic_error("Invalid terrain compiled");
     } catch (const std::invalid_argument&) {}
 }
+// Painted tiles: stored sparsely by chunk, saved compactly, and applied over the generated
+// terrain, changing its version so saves of the unpainted world are not mixed in.
+void painting() {
+    seed::TerrainPaint paint;
+    check(paint.empty() && !paint.find(0, 0), "Nothing painted at first");
+    seed::PaintedTile ground{seed::paint_ground, paint.material("stone"), 0, false, 0};
+    paint.set(-1, -1, ground); // Chunk (-1, -1), its top-right tile.
+    paint.set(33, 2, ground);
+    seed::PaintedTile pond{seed::paint_height | seed::paint_solid | seed::paint_object, 0, 0, true, -0.5F};
+    paint.set(5, 6, pond);
+    seed::PaintedTile tree{seed::paint_object, 0, static_cast<std::uint8_t>(paint.material("tree") + 1),
+                           false, 0};
+    paint.set(7, 6, tree);
+    check(paint.tiles() == 4 && paint.chunks.size() == 3, "Tiles are kept by chunk");
+    check(paint.find(-1, -1) && *paint.find(-1, -1) == ground && !paint.find(-2, -1),
+          "Negative tiles are found");
+    check(paint.chunks.count({-1, -1}) && paint.chunks.at({-1, -1})[0].first == 31 * 32 + 31,
+          "Negative coordinates floor into their chunk");
+
+    const auto bytes = seed::encode_paint(paint);
+    check(seed::decode_paint(bytes) == paint, "Paint reads back unchanged");
+    // Header 8, names 1 + 6 + 5, chunk count 4, three chunk headers of 18, then each tile's index
+    // and mask (3) and only its painted fields: 1 + 1 + (1 + 4 + 1) + 1.
+    check(bytes.size() == 8 + 12 + 4 + 3 * 18 + 4 * 3 + 9, "Only painted fields are stored");
+    for (std::size_t cut = 0; cut < bytes.size(); ++cut)
+        try {
+            seed::decode_paint(std::string_view(bytes).substr(0, cut));
+            throw std::logic_error("Truncated paint read");
+        } catch (const std::runtime_error&) {}
+    auto unknown = paint;
+    unknown.material("lava");
+    unknown.set(8, 8, {seed::paint_ground, unknown.material("lava"), 0, false, 0});
+    check(unknown.problems(names()).find("\"lava\"") != std::string::npos, "Unknown materials are problems");
+    unknown.set(8, 8, {});
+    check(unknown.problems(names()).empty() && unknown.tiles() == 4, "Erasing restores the generated tile");
+    unknown.compact();
+    check(unknown.materials == std::vector<std::string>{"stone", "tree"} && *unknown.find(7, 6) == tree,
+          "Compacting drops unused names and renumbers");
+
+    const auto registry = materials();
+    const seed::Terrain plain(island(), registry), painted(island(), registry, paint);
+    check(painted.version() != plain.version(), "Paint changes the version");
+    check(seed::Terrain(island(), registry, seed::decode_paint(bytes)).version() == painted.version(),
+          "The same paint gives the same version");
+    auto chunk = std::make_unique<seed::Chunk>();
+    seed::fill_chunk(painted.generator(), 7, {0, 0}, *chunk);
+    const auto& wet = chunk->tiles[6 * 32 + 5];
+    check(wet.elevation == -0.5F && (wet.flags & seed::tile_solid) && wet.object == seed::no_object,
+          "Height, blocking and object removal apply");
+    const auto generated = plain.sample(7, {{}, {7.5F, 6.5F}});
+    const auto& planted = chunk->tiles[6 * 32 + 7];
+    check(planted.object == seed::tile_object(registry.find("tree")) &&
+              planted.material == generated.material && planted.elevation == generated.elevation,
+          "A painted object keeps the generated ground");
+    seed::fill_chunk(painted.generator(), 7, {1, 0}, *chunk);
+    check(chunk->tiles[2 * 32 + 1].material == registry.find("stone"),
+          "Ground paint applies in its own chunk");
+    auto bad = paint;
+    bad.set(9, 9, {seed::paint_ground, bad.material("lava"), 0, false, 0});
+    try {
+        seed::Terrain(island(), registry, bad);
+        throw std::logic_error("Paint with an unknown material compiled");
+    } catch (const std::invalid_argument&) {}
+}
 } // namespace
 
 int main() {
@@ -119,6 +183,7 @@ int main() {
         problems();
         sampling();
         versions();
+        painting();
         std::cout << "Terrain checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

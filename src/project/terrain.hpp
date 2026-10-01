@@ -1,10 +1,12 @@
 #pragma once
 #include "core/material.hpp"
 #include "io/json.hpp"
+#include "project/paint.hpp"
 #include "world/world_generator.hpp"
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -80,10 +82,13 @@ public:
         std::uint8_t object{no_object}; // As Tile::object.
         bool solid{};
     };
-    // Throws if the asset has problems against `materials`.
-    Terrain(const TerrainAsset& asset, const Materials& materials);
+    // Throws if the asset or the paint has problems against `materials`. Painted tiles replace
+    // generated ones in the chunks this generates.
+    Terrain(const TerrainAsset& asset, const Materials& materials, const TerrainPaint& paint = {});
+    // The generated tile at a position, without paint.
     Sample sample(std::uint64_t seed, WorldPosition position) const;
-    // Changes whenever the settings would generate a different world (not with default_seed).
+    // Changes whenever the settings or the paint would generate a different world (not with
+    // default_seed).
     std::uint32_t version() const { return version_; }
     // A generator for World. This Terrain must outlive it.
     WorldGenerator generator() const;
@@ -110,8 +115,17 @@ private:
         std::uint32_t one_in;
         bool scatter_solid;
     };
+    struct Painted {
+        std::uint16_t index;
+        std::uint8_t mask;
+        MaterialId ground;
+        std::uint8_t object; // As Tile::object.
+        bool solid;
+        float elevation;
+    };
     static void fill(void* context, std::uint64_t seed, ChunkCoord coord, Chunk& chunk);
     TerrainAsset asset_;
+    std::map<TerrainPaint::Key, std::vector<Painted>> paint_;
     std::vector<Field> fields_;
     std::vector<Rule> rules_;
     std::size_t elevation_{};

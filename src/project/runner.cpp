@@ -132,6 +132,7 @@ void step(void* context, Engine& engine, float dt) {
             if (motion->walk.x != 0 || motion->walk.y != 0) motion->has_target = false; // Keys take over.
         }
     move_characters(engine, dt);
+    runner.scripts->surfaces();
 }
 
 void render(void*, Engine& engine, const View& view) {
@@ -201,6 +202,13 @@ void load(Runner& runner, ProjectFiles files, std::filesystem::path save, std::f
             throw std::runtime_error(scene_path + ": " + error.what());
         }
     runner.data.terrain = load_terrain(subfolder(runner.files, "assets/"), runner.scene.terrain);
+    const auto paint_path = "scenes/" + runner.game.start_scene + ".paint";
+    if (const auto paint = runner.files(paint_path)) try {
+            runner.scene.paint = decode_paint(*paint);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(paint_path + ": " + error.what());
+        }
+    runner.data.paint = runner.scene.paint;
     if (const auto problems = runner.scene.problems(runner.data); !problems.empty())
         throw std::runtime_error("The start scene has problems:\n" + problems);
     // The player is the character marked as the player. Older projects mark it by name: an entity

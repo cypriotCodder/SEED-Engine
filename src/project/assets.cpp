@@ -22,7 +22,8 @@ std::string get_string(const Json& object, std::string_view key) {
 // Registration of single entries. Names point into the asset, which must outlive the registry.
 void add_material(Materials& out, const MaterialAsset& material) {
     out.add({material.name.c_str(), material.color, material.pattern, material.variation,
-             material.texture.empty() ? nullptr : material.texture.c_str(), material.texture_scale});
+             material.texture.empty() ? nullptr : material.texture.c_str(), material.texture_scale,
+             material.speed, material.tags.empty() ? nullptr : material.tags.c_str()});
 }
 void add_action(Actions& out, const ActionAsset& action) {
     out.add(action.name.c_str(), action.bindings);
@@ -89,6 +90,10 @@ MaterialAsset read_material(const Json& entry) {
         material.variation = static_cast<int>(variation->as_int(1, 255));
     material.texture = get_string(entry, "texture");
     material.texture_scale = get_float(entry, "texture_scale", 1);
+    material.speed = get_float(entry, "speed", 1);
+    if (const auto* tags = entry.find("tags"))
+        for (const auto& tag : tags->items())
+            material.tags += (material.tags.empty() ? "" : " ") + tag.as_string();
     return material;
 }
 ActionAsset read_action(const Json& entry) {
@@ -138,6 +143,18 @@ Json write_material(const MaterialAsset& material) {
     if (!material.texture.empty()) {
         entry.set("texture", material.texture);
         entry.set("texture_scale", json_float(material.texture_scale));
+    }
+    // Written only when set, so projects that never use them keep their files unchanged.
+    if (material.speed != 1) entry.set("speed", json_float(material.speed));
+    if (!material.tags.empty()) {
+        auto tags = Json::array();
+        for (std::size_t start = 0; start <= material.tags.size();) {
+            auto end = material.tags.find(' ', start);
+            if (end == std::string::npos) end = material.tags.size();
+            tags.push(material.tags.substr(start, end - start));
+            start = end + 1;
+        }
+        entry.set("tags", tags);
     }
     return entry;
 }

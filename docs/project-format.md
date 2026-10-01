@@ -20,7 +20,7 @@ My Game/
 
 Each file is `{"format": 1, "<kind>": [...]}`. A missing file is an empty list. **List order is registration order and so decides each entry's ID.** Tiles store material IDs, so moving a material changes what existing saved worlds show; particle styles refer to materials by name and are unaffected. Every entry is validated with the same checks the running engine uses; the editor will not save invalid assets, and a game refuses to start with them.
 
-- `materials.json`: `name`, `color` ([r, g, b], 0–255), `pattern` (`speckle`, `water`, `planks`, `round`), `variation` (1–255), optional `texture` (an image in `assets/textures`, by file name without the extension) and `texture_scale` (1–256: how many tiles one copy of the texture covers on the ground; 1 draws the whole image on each tile). At most 64.
+- `materials.json`: `name`, `color` ([r, g, b], 0–255), `pattern` (`speckle`, `water`, `planks`, `round`), `variation` (1–255), optional `texture` (an image in `assets/textures`, by file name without the extension) and `texture_scale` (1–256: how many tiles one copy of the texture covers on the ground; 1 draws the whole image on each tile), optional `speed` (0.1–4, default 1: characters walk at their own speed times this on the ground) and optional `tags` (up to 8 words of letters, digits, `_` and `-`, at most 32 characters each, for scripts; the engine gives them no meaning). `speed` and `tags` are written only when set. At most 64.
 
 ### textures/
 
@@ -56,10 +56,14 @@ Each `<name>.json` is `{"format": 1, "terrain": "<name>", "entities": [...]}`, a
 
 `prefab` (optional) links a placed copy to `prefabs/<name>.json`; the copy's `visual`, `light` and `script` are the prefab's, stored in the scene too so games need not resolve prefabs. `editor` (optional) holds editor-only `hidden` and `locked` flags that games ignore.
 
+### <name>.paint
+
+Terrain painted in the editor's Scene view, saved beside the scene and only when something is painted. Each painted tile replaces some of what the scene's terrain generates there; the rest stays generated. Little-endian binary: u32 magic `0x544e5053` ("SPNT"), u32 version 1, u8 name count and the material names the tiles use (u8 length, bytes), u32 chunk count, then per chunk in (x, y) order: i64 x, i64 y, u16 tile count (1–1024) and, in index order (y × 32 + x), u16 index, u8 mask, and only the masked fields: ground (bit 1, u8 name index), object (bit 2, u8: 0 none, else name index + 1), height (bit 4, f32, at most 16 either way) and solid (bit 8, u8 0 or 1). Malformed, unordered or trailing data is rejected. Games apply paint while generating each chunk, so it costs nothing per frame; it is part of the terrain's generator version, so changing the paint starts new saved worlds just as changing the terrain does.
+
 An entity with no components is a named marker, such as a spawn point. Material references are checked against `assets/materials.json`; the editor will not save a scene with problems.
 
 A C++ game uses a project's assets by setting `Game::project_assets` to the folder; the engine registers them before calling the game's own `materials`, `actions` and `effects` callbacks, which may add more.
 
 ## Exported games
 
-An exported app carries the project as `Contents/Resources/game.seedpack`: the shared LZ4 envelope (checksummed; see [binary formats](save-format.md)) around u32 magic `0x4b415053` ("SPAK"), u32 version 1, u32 file count, then, in path order, u16 path length, path, u32 size and bytes for `project.seed.json`, `assets/*.json`, `scenes/*.json` (all JSON re-written without whitespace) and `scripts/*.lua`. Paths are relative and limited to letters, digits, `_`, `-` and `.` with `/` separators; unsafe, duplicate or out-of-order paths and trailing bytes are rejected. `seed_player` runs `game.seedpack` when it sits in the base folder SDL reports, which is `Contents/Resources` inside an app bundle.
+An exported app carries the project as `Contents/Resources/game.seedpack`: the shared LZ4 envelope (checksummed; see [binary formats](save-format.md)) around u32 magic `0x4b415053` ("SPAK"), u32 version 1, u32 file count, then, in path order, u16 path length, path, u32 size and bytes for `project.seed.json`, `assets/*.json`, `scenes/*.json` (all JSON re-written without whitespace), `scenes/*.paint` and `scripts/*.lua`. Paths are relative and limited to letters, digits, `_`, `-` and `.` with `/` separators; unsafe, duplicate or out-of-order paths and trailing bytes are rejected. `seed_player` runs `game.seedpack` when it sits in the base folder SDL reports, which is `Contents/Resources` inside an app bundle.

@@ -60,7 +60,7 @@ WorldGenerator world_generator(const Game& game, const Assets& assets, const Mat
     if (game.world.terrain) return game.world;
     if (!game.project_assets && !game.assets)
         throw std::invalid_argument("A game needs world.terrain or project assets with a terrain");
-    terrain = std::make_unique<Terrain>(assets.terrain, materials);
+    terrain = std::make_unique<Terrain>(assets.terrain, materials, assets.paint);
     return terrain->generator();
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "core/ecs.hpp"
 #include "world/coordinates.hpp"
+#include <cstdint>
 
 namespace seed {
 class Engine;
@@ -18,13 +19,21 @@ struct CharacterMotion {
     Vec2 walk{};
     bool running{};
     bool has_target{};
+    // The ground material under its centre, and whether that changed in the last move; none
+    // until it first stands on a loaded tile. Placed here, these fill padding before `target`:
+    // every scene reserves room for 8,192 of these.
+    static constexpr std::int16_t no_surface = -1;
+    std::int16_t surface{no_surface};
+    bool surface_changed{};
     WorldPosition target{};
     Vec2 velocity{}; // Tiles per second, as last moved.
 };
+static_assert(sizeof(CharacterMotion) <= 72, "CharacterMotion grew; scenes reserve 8,192 of them");
 
 CharacterMotion character_motion(const SceneCharacter& settings);
 
 // Moves every entity with a CharacterMotion one step of `dt` seconds, sliding along whatever
-// blocks it. Physics must be idle (call from Game::step). Characters that reach their target stop.
+// blocks it. Each walks at its speed times the speed of the ground material under it. Physics
+// must be idle (call from Game::step). Characters that reach their target stop.
 void move_characters(Engine& engine, float dt);
 } // namespace seed

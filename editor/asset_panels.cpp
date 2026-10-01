@@ -123,7 +123,14 @@ void AssetPanels::problems(const char* kind) {
     if (any) ImGui::Separator();
 }
 
+void AssetPanels::select_material(const std::string& name) {
+    for (std::size_t i = 0; i < edited_.materials.size(); ++i)
+        if (edited_.materials[i].name == name) material_ = static_cast<int>(i);
+    show_materials = focus_materials_ = true;
+}
+
 void AssetPanels::materials() {
+    if (std::exchange(focus_materials_, false)) ImGui::SetNextWindowFocus();
     if (!begin_panel("Materials", edited_.materials != saved_.materials, &show_materials)) return;
     problems("Material");
     bool changed = false;
@@ -194,6 +201,16 @@ void AssetPanels::materials() {
                     "On the ground, one copy of the texture spans this many tiles and repeats\n"
                     "seamlessly. 1 shows the whole texture on every tile.");
             }
+            field("Walking speed");
+            changed |=
+                ImGui::SliderFloat("##speed", &m.speed, 0.1F, 4, "%.2fx", ImGuiSliderFlags_Logarithmic);
+            ImGui::SetItemTooltip("How fast characters walk on this ground, times their own speed:\n"
+                                  "below 1 for mud or deep snow, above 1 for roads.");
+            field("Tags");
+            changed |= ImGui::InputTextWithHint("##tags", "e.g. slippery hurts", &m.tags);
+            ImGui::SetItemTooltip(
+                "Words for scripts, separated by spaces. world.surface(x, y) returns them,\n"
+                "and on_surface(material) runs when a character steps onto this ground.");
             ImGui::TextDisabled("ID %d", material_);
         } else
             ImGui::TextDisabled("Select a material.");

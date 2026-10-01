@@ -75,6 +75,10 @@ public:
     }
     // Called to bring up the full terrain editor (the Terrain panel).
     std::function<void()> open_terrain_editor;
+    // Called to show a material in the Materials panel.
+    std::function<void(const std::string&)> open_material;
+    // Called after the Inspector imported a texture, so the texture pack is rebuilt.
+    std::function<void()> textures_changed;
     bool terrain_selected() const { return terrain_selected_; }
     // An error raised while drawing the view during ImGui's rendering, cleared by the call.
     std::string take_error() { return std::exchange(render_error_, {}); }
@@ -99,9 +103,33 @@ public:
     }
 
 private:
-    enum class Tool { move, rotate, scale };
+    enum class Tool { move, rotate, scale, paint };
     // What a left-button drag in the Scene view is doing.
-    enum class Drag { none, body, free, axis_x, axis_y, rotate, scale_x, scale_y, scale_both, box };
+    enum class Drag { none, body, free, axis_x, axis_y, rotate, scale_x, scale_y, scale_both, box, paint };
+
+    // Terrain painting. A stroke paints the tiles under the brush each frame the button is held.
+    enum class Brush { ground, object, raise, lower, flatten, solid, erase };
+    struct BrushSettings {
+        Brush kind{Brush::ground};
+        float size{3};      // Tiles across.
+        bool square{};      // Otherwise round.
+        float strength{1};  // Ground and objects: the share of tiles painted; height: how fast.
+        std::string ground; // Material painted by the ground brush.
+        std::string object; // Object placed by the object brush; empty removes objects.
+        bool object_solid{true};
+        float height{0.15F}; // Height the flatten brush levels to; below 0 is water.
+        bool block{true};    // The solid brush blocks walking, or clears blocking.
+    } brush_;
+    unsigned stroke_{}; // Counts strokes, so partial-strength strokes pick different tiles.
+    void brush_section(const Assets& assets);
+    void paint_at(WorldPosition centre, float dt);
+    // Ground under global tile (x, y) as the view shows it, paint included; false when the tile is
+    // outside the cached view.
+    struct ViewTile {
+        float elevation;
+        bool solid;
+    };
+    bool view_tile(std::int64_t x, std::int64_t y, ViewTile& out) const;
 
     // Draws the scene into the Scene view's rectangle. Runs as an ImGui draw callback, so the
     // scene lands at its place in ImGui's draw order: under the view's overlays, and under any
@@ -113,7 +141,9 @@ private:
     void toolbar();
     void overlays(ImDrawList* draw);
     void hierarchy();
-    void inspector(const Assets& assets);
+    // Returns true when it changed `assets` (materials made or edited from the Visual section).
+    bool inspector(Assets& assets);
+    bool visual_material(SceneVisual& visual, Assets& assets);
     void character_section(SceneEntity& e, const Assets& assets);
     // The Inspector for the scene's Terrain object; returns true when it changed `assets`.
     bool terrain_inspector(Assets& assets);
@@ -189,6 +219,8 @@ private:
         struct Cell {
             MaterialId ground;
             std::uint8_t object; // As Tile::object.
+            bool solid;
+            float elevation;
         };
         std::vector<Cell> cells;
     } cache_;

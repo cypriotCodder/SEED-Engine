@@ -194,7 +194,8 @@ TerrainAsset parse_terrain(const Json& json) {
     return t;
 }
 
-Terrain::Terrain(const TerrainAsset& asset, const Materials& materials) : asset_(asset) {
+Terrain::Terrain(const TerrainAsset& asset, const Materials& materials, const TerrainPaint& paint)
+    : asset_(asset) {
     std::vector<std::string> names;
     for (std::size_t i = 0; i < materials.size(); ++i)
         names.emplace_back(materials[static_cast<MaterialId>(i)].name);
@@ -226,7 +227,26 @@ Terrain::Terrain(const TerrainAsset& asset, const Materials& materials) : asset_
     }
     auto identity = asset;
     identity.default_seed = 0; // The seed chooses a world; it does not change the generator.
-    version_ = fnv32(to_json(terrain_json(identity)));
+    auto identity_text = to_json(terrain_json(identity));
+    if (!paint.empty()) {
+        if (const auto problems = paint.problems(names); !problems.empty())
+            throw std::invalid_argument("Terrain paint has problems:\n" + problems);
+        std::vector<MaterialId> ids;
+        for (const auto& name : paint.materials) {
+            const bool known = std::find(names.begin(), names.end(), name) != names.end();
+            ids.push_back(known ? materials.find(name) : MaterialId{}); // Unknown ones are unused.
+        }
+        for (const auto& [key, tiles] : paint.chunks) {
+            auto& out = paint_[key];
+            for (const auto& [index, t] : tiles)
+                out.push_back(
+                    {index, t.mask, (t.mask & paint_ground) ? ids[t.ground] : MaterialId{},
+                     (t.mask & paint_object) && t.object ? tile_object(ids[t.object - 1u]) : no_object,
+                     t.solid, t.elevation});
+        }
+        identity_text += encode_paint(paint); // Paint is part of what this terrain generates.
+    }
+    version_ = fnv32(identity_text);
 }
 
 Terrain::Sample Terrain::sample(std::uint64_t seed, WorldPosition position) const {
@@ -317,6 +337,17 @@ void Terrain::fill(void* context, std::uint64_t seed, ChunkCoord coord, Chunk& c
             tile.object = s.object;
             tile.flags = s.solid ? tile_solid : 0;
         }
+    const auto painted = terrain.paint_.find({coord.x, coord.y});
+    if (painted == terrain.paint_.end()) return;
+    for (const auto& p : painted->second) {
+        auto& tile = chunk.tiles[p.index];
+        if (p.mask & paint_ground) tile.material = p.ground;
+        if (p.mask & paint_object) tile.object = p.object;
+        if (p.mask & paint_height) tile.elevation = p.elevation;
+        if (p.mask & paint_solid)
+            tile.flags =
+                static_cast<std::uint8_t>(p.solid ? tile.flags | tile_solid : tile.flags & ~tile_solid);
+    }
 }
 
 WorldGenerator Terrain::generator() const {

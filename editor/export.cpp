@@ -172,6 +172,13 @@ ExportReport export_macos_app(const Project& project, const fs::path& player, co
                 throw std::runtime_error("Rename " + path + ": use letters, digits, '_', '-' and '.'");
             add_json(path);
         }
+    // Painted terrain, binary, beside its scene.
+    for (const auto& file : files_in(project.root / "scenes", ".paint")) {
+        const auto path = "scenes/" + file.filename().string();
+        if (!valid_project_path(path))
+            throw std::runtime_error("Rename " + path + ": use letters, digits, '_', '-' and '.'");
+        archive.files[path] = read_text(file, 64 * 1024 * 1024);
+    }
     for (const auto& file : files_in(project.root / "scripts", ".lua"))
         archive.files["scripts/" + file.filename().string()] = read_text(file);
 

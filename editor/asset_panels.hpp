@@ -29,6 +29,8 @@ public:
     void set_terrain(const std::string& name) { terrain_name_ = name; }
     // True once after a texture was imported, so the texture pack is rebuilt straight away.
     bool take_textures_changed() { return std::exchange(textures_changed_, false); }
+    // Selects a material in the Materials panel and brings the panel forward.
+    void select_material(const std::string& name);
     // Replaces the edited assets, e.g. from undo; selections stay where they still fit.
     void set(const Assets& assets);
     // Saves the kinds that changed. Returns false, logging why, when the assets have problems.
@@ -63,5 +65,6 @@ private:
     int capturing_{-1}; // Action waiting for a key or button press, or -1.
     std::string terrain_name_{"main"};
     bool textures_changed_{};
+    bool focus_materials_{};
 };
 } // namespace seed::editor
