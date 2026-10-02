@@ -228,6 +228,18 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
                   e.visual->material.compare(e.visual->material.size() - 2, 2, "_2") == 0,
               "Make Unique gives the entity its own copy of the material");
     });
+
+    // The Atmosphere row selects the scene's atmosphere; its checkbox turns on day and night.
+    click([this] { return scene_.control("atmosphere row"); });
+    add(2, [this] {
+        check(scene_.atmosphere_selected() && scene_.selection().empty(), "the Atmosphere row selects it");
+    });
+    click([this] { return scene_.control("day cycle"); });
+    add(3, [this] {
+        check(scene_.scene().atmosphere.day_length > 0, "the day-and-night checkbox starts a day cycle");
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this] { check(scene_.scene().atmosphere.day_length == 0, "Cmd+Z takes it back"); });
 }
 
 void UiTest::type(const char* text) {

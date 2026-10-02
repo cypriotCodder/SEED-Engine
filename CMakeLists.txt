@@ -86,7 +86,7 @@ function(seed_strict target)
     endif()
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
-    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/paint.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/project/game_settings.cpp src/script/host.cpp src/core/metrics.cpp
+    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/paint.cpp src/project/atmosphere.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/project/game_settings.cpp src/script/host.cpp src/core/metrics.cpp
     src/app/app.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
@@ -195,7 +195,7 @@ if(BUILD_TESTING)
     # Gameplay scripts: an API walkthrough that must pass, and broken scripts that must be caught
     # (a syntax error and an endless loop) without hanging the game.
     add_test(NAME scripts_fresh_save COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/script-project-save"
-        "${CMAKE_CURRENT_BINARY_DIR}/surfaces-save")
+        "${CMAKE_CURRENT_BINARY_DIR}/surfaces-save" "${CMAKE_CURRENT_BINARY_DIR}/atmosphere-save")
     add_test(NAME scripts COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_project" --smoke
         --save "${CMAKE_CURRENT_BINARY_DIR}/script-project-save")
     set_tests_properties(scripts PROPERTIES PASS_REGULAR_EXPRESSION "Script checks passed.*Character checks passed|Character checks passed.*Script checks passed"
@@ -206,6 +206,10 @@ if(BUILD_TESTING)
     set_tests_properties(surfaces PROPERTIES PASS_REGULAR_EXPRESSION "Surface checks passed"
         FAIL_REGULAR_EXPRESSION "Script error|Engine error" DEPENDS scripts_fresh_save)
     set_tests_properties(scripts PROPERTIES DEPENDS scripts_fresh_save)
+    add_test(NAME atmosphere COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_project" --smoke
+        --save "${CMAKE_CURRENT_BINARY_DIR}/atmosphere-save")
+    set_tests_properties(atmosphere PROPERTIES PASS_REGULAR_EXPRESSION "Atmosphere checks passed"
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error" DEPENDS scripts_fresh_save)
     add_test(NAME start_scene COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_scene_project"
         --smoke --save "${CMAKE_CURRENT_BINARY_DIR}/start-scene-save")
     set_tests_properties(start_scene PROPERTIES PASS_REGULAR_EXPRESSION "Started in level2"

@@ -3,6 +3,7 @@
 #include "io/storage.hpp"
 #include "physics/character.hpp"
 #include "project/characters.hpp"
+#include "project/scene_file.hpp"
 // Lua is compiled as C++ (see CMakeLists.txt), so its errors are C++ exceptions and unwind engine
 // code correctly. Its headers are therefore included without extern "C".
 #include "lauxlib.h"
@@ -324,7 +325,100 @@ struct ScriptApi {
         return 1;
     }
 
+    // atmosphere: the scene's time of day.
+    static DayClock& clock(lua_State* lua) {
+        auto* c = host(lua).clock_;
+        if (!c) luaL_error(lua, "this game has no time of day");
+        return *c;
+    }
+    static int hour(lua_State* lua) {
+        lua_pushnumber(lua, clock(lua).hour);
+        return 1;
+    }
+    static int set_hour(lua_State* lua) {
+        const auto value = luaL_checknumber(lua, 1);
+        if (!(value >= 0 && value <= 24)) luaL_error(lua, "the hour must be from 0 to 24");
+        clock(lua).set_hour(value);
+        return 0;
+    }
+    static int light_of_day(lua_State* lua) {
+        lua_pushnumber(lua, daylight(static_cast<float>(clock(lua).hour)));
+        return 1;
+    }
+
     // Entity methods.
+    static int light(lua_State* lua) {
+        const auto* l = engine(lua).scene.components<LightComponent>().find(check_entity(lua, 1));
+        if (!l) {
+            lua_pushnil(lua);
+            return 1;
+        }
+        lua_createtable(lua, 0, 6);
+        lua_createtable(lua, 3, 0);
+        for (int i = 0; i < 3; ++i) {
+            lua_pushnumber(lua, l->color[static_cast<std::size_t>(i)]);
+            lua_rawseti(lua, -2, i + 1);
+        }
+        lua_setfield(lua, -2, "color");
+        const std::pair<const char*, float> fields[] = {{"radius", l->radius},
+                                                        {"intensity", l->intensity},
+                                                        {"height", l->height},
+                                                        {"flicker", l->flicker}};
+        for (const auto& [key, value] : fields) {
+            lua_pushnumber(lua, value);
+            lua_setfield(lua, -2, key);
+        }
+        lua_pushboolean(lua, l->night_only);
+        lua_setfield(lua, -2, "night_only");
+        return 1;
+    }
+    // Changes the fields given; an entity without a light gets one, with the editor's defaults.
+    static int set_light(lua_State* lua) {
+        const auto entity = check_entity(lua, 1);
+        luaL_checktype(lua, 2, LUA_TTABLE);
+        auto& lights = engine(lua).scene.components<LightComponent>();
+        LightComponent l;
+        if (const auto* found = lights.find(entity))
+            l = *found;
+        else {
+            const SceneLight defaults;
+            l = {defaults.color, defaults.radius, defaults.intensity, defaults.height, 0, false};
+        }
+        const auto number = [&](const char* key, float& out, float low, float high) {
+            lua_getfield(lua, 2, key);
+            if (!lua_isnil(lua, -1)) {
+                const auto value = luaL_checknumber(lua, -1);
+                if (!(value >= low && value <= high))
+                    luaL_error(lua, "%s must be from %f to %f", key, low, high);
+                out = static_cast<float>(value);
+            }
+            lua_pop(lua, 1);
+        };
+        lua_getfield(lua, 2, "color");
+        if (lua_istable(lua, -1))
+            for (int i = 0; i < 3; ++i) {
+                lua_rawgeti(lua, -1, i + 1);
+                const auto c = luaL_checknumber(lua, -1);
+                if (!(c >= 0 && c <= 16)) luaL_error(lua, "colour values must be from 0 to 16");
+                l.color[static_cast<std::size_t>(i)] = static_cast<float>(c);
+                lua_pop(lua, 1);
+            }
+        else if (!lua_isnil(lua, -1))
+            luaL_error(lua, "color is a table of three numbers");
+        lua_pop(lua, 1);
+        number("radius", l.radius, 0.01F, 256);
+        number("intensity", l.intensity, 0, 64);
+        number("height", l.height, 0.01F, 64);
+        number("flicker", l.flicker, 0, 1);
+        lua_getfield(lua, 2, "night_only");
+        if (!lua_isnil(lua, -1)) l.night_only = lua_toboolean(lua, -1);
+        lua_pop(lua, 1);
+        if (auto* found = lights.find(entity))
+            *found = l;
+        else
+            lights.add(entity, l);
+        return 0;
+    }
     static int position(lua_State* lua) {
         push_position(lua, transform(lua, check_entity(lua, 1)).position);
         return 2;
@@ -458,6 +552,11 @@ struct ScriptApi {
         module(lua, "particles", particles);
         module(lua, "camera", camera);
         module(lua, "game", game);
+        static const luaL_Reg atmosphere[] = {{"hour", guarded<hour>},
+                                              {"set_hour", guarded<set_hour>},
+                                              {"daylight", guarded<light_of_day>},
+                                              {nullptr, nullptr}};
+        module(lua, "atmosphere", atmosphere);
         static const luaL_Reg methods[] = {{"position", guarded<position>},
                                            {"set_position", guarded<set_position>},
                                            {"move", guarded<move>},
@@ -475,6 +574,8 @@ struct ScriptApi {
                                            {"speed", guarded<speed>},
                                            {"set_speed", guarded<set_speed>},
                                            {"moving", guarded<moving>},
+                                           {"light", guarded<light>},
+                                           {"set_light", guarded<set_light>},
                                            {nullptr, nullptr}};
         luaL_newmetatable(lua, entity_type);
         luaL_newlib(lua, methods);

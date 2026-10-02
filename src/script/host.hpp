@@ -13,6 +13,7 @@ struct lua_State;
 
 namespace seed {
 class Engine;
+struct DayClock;
 struct Tile;
 
 // The tile rule scripts and the project runner move by: water (elevation below 0), solid tiles
@@ -22,7 +23,7 @@ bool blocks_walking(void*, const Tile* tile);
 // Runs a project's Lua gameplay scripts. Each attached script gets its own environment, so its
 // globals belong to that entity alone; `self` in it is the entity. A script may define start(),
 // called once before its first update, and update(dt), called every fixed step. Scripts see the
-// engine through a small API (input, world, sound, particles, camera, game; see
+// engine through a small API (input, world, sound, particles, camera, game, atmosphere; see
 // docs/scripting.md) and nothing else: no files, OS or modules. A failing script is reported and
 // switched off; the game carries on.
 class ScriptHost final {
@@ -46,6 +47,8 @@ public:
     void set_prefab_spawner(PrefabSpawner spawner) { spawn_prefab_ = std::move(spawner); }
     // The entity game.player() returns.
     void set_player(Entity player) { player_ = player; }
+    // The time of day the atmosphere API reads and sets; without one, those calls are errors.
+    void set_clock(DayClock* clock) { clock_ = clock; }
     // Runs pending start() calls, then update(dt) on every live script.
     void update(float dt);
     // Calls on_surface(material) on each scripted character that stepped onto a different ground
@@ -70,6 +73,7 @@ private:
     ProjectFiles scripts_;
     PrefabSpawner spawn_prefab_;
     Entity player_{};
+    DayClock* clock_{};
     lua_State* lua_{};
     std::size_t memory_{};
     std::vector<Instance> instances_;

@@ -1,4 +1,5 @@
 #include "project/scene_file.hpp"
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 
@@ -48,6 +49,22 @@ void round_trip(const fs::path& root) {
     const auto loaded = seed::load_scene(root / "scenes" / "main.json");
     check(loaded == scene, "Scene reads back unchanged, including far chunk coordinates");
     check(!loaded.entities[2].visual && !loaded.entities[2].light, "Component-free entities stay empty");
+    check(seed::read_text(root / "scenes" / "main.json").find("atmosphere") == std::string::npos,
+          "A default atmosphere is left out of the file");
+    auto lit = scene;
+    lit.atmosphere.hour = 21.5F;
+    lit.atmosphere.day_length = 90;
+    lit.atmosphere.night = {0.1F, 0.1F, 0.3F};
+    lit.entities[1].light->flicker = 0.25F;
+    lit.entities[1].light->night_only = true;
+    seed::save_scene(root / "scenes" / "lit.json", lit);
+    check(seed::load_scene(root / "scenes" / "lit.json") == lit, "Atmosphere and light settings read back");
+    lit.atmosphere.day_length = 5;
+    lit.entities[1].light->flicker = 2;
+    const auto lit_problems = lit.problems(assets());
+    check(lit_problems.find("A day lasts") != std::string::npos &&
+              lit_problems.find("Light values out of range") != std::string::npos,
+          "Atmosphere and flicker limits are checked");
     const auto paint_file = root / "scenes" / "main.paint";
     check(!fs::exists(paint_file), "A scene without paint has no paint file");
 
@@ -146,6 +163,39 @@ void malformed() {
 }
 } // namespace
 
+// Daylight and the lighting it gives; full daylight is exactly the scene's own colours.
+void atmosphere() {
+    check(seed::daylight(12) == 1 && seed::daylight(9) == 1 && seed::daylight(0) == 0 &&
+              seed::daylight(21) == 0,
+          "Day and night hours");
+    check(std::abs(seed::daylight(6) - 0.5F) < 1e-6F && std::abs(seed::daylight(18) - 0.5F) < 1e-6F,
+          "Dawn and dusk are halfway");
+    check(seed::daylight(36) == 1 && seed::daylight(-24) == 0 && seed::daylight(-12) == 1,
+          "Hours wrap around the day");
+    const seed::SceneAtmosphere a;
+    const auto noon = seed::lighting_at(a, 12);
+    const seed::Lighting renderer_defaults;
+    check(noon.ambient == renderer_defaults.ambient && noon.clear == renderer_defaults.clear &&
+              noon.haze == renderer_defaults.haze && noon.haze_amount == renderer_defaults.haze_amount,
+          "A default atmosphere at noon is the renderer's default lighting");
+    check(seed::lighting_at(a, 0).ambient == a.night, "Midnight is the night colour");
+    seed::LightComponent lamp{{1, 1, 1}, 5, 2, 2, 0, true};
+    check(seed::light_intensity(lamp, 1, 0) == 0 && seed::light_intensity(lamp, 0, 0) == 2,
+          "Lamps light at night");
+    lamp.flicker = 1;
+    float low = 9, high = 0;
+    for (int i = 0; i < 600; ++i) {
+        const float v = seed::light_intensity(lamp, 0, i / 60.0);
+        low = std::min(low, v), high = std::max(high, v);
+    }
+    check(low >= 2 * 0.4F - 1e-4F && high <= 2 && high - low > 0.5F, "Flicker wavers within its range");
+    seed::DayClock clock;
+    clock.atmosphere.day_length = 240; // Ten seconds an hour.
+    clock.set_hour(23);
+    clock.advance(20);
+    check(std::abs(clock.hour - 1) < 1e-9, "The clock wraps past midnight");
+}
+
 int main(int argc, char** argv) {
     try {
         if (argc != 2) throw std::invalid_argument("Usage: seed_scene_tests SCRATCH_DIRECTORY");
@@ -156,6 +206,7 @@ int main(int argc, char** argv) {
         prefabs();
         problems();
         malformed();
+        atmosphere();
         std::cout << "Scene file checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

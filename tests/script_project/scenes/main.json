@@ -237,6 +237,35 @@
         "face_movement": false
       },
       "script": "wader.lua"
+    },
+    {
+      "name": "Lamp",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        4.5,
+        8.5
+      ],
+      "angle": 0,
+      "light": {
+        "color": [
+          1,
+          0.8,
+          0.5
+        ],
+        "radius": 5,
+        "intensity": 2,
+        "height": 2,
+        "flicker": 0.5,
+        "night_only": true
+      },
+      "script": "lamp.lua"
     }
-  ]
+  ],
+  "atmosphere": {
+    "hour": 20,
+    "day_length": 60
+  }
 }

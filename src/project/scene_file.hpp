@@ -1,6 +1,7 @@
 #pragma once
 #include "io/json.hpp"
 #include "project/assets.hpp"
+#include "project/atmosphere.hpp"
 #include "world/coordinates.hpp"
 #include <array>
 #include <filesystem>
@@ -19,6 +20,8 @@ struct SceneVisual {
 struct SceneLight {
     std::array<float, 3> color{1, 0.85F, 0.6F};
     float radius{6}, intensity{2}, height{2};
+    float flicker{};   // 0 to 1: how much it wavers, as a flame does.
+    bool night_only{}; // Lit only as the scene's daylight fades.
     bool operator==(const SceneLight&) const = default;
 };
 // The player-controlled character's settings: which actions move it, and how the camera follows it.
@@ -76,6 +79,7 @@ struct SceneFile {
     std::string terrain{"main"};                  // The project terrain this scene's world is generated from.
     std::vector<SceneEntity> entities;
     TerrainPaint paint; // Tiles painted over the terrain, saved beside the scene as <name>.paint.
+    SceneAtmosphere atmosphere;
     bool operator==(const SceneFile&) const = default;
 
     // Every problem found, one per line, checking material names against `assets`; empty when

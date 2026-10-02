@@ -64,6 +64,10 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `world.spawn{x=, y=, name=, material=, size=, angle=, script=}` | A new entity; `material` gives it a visual, `size` is a number or `{w, h}`, `script` attaches a script. |
 | `world.spawn{prefab=, x=, y=, name=, angle=}` | A copy of a prefab, with its look, light and script. |
 | `world.tile(x, y)` | `{material=, object=, solid=, elevation=}` for a loaded tile (`object` is `nil` when nothing stands there), or `nil` far from the camera. Water has elevation below 0. |
+| `atmosphere.hour()` / `atmosphere.set_hour(h)` | The scene's time of day, 0 to 24; it moves on by the atmosphere's day length. |
+| `atmosphere.daylight()` | How bright the day is now: 1 from 09:00 to 15:00, 0 from 21:00 to 03:00. |
+| `e:light()` | `{color={r,g,b}, radius=, intensity=, height=, flicker=, night_only=}`, or `nil` without a light. |
+| `e:set_light{...}` | Changes the fields given (same names and limits as the Light component); an entity without a light gets one. |
 | `world.surface(x, y)` | `{material=, speed=, tags={...}}`: the ground material at a loaded tile, how fast characters walk on it (a multiple of their own speed, applied by the engine) and its tags from the Materials panel, or `nil` far from the camera. |
 | `sound.play(name)` | A sound from the Sounds panel. |
 | `particles.burst(name, x, y)` | A particle style from the Particles panel. |

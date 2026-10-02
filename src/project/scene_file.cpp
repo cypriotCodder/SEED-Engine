@@ -75,6 +75,7 @@ std::string SceneFile::problems(const Assets& assets) const {
     };
     if (entities.size() > capacity) result += "More than 4096 entities in one scene\n";
     result += paint.problems(assets.material_names());
+    result += atmosphere.problems();
     int players = 0;
     if (!valid_prefab_name(terrain))
         result += "The scene's terrain needs a name of letters, digits, '_' and '-'\n";
@@ -117,7 +118,7 @@ std::string SceneFile::problems(const Assets& assets) const {
             const bool color =
                 std::all_of(l.color.begin(), l.color.end(), [](float c) { return c >= 0 && c <= 16; });
             if (!color || !(l.radius > 0 && l.radius <= 256) || !(l.intensity >= 0 && l.intensity <= 64) ||
-                !(l.height > 0 && l.height <= 64))
+                !(l.height > 0 && l.height <= 64) || !(l.flicker >= 0 && l.flicker <= 1))
                 report(i, "Light values out of range");
         }
     }
@@ -149,6 +150,8 @@ Json entity_json(const SceneEntity& e) {
         light.set("radius", json_float(e.light->radius));
         light.set("intensity", json_float(e.light->intensity));
         light.set("height", json_float(e.light->height));
+        if (e.light->flicker != 0) light.set("flicker", json_float(e.light->flicker));
+        if (e.light->night_only) light.set("night_only", true);
         entity.set("light", light);
     }
     if (e.character) {
@@ -201,6 +204,7 @@ Json scene_json(const SceneFile& scene) {
     auto file = Json::object();
     file.set("format", scene_format);
     file.set("terrain", scene.terrain);
+    if (scene.atmosphere != SceneAtmosphere{}) file.set("atmosphere", atmosphere_json(scene.atmosphere));
     file.set("entities", entities);
     return file;
 }
@@ -232,6 +236,9 @@ SceneEntity parse_entity(const Json& json) {
         l.radius = static_cast<float>(light->at("radius").as_number());
         l.intensity = static_cast<float>(light->at("intensity").as_number());
         l.height = static_cast<float>(light->at("height").as_number());
+        if (const auto* flicker = light->find("flicker"))
+            l.flicker = static_cast<float>(flicker->as_number());
+        if (const auto* night = light->find("night_only")) l.night_only = night->as_bool();
         e.light = l;
     }
     if (const auto* character = json.find("character")) {
@@ -288,6 +295,7 @@ SceneFile parse_scene(const Json& json) {
         throw std::runtime_error("Made by a newer editor");
     SceneFile scene;
     if (const auto* terrain = json.find("terrain")) scene.terrain = terrain->as_string();
+    if (const auto* atmosphere = json.find("atmosphere")) scene.atmosphere = parse_atmosphere(*atmosphere);
     const auto& list = json.at("entities").items();
     if (list.size() > SceneFile::capacity) throw std::runtime_error("More than 4096 entities");
     for (const auto& item : list)

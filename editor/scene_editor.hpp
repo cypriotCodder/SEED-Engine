@@ -80,6 +80,7 @@ public:
     // Called after the Inspector imported a texture, so the texture pack is rebuilt.
     std::function<void()> textures_changed;
     bool terrain_selected() const { return terrain_selected_; }
+    bool atmosphere_selected() const { return atmosphere_selected_; }
     // An error raised while drawing the view during ImGui's rendering, cleared by the call.
     std::string take_error() { return std::exchange(render_error_, {}); }
 
@@ -148,6 +149,10 @@ private:
     // The Inspector for the scene's Terrain object; returns true when it changed `assets`.
     bool terrain_inspector(Assets& assets);
     bool terrain_selected_{};
+    // The Inspector for the scene's atmosphere: its light, haze and time of day.
+    void atmosphere_inspector();
+    bool atmosphere_selected_{};
+    float preview_hour_{-1};   // Hour the Lit view shows instead of the scene's; -1 for the scene's.
     std::string terrain_name_; // Name being typed in the new/rename terrain popup.
     int terrain_action_{};     // What that popup does: 0 blank, 1 starter island, 2 copy, 3 rename.
     void scene_menu();

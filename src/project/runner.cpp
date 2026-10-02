@@ -24,12 +24,6 @@ constexpr DefaultAction default_actions[] = {{"move_up", {SDL_SCANCODE_W, SDL_SC
                                              {"move_right", {SDL_SCANCODE_D, SDL_SCANCODE_RIGHT}},
                                              {"run", {SDL_SCANCODE_LSHIFT, SDL_SCANCODE_RSHIFT}}};
 
-// A light standing on a scene entity; drawn each frame at the entity's position.
-struct SceneLightComponent {
-    std::array<float, 3> color{};
-    float radius{}, intensity{}, height{};
-};
-
 struct Runner {
     ProjectFiles files;
     std::string id, name, title, save;
@@ -42,6 +36,8 @@ struct Runner {
     std::array<ActionId, 5> moves{}; // up, down, left, right, run
     std::unique_ptr<ScriptHost> scripts;
     Entity player{};
+    DayClock clock; // The scene's time of day.
+    double time{};  // Seconds of play, for flickering lights.
 };
 
 void add_moves(void* context, Actions& actions) {
@@ -70,8 +66,9 @@ Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPo
         e.visual ? engine.scene.create(transform, {engine.materials.find(e.visual->material), e.visual->size})
                  : engine.scene.create(transform);
     if (e.light)
-        engine.scene.components<SceneLightComponent>().add(
-            entity, {e.light->color, e.light->radius, e.light->intensity, e.light->height});
+        engine.scene.components<LightComponent>().add(entity, {e.light->color, e.light->radius,
+                                                               e.light->intensity, e.light->height,
+                                                               e.light->flicker, e.light->night_only});
     if (e.character) engine.scene.components<CharacterMotion>().add(entity, character_motion(*e.character));
     runner.scripts->name(entity, e.name);
     return entity;
@@ -79,7 +76,7 @@ Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPo
 
 Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
-    engine.scene.add_component<SceneLightComponent>();
+    engine.scene.add_component<LightComponent>();
     engine.scene.add_component<CharacterMotion>();
     runner.scripts = std::make_unique<ScriptHost>(engine, subfolder(runner.files, "scripts/"));
     // Scripts spawn prefabs through the same path as scene entities, lights and scripts included.
@@ -110,6 +107,8 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     engine.camera_dead_zone = runner.player_settings.dead_zone;
     engine.camera_zoom = runner.player_settings.zoom;
     runner.scripts->set_player(runner.player);
+    runner.scripts->set_clock(&runner.clock);
+    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
     // Scripts load once every entity exists, so their top-level code can already find the others.
     for (const auto& [e, source] : scripted)
         runner.scripts->attach(e, source->script);
@@ -133,9 +132,14 @@ void step(void* context, Engine& engine, float dt) {
         }
     move_characters(engine, dt);
     runner.scripts->surfaces();
+    // The day moves on; the frame drawn next uses its light.
+    runner.time += dt;
+    runner.clock.advance(dt);
+    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
 }
 
-void render(void*, Engine& engine, const View& view) {
+void render(void* context, Engine& engine, const View& view) {
+    const auto& runner = *static_cast<const Runner*>(context);
     const float half_w = static_cast<float>(view.width) / view.zoom / 2 + 1;
     const float half_h = static_cast<float>(view.height) / view.zoom / 2 + 1;
     engine.world.each([&](ChunkCoord coord, const Chunk& chunk) {
@@ -159,8 +163,9 @@ void render(void*, Engine& engine, const View& view) {
     });
     engine.draw_entities(view);
     engine.particles.draw(engine.renderer, view.camera);
-    // Lights near the view, up to the renderer's 32.
-    auto& lights = engine.scene.components<SceneLightComponent>();
+    // Lights near the view, up to the renderer's 32; lights that are out (a lamp by day) are skipped.
+    const float day = daylight(static_cast<float>(runner.clock.hour));
+    auto& lights = engine.scene.components<LightComponent>();
     const auto owners = lights.owners();
     const auto values = lights.values();
     for (std::size_t i = 0, drawn = 0; i < owners.size() && drawn < 32; ++i) {
@@ -169,7 +174,9 @@ void render(void*, Engine& engine, const View& view) {
         const auto p = relative(t.previous, view.camera) + relative(t.position, t.previous) * view.alpha;
         const auto& l = values[i];
         if (std::abs(p.x) > half_w + l.radius || std::abs(p.y) > half_h + l.radius) continue;
-        engine.renderer.light(p.x, p.y, l.radius, l.color[0], l.color[1], l.color[2], l.intensity, l.height);
+        const float intensity = light_intensity(l, day, runner.time, owners[i].index);
+        if (intensity <= 0) continue;
+        engine.renderer.light(p.x, p.y, l.radius, l.color[0], l.color[1], l.color[2], intensity, l.height);
         ++drawn;
     }
 }
@@ -209,6 +216,8 @@ void load(Runner& runner, ProjectFiles files, std::filesystem::path save, std::f
             throw std::runtime_error(paint_path + ": " + error.what());
         }
     runner.data.paint = runner.scene.paint;
+    runner.clock.atmosphere = runner.scene.atmosphere;
+    runner.clock.set_hour(runner.scene.atmosphere.hour);
     if (const auto problems = runner.scene.problems(runner.data); !problems.empty())
         throw std::runtime_error("The start scene has problems:\n" + problems);
     // The player is the character marked as the player. Older projects mark it by name: an entity
@@ -250,6 +259,9 @@ int play(Runner& runner, int argc, char** argv) {
     game.window_height = runner.game.height;
     game.fullscreen = runner.game.fullscreen;
     game.assets = &runner.data;
+    // Room for the runner's own components (lights and characters, 8,192 of each) beyond what the
+    // engine's scene needs.
+    game.scene_memory = Scene::default_memory + 1024 * 1024;
     if (!runner.pack.empty()) game.asset_pack = runner.pack.c_str();
     game.actions = add_moves;
     game.setup = setup;

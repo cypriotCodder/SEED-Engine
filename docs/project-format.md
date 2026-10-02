@@ -47,14 +47,16 @@ A game with `Game::project_assets` set and no `world.terrain` callback generates
 
 ## scenes/
 
-Each `<name>.json` is `{"format": 1, "terrain": "<name>", "entities": [...]}`, at most 4096 entities, drawn in list order (later entries on top). An entity has `name` (1–64 characters; need not be unique), `chunk` ([x, y], whole numbers), `position` ([x, y] within the chunk; offsets outside 0–32 are moved into the right chunk on load), `angle` (radians) and optional components:
+Each `<name>.json` is `{"format": 1, "terrain": "<name>", "atmosphere": {...}, "entities": [...]}`, at most 4096 entities, drawn in list order (later entries on top). An entity has `name` (1–64 characters; need not be unique), `chunk` ([x, y], whole numbers), `position` ([x, y] within the chunk; offsets outside 0–32 are moved into the right chunk on load), `angle` (radians) and optional components:
 
 - `visual`: `material` (a material name) and `size` ([w, h], above 0 and at most 64).
-- `light`: `color` ([r, g, b], 0–16), `radius` (up to 256), `intensity` (0–64) and `height` (above 0, at most 64).
+- `light`: `color` ([r, g, b], 0–16), `radius` (up to 256), `intensity` (0–64), `height` (above 0, at most 64), and optional `flicker` (0–1: how much it wavers, as a flame does) and `night_only` (lit only as daylight fades).
 
 `character` (optional) makes the entity walk with collisions: `speed` and `run_speed` (tiles per second), `acceleration` (tiles per second squared; 0 is instant), `collision` ([w, h]), `blocked_by` (`water`, `solid`, `buildings`: true or false) and `face_movement`. One character per scene may have `player`: `actions` (`up`, `down`, `left`, `right`, `run`; action names from `assets/actions.json`, where `move_*` and `run` default to WASD, the arrows and Shift), `input` (moves with the keys; false leaves movement to its script), camera `zoom` (pixels per tile), `smoothing` (seconds) and `dead_zone` (tiles), and `resume` (a saved game starts where the player was). Other characters are NPCs, moved by their scripts. Scenes from before characters mark the player by naming an entity "Player"; that still works.
 
 `prefab` (optional) links a placed copy to `prefabs/<name>.json`; the copy's `visual`, `light` and `script` are the prefab's, stored in the scene too so games need not resolve prefabs. `editor` (optional) holds editor-only `hidden` and `locked` flags that games ignore.
+
+`atmosphere` (optional; each field optional, written only when it differs from its default) is the scene's light and air: `ambient` (daytime light everywhere, [r, g, b] 0–4), `night` (light everywhere at midnight), `background`, `haze` and `haze_amount` (0–1, haze towards the view's edges), `hour` (0–24, the time of day the scene starts at; default 12) and `day_length` (real seconds per day, 10–86,400; 0, the default, keeps the time at `hour`). Daylight is full from 09:00 to 15:00 and gone from 21:00 to 03:00, easing between; towards night the ambient light moves to `night` and the background and haze darken to about a third. The defaults at noon are the renderer's own lighting. The time of day is not saved with games; it starts at `hour` each run.
 
 ### <name>.paint
 

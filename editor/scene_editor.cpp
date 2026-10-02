@@ -266,11 +266,11 @@ bool SceneEditor::is_selected(int index) const {
 void SceneEditor::select_only(int index) {
     selection_ = {index};
     primary_ = index;
-    terrain_selected_ = false;
+    terrain_selected_ = atmosphere_selected_ = false;
 }
 
 void SceneEditor::toggle(int index) {
-    terrain_selected_ = false;
+    terrain_selected_ = atmosphere_selected_ = false;
     const auto at = std::lower_bound(selection_.begin(), selection_.end(), index);
     if (at != selection_.end() && *at == index) {
         selection_.erase(at);
@@ -469,11 +469,73 @@ bool SceneEditor::draw(Assets& assets) {
     if (show_inspector) {
         if (terrain_selected_)
             changed = terrain_inspector(assets);
+        else if (atmosphere_selected_)
+            atmosphere_inspector();
         else
             changed = inspector(assets);
     }
     if (show_prefabs) prefabs_panel();
     return changed;
+}
+
+void SceneEditor::atmosphere_inspector() {
+    if (!ImGui::Begin(inspector_id, &show_inspector)) {
+        ImGui::End();
+        return;
+    }
+    auto& a = edited_.atmosphere;
+    ImGui::TextColored({0.45F, 0.9F, 0.65F, 1}, "Atmosphere");
+    ImGui::TextDisabled("This scene's light and air.");
+    if (!lit_) {
+        if (ImGui::Button("Show in the Scene View (Lit)", {-1, 0})) lit_ = true;
+        mark("atmosphere lit");
+    }
+    const auto color = [&](const char* label, const char* id, std::array<float, 3>& value, const char* tip) {
+        ImGui::TextUnformatted(label);
+        ImGui::SetNextItemWidth(-1);
+        ImGui::ColorEdit3(id, value.data(), ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+        ImGui::SetItemTooltip("%s", tip);
+    };
+    ImGui::SeparatorText("Light");
+    color("Ambient (day)", "##ambient", a.ambient,
+          "Light present everywhere in daytime, before lights add their own.");
+    color("Background", "##background", a.background,
+          "The colour behind everything, where nothing is drawn.");
+    ImGui::SeparatorText("Haze");
+    color("Haze colour", "##haze", a.haze, "Blended in towards the edges of the view, like distance fading.");
+    ImGui::TextUnformatted("Haze amount");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::SliderFloat("##haze amount", &a.haze_amount, 0, 1);
+
+    ImGui::SeparatorText("Day and night");
+    bool cycle = a.day_length > 0;
+    if (ImGui::Checkbox("Day turns into night", &cycle)) a.day_length = cycle ? 300 : 0;
+    mark("day cycle");
+    ImGui::SetItemTooltip(
+        "Time passes while the game runs; scripts can read and set it with atmosphere.hour().");
+    if (cycle) {
+        ImGui::TextUnformatted("Length of a day (seconds)");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderFloat("##day length", &a.day_length, 10, 3600, "%.0f", ImGuiSliderFlags_Logarithmic);
+    }
+    ImGui::TextUnformatted(cycle ? "Starting hour" : "Hour");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::SliderFloat("##hour", &a.hour, 0, 24, "%.1f");
+    ImGui::SetItemTooltip("12 is noon, 0 is midnight. Full daylight is 9 to 15, full night 21 to 3.");
+    color("Ambient (night)", "##night", a.night, "Light present everywhere at night.");
+
+    ImGui::SeparatorText("Preview");
+    bool previewing = preview_hour_ >= 0;
+    if (ImGui::Checkbox("Preview another hour", &previewing)) preview_hour_ = previewing ? a.hour : -1;
+    ImGui::SetItemTooltip("Shows the Scene view at another time of day without changing the scene.");
+    if (previewing) {
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderFloat("##preview hour", &preview_hour_, 0, 24, "%.1f");
+    }
+    if (const auto problems = a.problems(); !problems.empty())
+        ImGui::TextColored({0.95F, 0.55F, 0.4F, 1}, "%s", problems.c_str());
+    if (ImGui::Button("Reset to Defaults", {-1, 0})) a = {};
+    ImGui::End();
 }
 
 bool SceneEditor::terrain_inspector(Assets& assets) {
@@ -723,6 +785,7 @@ void SceneEditor::toolbar() {
     if (tool_ == Tool::paint && !was_painting) {
         clear_selection();
         terrain_selected_ = true;
+        atmosphere_selected_ = false;
     }
     ImGui::SetNextItemWidth(95);
     ImGui::Combo("##snap", &snap_, snap_labels, 4);
@@ -902,6 +965,7 @@ void SceneEditor::scene_view() {
             tool_ = Tool::paint;
             clear_selection();
             terrain_selected_ = true;
+            atmosphere_selected_ = false;
         }
     }
 
@@ -1078,8 +1142,12 @@ void SceneEditor::render() {
     const int height = static_cast<int>((view_max_.y - view_min_.y) * sy);
     if (width < 1 || height < 1) return;
     auto& r = *renderer_;
-    r.lighting = game_lighting_;
+    // Lit shows the scene's atmosphere at the preview hour, with lights flickering as in the game.
+    const float hour = preview_hour_ >= 0 ? preview_hour_ : edited_.atmosphere.hour;
+    const float day = daylight(hour);
+    r.lighting = lighting_at(edited_.atmosphere, hour);
     if (!lit_) {
+        r.lighting = game_lighting_;
         r.lighting.ambient = {1, 1, 1};
         r.lighting.haze_amount = 0;
     }
@@ -1105,8 +1173,13 @@ void SceneEditor::render() {
         if (lit_ && e.light && lights < 32 && std::abs(at.x) < half_w + e.light->radius &&
             std::abs(at.y) < half_h + e.light->radius) {
             const auto& l = *e.light;
-            r.light(at.x, at.y, l.radius, l.color[0], l.color[1], l.color[2], l.intensity, l.height);
-            ++lights;
+            const LightComponent shown{l.color, l.radius, l.intensity, l.height, l.flicker, l.night_only};
+            if (const float intensity =
+                    light_intensity(shown, day, ImGui::GetTime(), static_cast<unsigned>(lights));
+                intensity > 0) {
+                r.light(at.x, at.y, l.radius, l.color[0], l.color[1], l.color[2], intensity, l.height);
+                ++lights;
+            }
         }
     }
     r.finish();
@@ -1533,8 +1606,17 @@ void SceneEditor::hierarchy() {
     if (ImGui::Selectable(("Terrain: " + edited_.terrain).c_str(), terrain_selected_)) {
         clear_selection();
         terrain_selected_ = true;
+        atmosphere_selected_ = false;
     }
     mark("terrain row");
+    // So is its atmosphere: ambient light, haze and the time of day.
+    if (ImGui::Selectable("Atmosphere", atmosphere_selected_)) {
+        clear_selection();
+        terrain_selected_ = false;
+        atmosphere_selected_ = true;
+        if (tool_ == Tool::paint) tool_ = Tool::move;
+    }
+    mark("atmosphere row");
     if (ImGui::SmallButton("Create")) ImGui::OpenPopup("create");
     mark("create");
     if (ImGui::BeginPopup("create")) {
@@ -1989,6 +2071,12 @@ bool SceneEditor::inspector(Assets& assets) {
             ImGui::SetNextItemWidth(-1);
             ImGui::SliderFloat("##height", &l.height, 0.1F, 16);
             ImGui::SetItemTooltip("Higher lights spread more evenly; low lights graze surfaces.");
+            ImGui::TextUnformatted("Flicker");
+            ImGui::SetNextItemWidth(-1);
+            ImGui::SliderFloat("##flicker", &l.flicker, 0, 1);
+            ImGui::SetItemTooltip("How much the light wavers, as a flame or a failing lamp does.");
+            ImGui::Checkbox("Only at night", &l.night_only);
+            ImGui::SetItemTooltip("Lit as the scene's daylight fades, like a street lamp; out by day.");
             ImGui::TextDisabled("Turn on Lit in the Scene view to see lights.");
         }
         if (!keep) e.light.reset();
