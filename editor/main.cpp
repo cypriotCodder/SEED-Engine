@@ -4,7 +4,7 @@
 #include <string_view>
 
 // seed_editor [--open PROJECT] [--create PARENT NAME] [--preferences DIR] [--play] [--smoke]
-//             [--screenshot FILE.ppm]
+//             [--splash] [--screenshot FILE.ppm]
 int main(int argc, char** argv) {
     try {
         seed::editor::Options options;
@@ -23,6 +23,8 @@ int main(int argc, char** argv) {
                 options.export_to = argv[++i];
             else if (arg == "--ui-test")
                 options.ui_test = true;
+            else if (arg == "--splash")
+                options.splash = true;
             else if (arg == "--play")
                 options.play = true;
             else if (arg == "--preferences" && i + 1 < argc)
@@ -30,7 +32,7 @@ int main(int argc, char** argv) {
             else
                 throw std::invalid_argument("Usage: seed_editor [--open PROJECT] [--create PARENT NAME] "
                                             "[--preferences DIR] [--export DIR] [--play] [--ui-test] "
-                                            "[--smoke] [--screenshot FILE.ppm]");
+                                            "[--smoke] [--splash] [--screenshot FILE.ppm]");
         }
         return seed::editor::App(options).run();
     } catch (const std::exception& error) {

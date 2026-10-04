@@ -9,6 +9,20 @@ foreach(seed_license SDL2 LZ4 Lua)
 endforeach()
 string(APPEND seed_licenses_body "    {nullptr, nullptr}};\n} // namespace seed::editor\n")
 file(GENERATE OUTPUT "${seed_licenses_source}" CONTENT "${seed_licenses_body}")
+# The editor's own images (splash and icon), embedded so the editor needs no files beside it.
+set(seed_brand_source "${CMAKE_CURRENT_BINARY_DIR}/brand_images.cpp")
+set(seed_brand_body "#include <cstddef>\nnamespace seed::editor {\n")
+foreach(seed_image splash icon)
+    set(seed_image_file "${CMAKE_CURRENT_SOURCE_DIR}/resources/${seed_image}.jpg")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${seed_image_file}")
+    file(READ "${seed_image_file}" seed_image_hex HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," seed_image_bytes "${seed_image_hex}")
+    file(SIZE "${seed_image_file}" seed_image_size)
+    string(APPEND seed_brand_body "extern const unsigned char ${seed_image}_jpg[] = {${seed_image_bytes}};\n"
+        "extern const std::size_t ${seed_image}_jpg_size = ${seed_image_size};\n")
+endforeach()
+string(APPEND seed_brand_body "} // namespace seed::editor\n")
+file(GENERATE OUTPUT "${seed_brand_source}" CONTENT "${seed_brand_body}")
 # stb_image decodes imported images; it builds on its own, without the strict warning flags.
 add_library(seed_stb STATIC stb_image.c)
 target_include_directories(seed_stb SYSTEM PUBLIC "${stb_SOURCE_DIR}")
@@ -22,7 +36,8 @@ if(APPLE)
 else()
     set(seed_folder_dialog folder_dialog_none.cpp)
 endif()
-add_executable(seed_editor main.cpp app.cpp asset_panels.cpp terrain_panel.cpp scene_editor.cpp play.cpp ui_test.cpp ${seed_folder_dialog})
+add_executable(seed_editor main.cpp app.cpp asset_panels.cpp terrain_panel.cpp scene_editor.cpp play.cpp ui_test.cpp
+    splash.cpp "${seed_brand_source}" ${seed_folder_dialog})
 seed_strict(seed_editor)
 target_link_libraries(seed_editor PRIVATE seed_editor_core seed_imgui)
 add_dependencies(seed_editor seed_player)
@@ -50,6 +65,8 @@ if(BUILD_TESTING)
     # Creates a project through the editor, then reopens it, drawing 60 frames each time.
     set(seed_editor_smoke "${CMAKE_CURRENT_BINARY_DIR}/editor-smoke")
     add_test(NAME editor_smoke_clean COMMAND ${CMAKE_COMMAND} -E rm -rf "${seed_editor_smoke}")
+    # The launch screen: decoded from the embedded artwork and drawn over the hub.
+    add_test(NAME editor_splash COMMAND seed_editor --smoke --splash --preferences "${seed_editor_smoke}/splash-preferences")
     add_test(NAME editor_smoke_create COMMAND seed_editor --smoke --preferences "${seed_editor_smoke}/preferences"
         --create "${seed_editor_smoke}" "Smoke Test")
     add_test(NAME editor_smoke_open COMMAND seed_editor --smoke --preferences "${seed_editor_smoke}/preferences"

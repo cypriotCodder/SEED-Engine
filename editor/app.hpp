@@ -6,6 +6,7 @@
 #include "play.hpp"
 #include "project.hpp"
 #include "scene_editor.hpp"
+#include "splash.hpp"
 #include "ui_test.hpp"
 #include <chrono>
 #include <filesystem>
@@ -26,6 +27,7 @@ struct Options {
     bool play{};    // Press Play once the project opens; with smoke, wait for the game to finish.
     bool ui_test{}; // Drive the opened project's Scene view with scripted input and check it.
     std::filesystem::path export_to; // Export the opened project here (replacing), then carry on.
+    bool splash{};                   // Show the launch screen even in a smoke run (automated runs skip it).
 };
 
 // The Seed editor: a hub for creating and opening projects, and a dockable workspace for the open
@@ -120,6 +122,7 @@ private:
     SceneEditor scene_;
     PlaySession play_;
     std::unique_ptr<UiTest> ui_test_;
+    std::unique_ptr<Splash> splash_;       // The launch screen, until it has faded.
     std::filesystem::path pending_export_; // Waiting for the user to allow replacing an app.
     bool export_failed_{};
     // What undo restores: every edit to the project's assets, the open scene and its settings.

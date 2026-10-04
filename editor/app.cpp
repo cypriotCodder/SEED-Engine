@@ -100,6 +100,9 @@ App::App(Options options)
         ImGui::DestroyContext();
         throw std::runtime_error("Could not start ImGui");
     }
+    set_window_icon(window_.handle());
+    // Automated runs skip the launch screen, so their screenshots and timing are the editor's own.
+    if ((!options_.smoke && !options_.ui_test) || options_.splash) splash_ = std::make_unique<Splash>();
     // A key or click recording an input binding is not also delivered to ImGui.
     window_.observe(this, [](void* self, const SDL_Event& event) {
         auto& app = *static_cast<App*>(self);
@@ -488,6 +491,10 @@ void App::frame() {
         // Every user action reports failure here rather than closing the editor.
         log(Level::error, error.what());
         if (!project_) hub_error_ = error.what();
+    }
+    if (splash_) {
+        splash_->draw(project_ ? "Opening " + project_->name : "Starting");
+        if (!splash_->active()) splash_.reset();
     }
 }
 

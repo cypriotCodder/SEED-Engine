@@ -78,6 +78,15 @@ PackImage read_texture(const fs::path& file, const std::string& name) {
     return image;
 }
 
+std::vector<std::uint8_t> decode_image(const unsigned char* bytes, std::size_t size, int& width,
+                                       int& height) {
+    int channels{};
+    std::unique_ptr<stbi_uc, void (*)(void*)> pixels(
+        stbi_load_from_memory(bytes, static_cast<int>(size), &width, &height, &channels, 4), stbi_image_free);
+    if (!pixels) throw std::runtime_error(std::string("Image: ") + stbi_failure_reason());
+    return {pixels.get(), pixels.get() + std::size_t(width) * std::size_t(height) * 4};
+}
+
 std::string import_texture(const fs::path& project, const fs::path& image) {
     if (!is_image(image)) throw std::runtime_error("Textures are PNG, JPG or TGA images");
     read_texture(image, "check"); // Refuse anything that will not decode, before copying it.

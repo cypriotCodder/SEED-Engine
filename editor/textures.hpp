@@ -1,5 +1,6 @@
 #pragma once
 #include "assets/pack_writer.hpp"
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -19,6 +20,9 @@ std::string import_texture(const std::filesystem::path& project, const std::file
 // Reads an image for packing: RGBA, bottom row first, sides rounded to multiples of four (at most
 // 4096) by resampling.
 PackImage read_texture(const std::filesystem::path& file, const std::string& name);
+
+// Decodes a PNG, JPG or TGA image in memory to RGBA, top row first. Throws if it cannot.
+std::vector<std::uint8_t> decode_image(const unsigned char* bytes, std::size_t size, int& width, int& height);
 
 // Brings .seed/textures.pak up to date with the texture files: rebuilds it when any was added,
 // removed or changed, and removes it when there are none. Returns true when the pack changed.
