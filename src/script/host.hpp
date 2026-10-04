@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct lua_State;
@@ -66,6 +68,14 @@ public:
     void draw_ui(Renderer& renderer) const;
     // Whether a script paused the game (game.set_paused): scripts still update, the world waits.
     bool paused() const { return paused_; }
+    // The scene game.scene() names; set before its scripts attach.
+    void set_scene(const std::string& name) { scene_ = name; }
+    // A scene a script asked for with game.load_scene, and the spawn entity's name, once.
+    std::optional<std::pair<std::string, std::string>> take_scene_request() {
+        return std::exchange(scene_request_, {});
+    }
+    // Reports a script error that happened outside a script, such as a scene that cannot load.
+    void report(const std::string& message);
     unsigned errors() const { return errors_; }
 
 private:
@@ -97,6 +107,8 @@ private:
     float pointer_x_{}, pointer_y_{};
     int screen_width_{1280}, screen_height_{720};
     bool paused_{};
+    std::string scene_;
+    std::optional<std::pair<std::string, std::string>> scene_request_;
     lua_State* lua_{};
     std::size_t memory_{};
     std::vector<Instance> instances_;

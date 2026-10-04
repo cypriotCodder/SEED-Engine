@@ -1,0 +1,79 @@
+{
+  "format": 1,
+  "terrain": "cave",
+  "entities": [
+    {
+      "name": "Player",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        1.5,
+        1.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "sand",
+        "size": [
+          0.6,
+          0.6
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": false,
+          "solid": false,
+          "buildings": false
+        },
+        "face_movement": false,
+        "player": {
+          "actions": {
+            "up": "move_up",
+            "down": "move_down",
+            "left": "move_left",
+            "right": "move_right",
+            "run": "run"
+          },
+          "input": true,
+          "zoom": 30,
+          "smoothing": 0,
+          "dead_zone": 0,
+          "resume": true
+        }
+      }
+    },
+    {
+      "name": "Entry",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        5.5,
+        6.5
+      ],
+      "angle": 0
+    },
+    {
+      "name": "Keeper",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        3.5,
+        3.5
+      ],
+      "angle": 0,
+      "script": "cave.lua"
+    }
+  ]
+}

@@ -9,14 +9,14 @@ namespace {
 constexpr std::uint32_t world_file_magic = 0x444c5257, world_file_version = 2;
 }
 World::World(Jobs& jobs, std::uint64_t game_id, const WorldGenerator& generator, std::uint64_t seed,
-             std::filesystem::path directory, ReadPath read_path)
+             std::filesystem::path directory, ReadPath read_path, std::string prefix)
     : jobs_(jobs),
       generator_(generator),
       game_id_(game_id),
       seed_(seed),
       directory_(std::move(directory)),
-      read_path_(std::move(read_path)) {
-    validate(generator_);
+      read_path_(std::move(read_path)),
+      prefix_(std::move(prefix)) {
     if (!read_path_)
         read_path_ = [](const std::filesystem::path& path) {
             return path;
@@ -25,7 +25,16 @@ World::World(Jobs& jobs, std::uint64_t game_id, const WorldGenerator& generator,
         throw std::runtime_error(
             "Legacy standalone building saves are unsupported; choose a new save directory");
     std::filesystem::create_directories(directory_);
-    const auto metadata = directory_ / "world.seed";
+    open();
+    for (auto& slot : slots_) {
+        slot.world = this;
+        slot.chunk = &pool_.get(pool_.create());
+    }
+}
+// Checks the save's world.seed against this generator and seed, or writes it for a new save.
+void World::open() {
+    validate(generator_);
+    const auto metadata = directory_ / (prefix_ + "world.seed");
     if (std::filesystem::exists(read_path_(metadata))) {
         const auto bytes = read_blob(read_path_(metadata));
         Reader input(bytes);
@@ -53,16 +62,29 @@ World::World(Jobs& jobs, std::uint64_t game_id, const WorldGenerator& generator,
         output.u64(seed_);
         write_blob(metadata, output.data);
     }
-    for (auto& slot : slots_) {
-        slot.world = this;
-        slot.chunk = &pool_.get(pool_.create());
-    }
 }
+
+void World::reopen(const WorldGenerator& generator, std::uint64_t seed, std::string prefix) {
+    // Every chunk goes back to the save it came from, through the same hooks as streaming out.
+    jobs_.wait(group_);
+    check_errors();
+    for (auto& slot : slots_) {
+        const auto state = slot.state.load();
+        if (state == State::active && hooks_.release) hooks_.release(hooks_.context, slot.coord, *slot.chunk);
+        if (state == State::active || state == State::ready) write(slot);
+        slot.state = State::empty;
+    }
+    generator_ = generator;
+    seed_ = seed;
+    prefix_ = std::move(prefix);
+    open();
+}
+
 World::~World() {
     jobs_.wait(group_);
 }
 std::filesystem::path World::path(ChunkCoord coord) const {
-    return directory_ / (std::to_string(coord.x) + "_" + std::to_string(coord.y) + ".chunk");
+    return directory_ / (prefix_ + std::to_string(coord.x) + "_" + std::to_string(coord.y) + ".chunk");
 }
 void World::check_errors() const {
     for (const auto& slot : slots_)

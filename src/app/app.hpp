@@ -78,7 +78,9 @@ struct Game {
     void (*effects)(void*, Sounds&, Particles&){};
     // How building bodies look; see BodyVisuals. Optional.
     Visual (*body_visual)(void*, const BodyState&){};
-    float body_lift_per_height{};                  // See BodyVisuals::lift_per_height.
+    float body_lift_per_height{}; // See BodyVisuals::lift_per_height.
+    // Starts every save file's name, so one save can hold several worlds; null for none.
+    const char* save_prefix{};
     std::size_t scene_memory{};                    // Scene arena bytes; 0 uses Scene::default_memory.
     bool (*option)(void*, std::string_view arg){}; // Return true if the game consumed arg.
     void (*validate)(void*, const AppOptions&){};  // Reject incompatible option combinations.
@@ -112,6 +114,11 @@ public:
     // Draws every entity with a Visual near the camera, interpolated between fixed steps.
     void draw_entities(const View& view);
     WorldPosition focus_position();
+    // Saves where the focus is, then continues in another world from the project's terrain: one
+    // terrain and its paint, a seed, and the save-file prefix that keeps its files apart (see
+    // World). Call from Game::step. Entities are the game's to remove and create.
+    void change_world(const TerrainAsset& terrain, const TerrainPaint& paint, std::uint64_t seed,
+                      std::string prefix);
     // Creates an entity that is saved with the world, in the chunk it stands in. It leaves the
     // scene when that chunk unloads and returns when it loads again, as a new Entity handle.
     Entity create_saved(Transform transform, Visual visual);

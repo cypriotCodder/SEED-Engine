@@ -128,9 +128,11 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       gpu(options.benchmark ? options.measured_frames : 0),
       scene(game.scene_memory ? game.scene_memory : Scene::default_memory),
       checkpoint(options.save),
-      world(jobs, stable_id(game.id), world_generator(game, project_assets_, materials, terrain_),
-            options.seed, checkpoint.working_directory(),
-            [this](const auto& path) { return checkpoint.read_path(path.filename().string()); }),
+      world(
+          jobs, stable_id(game.id), world_generator(game, project_assets_, materials, terrain_), options.seed,
+          checkpoint.working_directory(),
+          [this](const auto& path) { return checkpoint.read_path(path.filename().string()); },
+          game.save_prefix ? game.save_prefix : ""),
       physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
       sounds(register_effects(game, project_assets_, materials, particles)),
       audio(!options.smoke && !options.benchmark, sounds),
@@ -227,8 +229,19 @@ void Engine::write_deltas(WorldPosition focus_at) {
     physics.finish_step();
     update_owners();
     world.save();
-    save_player(checkpoint.working_directory(), options.seed, world.generator().version, focus_at,
-                std::filesystem::exists(checkpoint.read_path("player.delta")));
+    save_player(checkpoint.working_directory(), world.seed(), world.generator().version, focus_at,
+                std::filesystem::exists(checkpoint.read_path(world.prefix() + "player.delta")),
+                world.prefix());
+}
+
+void Engine::change_world(const TerrainAsset& terrain, const TerrainPaint& paint, std::uint64_t seed,
+                          std::string prefix) {
+    if (!terrain_) throw std::logic_error("Only games built from project terrain can change worlds");
+    write_deltas(focus_position()); // Where the player was, for coming back.
+    auto next = std::make_unique<Terrain>(terrain, materials, paint);
+    world.reopen(next->generator(), seed, std::move(prefix));
+    terrain_ = std::move(next); // The old one stays until the world has written its chunks.
+    camera_placed_ = false;     // The camera jumps rather than gliding between worlds.
 }
 
 void Engine::draw_entities(const View& view) {
@@ -299,31 +312,35 @@ void Engine::loop(const Game& game) {
         const auto frame_bodies = physics.count();
         if (game.frame) game.frame(game.context, *this, dt);
         if (actions.pressed(engine_action::quit)) input.quit = true;
-        auto& transform = *scene.transforms.find(focus);
+        // A pointer, looked up again after each step: a step may replace the focus (a game changing
+        // scenes), and the old transform with it.
+        auto* transform = scene.transforms.find(focus);
         if (options.benchmark && options.stream_workload) {
             // A fixed route deliberately crosses the unload boundary and returns to the start.
             constexpr ChunkCoord route[] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}, {-4, 4}, {-4, 0}, {0, 0}};
             const auto index = frames < warmup_frames ? 0 : ((frames - warmup_frames) / 60) % 7;
-            transform.position = {route[index], {0, 0}};
-            transform.previous = transform.position;
+            transform->position = {route[index], {0, 0}};
+            transform->previous = transform->position;
         }
         const auto stream_start = MeasurementClock::now();
         update_owners();
-        world.stream(transform.position.chunk);
+        world.stream(transform->position.chunk);
         const auto stream_end = MeasurementClock::now();
         accumulator += dt;
         constexpr float step = 1.0F / 60.0F;
         while (accumulator >= step) {
             physics.finish_step();
             if (game.step) game.step(game.context, *this, step);
+            transform = scene.transforms.find(focus);
+            if (!transform) throw std::logic_error("The focus entity was removed during a step");
             // The last step of the frame keeps running while the frame renders.
-            physics.begin_step(transform.position);
+            physics.begin_step(transform->position);
             particles.update(step);
             accumulator -= step;
         }
         View view;
-        auto target = transform.position;
-        target.move(relative(transform.previous, transform.position) * (1 - accumulator / step));
+        auto target = transform->position;
+        target.move(relative(transform->previous, transform->position) * (1 - accumulator / step));
         view.camera = follow(target, dt);
         view.alpha = accumulator / step;
         window.drawable_size(view.width, view.height);
@@ -422,8 +439,9 @@ int run(const Game& game, int argc, char** argv) {
             throw std::invalid_argument("save_entity() and load_entity() must be given together");
         const auto options = parse(game, argc, argv);
         Engine engine(game, options);
-        const auto spawn = load_player(engine.checkpoint.read_path("player.delta").parent_path(),
-                                       options.seed, engine.world.generator().version);
+        const auto& prefix = engine.world.prefix();
+        const auto spawn = load_player(engine.checkpoint.read_path(prefix + "player.delta").parent_path(),
+                                       engine.world.seed(), engine.world.generator().version, prefix);
         engine.focus = game.setup(game.context, engine, spawn);
         if (!engine.scene.transforms.find(engine.focus))
             throw std::logic_error("setup() must return an entity with a Transform");

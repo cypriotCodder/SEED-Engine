@@ -6,6 +6,7 @@
 #include "project/game_settings.hpp"
 #include "project/scene_file.hpp"
 #include "script/host.hpp"
+#include "world/player_save.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -36,9 +37,12 @@ struct Runner {
     std::array<ActionId, 5> moves{}; // up, down, left, right, run
     std::unique_ptr<ScriptHost> scripts;
     Entity player{};
-    DayClock clock; // The scene's time of day.
-    double time{};  // Seconds of play, for flickering lights.
+    std::string scene_name, prefix; // The scene playing, and its save files' prefix.
+    DayClock clock;                 // The scene's time of day.
+    double time{};                  // Seconds of play, for flickering lights.
 };
+
+void read_scene(Runner& runner, const std::string& name, bool start);
 
 void add_moves(void* context, Actions& actions) {
     auto& runner = *static_cast<Runner*>(context);
@@ -74,6 +78,70 @@ Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPo
     return entity;
 }
 
+// Makes the engine entities of the scene that plays, the player at `spawn` when `place` (else at
+// its scene position), then loads their scripts.
+void spawn_scene(Runner& runner, Engine& engine, WorldPosition spawn, bool place) {
+    std::vector<std::pair<Entity, const SceneEntity*>> scripted;
+    for (std::size_t i = 0; i < runner.scene.entities.size(); ++i) {
+        const auto& e = runner.scene.entities[i];
+        const bool player = i == runner.player_index;
+        const auto at = player && place ? spawn : e.position;
+        const auto entity = instantiate(runner, engine, e, at);
+        if (player) runner.player = entity;
+        if (!e.script.empty()) scripted.emplace_back(entity, &e);
+    }
+    engine.camera_smoothing = runner.player_settings.smoothing;
+    engine.camera_dead_zone = runner.player_settings.dead_zone;
+    engine.camera_zoom = runner.player_settings.zoom;
+    runner.scripts->set_player(runner.player);
+    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
+    runner.scripts->set_scene(runner.scene_name);
+    // Scripts load once every entity exists, so their top-level code can already find the others.
+    for (const auto& [e, source] : scripted)
+        runner.scripts->attach(e, source->script);
+}
+
+// Leaves the scene that plays for another (game.load_scene): its world is saved and the other
+// scene's world, entities and scripts take its place. The player comes back where it left that
+// scene, or at the entity named `spawn_name` there when one is given.
+void change_scene(Runner& runner, Engine& engine, const std::string& name, const std::string& spawn_name) {
+    try {
+        read_scene(runner, name, false);
+    } catch (const std::exception& error) {
+        return runner.scripts->report("game.load_scene: " + std::string(error.what()));
+    }
+    // The start scene keeps the seed the game started with; others use their terrain's.
+    const auto seed =
+        name == runner.game.start_scene ? engine.options.seed : runner.data.terrain.default_seed;
+    engine.change_world(runner.data.terrain, runner.data.paint, seed, runner.prefix);
+    // Everything of the scene left behind goes, and its scripts with it.
+    const auto owners = engine.scene.transforms.owners();
+    const std::vector<Entity> leaving(owners.begin(), owners.end());
+    for (const auto e : leaving)
+        if (engine.scene.alive(e)) engine.scene.destroy(e);
+    // The player starts at the spawn entity asked for, else where it left this scene before (if
+    // its settings resume), else at its scene position.
+    WorldPosition at{};
+    bool place = false;
+    if (!spawn_name.empty()) {
+        const auto found = std::find_if(runner.scene.entities.begin(), runner.scene.entities.end(),
+                                        [&](const SceneEntity& e) { return e.name == spawn_name; });
+        if (found == runner.scene.entities.end())
+            runner.scripts->report("game.load_scene: the scene \"" + name + "\" has no entity \"" +
+                                   spawn_name + "\"");
+        else
+            at = found->position, place = true;
+    }
+    const auto saved = engine.checkpoint.read_path(runner.prefix + "player.delta");
+    if (!place && runner.player_settings.resume && std::filesystem::exists(saved)) {
+        at = load_player(saved.parent_path(), seed, engine.world.generator().version, runner.prefix);
+        place = true;
+    }
+    spawn_scene(runner, engine, at, place);
+    engine.focus = runner.player;
+    engine.world.settle(engine.scene.transforms.find(runner.player)->position.chunk);
+}
+
 Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
     engine.scene.add_component<LightComponent>();
@@ -92,26 +160,10 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
             if (!prefab.script.empty()) runner.scripts->attach(entity, prefab.script);
             return entity;
         });
-    std::vector<std::pair<Entity, const SceneEntity*>> scripted;
-    // A saved game can put the player back where it was instead of at its scene position.
-    const bool resumed = std::filesystem::exists(engine.checkpoint.read_path("player.delta"));
-    for (std::size_t i = 0; i < runner.scene.entities.size(); ++i) {
-        const auto& e = runner.scene.entities[i];
-        const bool player = i == runner.player_index;
-        const auto at = player && resumed && runner.player_settings.resume ? spawn : e.position;
-        const auto entity = instantiate(runner, engine, e, at);
-        if (player) runner.player = entity;
-        if (!e.script.empty()) scripted.emplace_back(entity, &e);
-    }
-    engine.camera_smoothing = runner.player_settings.smoothing;
-    engine.camera_dead_zone = runner.player_settings.dead_zone;
-    engine.camera_zoom = runner.player_settings.zoom;
-    runner.scripts->set_player(runner.player);
     runner.scripts->set_clock(&runner.clock);
-    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
-    // Scripts load once every entity exists, so their top-level code can already find the others.
-    for (const auto& [e, source] : scripted)
-        runner.scripts->attach(e, source->script);
+    // A saved game can put the player back where it was instead of at its scene position.
+    const bool resumed = std::filesystem::exists(engine.checkpoint.read_path(runner.prefix + "player.delta"));
+    spawn_scene(runner, engine, spawn, resumed);
     return runner.player;
 }
 
@@ -139,6 +191,9 @@ void step(void* context, Engine& engine, float dt) {
         runner.time += dt;
         runner.clock.advance(dt);
     }
+    // A scene change asked for in this step happens once the step is over.
+    if (auto request = runner.scripts->take_scene_request())
+        change_scene(runner, engine, request->first, request->second);
     engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
 }
 
@@ -194,6 +249,64 @@ void act(void* context, Engine& engine, const View& view) {
                                 view.logical_height);
 }
 
+// Reads scenes/<name>.json, its paint and its terrain, and makes it the scene that plays. Nothing
+// changes if it cannot: errors are thrown first. Only the start scene "main" may be missing (an
+// empty scene, for a new project).
+void read_scene(Runner& runner, const std::string& name, bool start) {
+    const auto scene_path = "scenes/" + name + ".json";
+    const auto text = runner.files(scene_path);
+    if (!text && !(start && name == "main"))
+        throw std::runtime_error("The scene " + scene_path + " does not exist");
+    SceneFile scene;
+    if (text) try {
+            scene = parse_scene(parse_json(*text));
+        } catch (const std::exception& error) {
+            throw std::runtime_error(scene_path + ": " + error.what());
+        }
+    auto data = runner.data;
+    data.terrain = load_terrain(subfolder(runner.files, "assets/"), scene.terrain);
+    const auto paint_path = "scenes/" + name + ".paint";
+    if (const auto paint = runner.files(paint_path)) try {
+            scene.paint = decode_paint(*paint);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(paint_path + ": " + error.what());
+        }
+    data.paint = scene.paint;
+    if (const auto problems = scene.problems(data); !problems.empty())
+        throw std::runtime_error("The scene \"" + name + "\" has problems:\n" + problems);
+    // The player is the character marked as the player. Older projects mark it by name: an entity
+    // named "Player" (moving itself if it has a script), else a new one at "Spawn" or the origin.
+    auto& entities = scene.entities;
+    auto found = std::find_if(entities.begin(), entities.end(),
+                              [](const SceneEntity& e) { return e.character && e.character->player; });
+    if (found == entities.end()) {
+        found = std::find_if(entities.begin(), entities.end(),
+                             [](const SceneEntity& e) { return e.name == "Player"; });
+        if (found == entities.end()) {
+            SceneEntity player;
+            player.name = "Player";
+            const auto spawn = std::find_if(entities.begin(), entities.end(),
+                                            [](const SceneEntity& e) { return e.name == "Spawn"; });
+            if (spawn != entities.end()) player.position = spawn->position;
+            player.visual = SceneVisual{data.materials.front().name, {0.6F, 0.6F}};
+            entities.push_back(player);
+            found = entities.end() - 1;
+        }
+        if (!found->character) found->character = SceneCharacter{};
+        found->character->player = ScenePlayer{};
+        found->character->player->input = found->script.empty();
+    }
+    runner.player_index = static_cast<std::size_t>(found - entities.begin());
+    runner.player_settings = *found->character->player;
+    runner.scene = std::move(scene);
+    runner.data.terrain = std::move(data.terrain);
+    runner.data.paint = std::move(data.paint);
+    runner.scene_name = name;
+    runner.prefix = name + ".";
+    runner.clock.atmosphere = runner.scene.atmosphere;
+    runner.clock.set_hour(runner.scene.atmosphere.hour);
+}
+
 // Reads a project through `files`. `save` is where its games are saved unless --save says otherwise.
 void load(Runner& runner, ProjectFiles files, std::filesystem::path save, std::filesystem::path pack) {
     // Textures arrive already compressed: the editor packs them (see editor/textures.hpp).
@@ -211,53 +324,8 @@ void load(Runner& runner, ProjectFiles files, std::filesystem::path save, std::f
     runner.title = runner.game.title.empty() ? runner.name : runner.game.title;
     runner.save = save.string();
     runner.data = load_assets(subfolder(runner.files, "assets/"));
-    // The game starts in its start scene; a missing "main" is an empty scene, any other is an error.
-    const auto scene_path = "scenes/" + runner.game.start_scene + ".json";
-    const auto scene = runner.files(scene_path);
-    if (!scene && runner.game.start_scene != "main")
-        throw std::runtime_error("The start scene " + scene_path + " does not exist");
-    if (scene) try {
-            runner.scene = parse_scene(parse_json(*scene));
-        } catch (const std::exception& error) {
-            throw std::runtime_error(scene_path + ": " + error.what());
-        }
-    runner.data.terrain = load_terrain(subfolder(runner.files, "assets/"), runner.scene.terrain);
-    const auto paint_path = "scenes/" + runner.game.start_scene + ".paint";
-    if (const auto paint = runner.files(paint_path)) try {
-            runner.scene.paint = decode_paint(*paint);
-        } catch (const std::exception& error) {
-            throw std::runtime_error(paint_path + ": " + error.what());
-        }
-    runner.data.paint = runner.scene.paint;
-    runner.clock.atmosphere = runner.scene.atmosphere;
-    runner.clock.set_hour(runner.scene.atmosphere.hour);
-    if (const auto problems = runner.scene.problems(runner.data); !problems.empty())
-        throw std::runtime_error("The start scene has problems:\n" + problems);
-    // The player is the character marked as the player. Older projects mark it by name: an entity
-    // named "Player" (moving itself if it has a script), else a new one at "Spawn" or the origin.
-    auto& entities = runner.scene.entities;
-    auto found = std::find_if(entities.begin(), entities.end(),
-                              [](const SceneEntity& e) { return e.character && e.character->player; });
-    if (found == entities.end()) {
-        found = std::find_if(entities.begin(), entities.end(),
-                             [](const SceneEntity& e) { return e.name == "Player"; });
-        if (found == entities.end()) {
-            SceneEntity player;
-            player.name = "Player";
-            const auto spawn = std::find_if(entities.begin(), entities.end(),
-                                            [](const SceneEntity& e) { return e.name == "Spawn"; });
-            if (spawn != entities.end()) player.position = spawn->position;
-            player.visual = SceneVisual{runner.data.materials.front().name, {0.6F, 0.6F}};
-            entities.push_back(player);
-            found = entities.end() - 1;
-        }
-        if (!found->character) found->character = SceneCharacter{};
-        found->character->player = ScenePlayer{};
-        found->character->player->input = found->script.empty();
-    }
-    runner.player_index = static_cast<std::size_t>(found - entities.begin());
-    runner.player_settings = *found->character->player;
     if (runner.data.materials.empty()) throw std::runtime_error("The project has no materials yet");
+    read_scene(runner, runner.game.start_scene, true);
 }
 
 int play(Runner& runner, int argc, char** argv) {
@@ -272,6 +340,7 @@ int play(Runner& runner, int argc, char** argv) {
     game.window_height = runner.game.height;
     game.fullscreen = runner.game.fullscreen;
     game.assets = &runner.data;
+    game.save_prefix = runner.prefix.c_str(); // Each scene keeps its own files in the save.
     // Room for the runner's own components (lights and characters, 8,192 of each) beyond what the
     // engine's scene needs.
     game.scene_memory = Scene::default_memory + 1024 * 1024;

@@ -22,7 +22,7 @@ constexpr std::uint32_t maximum_files = 100000;
 struct Unsupported : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
-bool delta_name(const std::string& name) {
+bool base_delta_name(std::string_view name) {
     if (name == "world.seed" || name == "player.delta") return true;
     if (!name.ends_with(".chunk")) return false;
     const auto split = name.find('_');
@@ -32,8 +32,25 @@ bool delta_name(const std::string& name) {
         const auto r = std::from_chars(value.data(), value.data() + value.size(), n);
         return r.ec == std::errc{} && r.ptr == value.data() + value.size() && std::to_string(n) == value;
     };
-    return number(std::string_view(name).substr(0, split)) &&
-           number(std::string_view(name).substr(split + 1, name.size() - split - 7));
+    return number(name.substr(0, split)) && number(name.substr(split + 1, name.size() - split - 7));
+}
+// A save may hold several worlds (a game's scenes), each file name starting with "<scene>.", the
+// scene named with letters, digits, '_' and '-'.
+bool delta_name(const std::string& name) {
+    if (base_delta_name(name)) return true;
+    const auto dot = name.find('.');
+    if (dot == 0 || dot == std::string::npos || dot > 64) return false;
+    const std::string_view prefix(name.data(), dot);
+    const bool valid = std::all_of(prefix.begin(), prefix.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
+               c == '-';
+    });
+    return valid && base_delta_name(std::string_view(name).substr(dot + 1));
+}
+// A save holds at least one world: its world.seed, or a scene's "<scene>.world.seed".
+bool has_world(const std::vector<std::string>& names) {
+    return std::any_of(names.begin(), names.end(),
+                       [](const std::string& n) { return n == "world.seed" || n.ends_with(".world.seed"); });
 }
 std::vector<std::string> files(const std::filesystem::path& directory) {
     std::vector<std::string> result;
@@ -87,7 +104,7 @@ void validate(const std::filesystem::path& path, std::uint64_t id) {
     std::vector<std::string> names;
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto length = r.u16();
-        if (!length || length > 80) throw std::runtime_error("Invalid checkpoint filename");
+        if (!length || length > 160) throw std::runtime_error("Invalid checkpoint filename");
         const auto text = r.take(length);
         const std::string name(text.begin(), text.end());
         if (!delta_name(name) || (!names.empty() && name <= names.back()))
@@ -100,7 +117,7 @@ void validate(const std::filesystem::path& path, std::uint64_t id) {
         if (payload.size() != size || crc32(payload) != crc)
             throw std::runtime_error("Checkpoint delta mismatch");
     }
-    if (!r.done() || !std::binary_search(names.begin(), names.end(), "world.seed") || names != files(path))
+    if (!r.done() || !has_world(names) || names != files(path))
         throw std::runtime_error("Incomplete checkpoint");
 }
 } // namespace
@@ -252,8 +269,15 @@ std::unique_ptr<Checkpoint::Snapshot> Checkpoint::prepare() {
     const auto start = std::chrono::steady_clock::now();
     metrics_ = {};
 
-    if (!std::filesystem::exists(read_path("world.seed")))
-        throw std::runtime_error("Cannot commit a save without world metadata");
+    {
+        auto names = files(working_);
+        std::lock_guard lock(read_mutex_);
+        for (const auto& base : {read_view_.frozen, read_view_.previous})
+            if (!base.empty() && std::filesystem::is_directory(base))
+                for (auto& name : files(base))
+                    names.push_back(std::move(name));
+        if (!has_world(names)) throw std::runtime_error("Cannot commit a save without world metadata");
+    }
     const auto parent = root_ / "checkpoints";
     if (std::filesystem::is_symlink(std::filesystem::symlink_status(parent)))
         throw std::runtime_error("Checkpoint directory cannot be a symlink");

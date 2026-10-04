@@ -77,6 +77,9 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `camera.follow(entity)` | The camera, and world streaming, follow this entity. |
 | `camera.zoom()`, `camera.set_zoom(pixels_per_tile)` | The camera's zoom, from 2 to 512. |
 | `game.player()` | The player entity. |
+| `game.load_scene(name [, spawn])` | Goes to another scene once this step is over: this scene's world is saved and its entities and scripts end; the other scene's world, entities and scripts take their place. The player appears at the entity named `spawn` there, else where it last left that scene (if its Character resumes), else at its scene position. |
+| `game.scene()` | The name of the scene that is playing. |
+| `game.data` | A table every script shares that lasts across scene changes, for things such as score or inventory. It is not saved yet. |
 | `game.set_paused(on)`, `game.paused()` | A paused game keeps running scripts (for title, pause and game-over screens) while characters, touches, surfaces and the time of day stand still. |
 | `ui.rect(x, y, w, h [, {r,g,b,a}])` | A filled rectangle over the game, in logical pixels from the top-left; colours 0 to 1. |
 | `ui.text(x, y, text [, scale [, {r,g,b,a}]])` | Text in the built-in pixel font, 6 x 8 pixels per character at scale 1 (default 2, up to 16). |

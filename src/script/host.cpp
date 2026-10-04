@@ -423,6 +423,16 @@ struct ScriptApi {
         return 2;
     }
 
+    static int load_scene(lua_State* lua) {
+        const std::string name = luaL_checkstring(lua, 1), spawn = luaL_optstring(lua, 2, "");
+        if (!valid_prefab_name(name)) luaL_error(lua, "scene names use letters, digits, '_' and '-'");
+        host(lua).scene_request_ = std::make_pair(name, spawn);
+        return 0;
+    }
+    static int scene(lua_State* lua) {
+        lua_pushstring(lua, host(lua).scene_.c_str());
+        return 1;
+    }
     static int set_paused(lua_State* lua) {
         host(lua).paused_ = lua_toboolean(lua, 1);
         return 0;
@@ -655,6 +665,8 @@ struct ScriptApi {
                                         {"player", guarded<player>},
                                         {"set_paused", guarded<set_paused>},
                                         {"paused", guarded<paused>},
+                                        {"load_scene", guarded<load_scene>},
+                                        {"scene", guarded<scene>},
                                         {nullptr, nullptr}};
         module(lua, "input", input);
         module(lua, "world", world);
@@ -662,6 +674,11 @@ struct ScriptApi {
         module(lua, "particles", particles);
         module(lua, "camera", camera);
         module(lua, "game", game);
+        // game.data: a table every script shares, which outlives scene changes (score, inventory).
+        lua_getglobal(lua, "game");
+        lua_newtable(lua);
+        lua_setfield(lua, -2, "data");
+        lua_pop(lua, 1);
         static const luaL_Reg atmosphere[] = {{"hour", guarded<hour>},
                                               {"set_hour", guarded<set_hour>},
                                               {"daylight", guarded<light_of_day>},
@@ -811,6 +828,11 @@ void ScriptHost::surfaces() {
         lua_pushstring(lua_, engine_.materials[static_cast<MaterialId>(motion->surface)].name);
         call(instances_[i], "on_surface", 1);
     }
+}
+
+void ScriptHost::report(const std::string& message) {
+    std::fprintf(stderr, "Script error: %s\n", message.c_str());
+    ++errors_;
 }
 
 void ScriptHost::set_pointer(WorldPosition world, float x, float y, int width, int height) {

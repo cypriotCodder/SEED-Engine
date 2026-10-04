@@ -6,6 +6,7 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <string>
 
 namespace seed {
 // Lets another system own per-chunk state while a chunk is active. All callbacks run on the main
@@ -23,8 +24,15 @@ public:
     using ReadPath = std::function<std::filesystem::path(const std::filesystem::path&)>;
     // Opens or creates the save in `directory`. world.seed binds it to one game, one generator
     // version and one seed; opening it with anything else throws without changing it.
+    // `prefix` starts every file name, so one save can hold several worlds (a game's scenes).
     World(Jobs& jobs, std::uint64_t game_id, const WorldGenerator& generator, std::uint64_t seed,
-          std::filesystem::path directory, ReadPath read_path = {});
+          std::filesystem::path directory, ReadPath read_path = {}, std::string prefix = {});
+    // Writes and unloads every chunk, then continues as the world of another generator, seed and
+    // file prefix in the same save. Nothing is loaded until the next stream or settle. Physics
+    // must be idle.
+    void reopen(const WorldGenerator& generator, std::uint64_t seed, std::string prefix);
+    const std::string& prefix() const { return prefix_; }
+    std::uint64_t seed() const { return seed_; }
     const WorldGenerator& generator() const { return generator_; }
     ~World();
     World(const World&) = delete;
@@ -65,6 +73,7 @@ private:
     void load(Slot& slot);
     void write(Slot& slot);
     void check_errors() const;
+    void open();
     std::atomic<std::uint64_t> generated_{}, generation_ns_{}, generation_max_ns_{};
     Jobs& jobs_;
     JobGroup group_;
@@ -73,6 +82,7 @@ private:
     std::uint64_t game_id_, seed_;
     std::filesystem::path directory_;
     ReadPath read_path_;
+    std::string prefix_;
     Pool<Chunk, 49> pool_;
     std::array<Slot, 49> slots_;
 };

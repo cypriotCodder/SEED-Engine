@@ -92,6 +92,27 @@ std::filesystem::path latest(const std::filesystem::path& root) {
     return root / "checkpoints" / std::to_string(r.u64());
 }
 } // namespace
+// A save can hold several worlds: a game's scenes keep their files under "<scene>." names, and a
+// save with only scene worlds commits and reopens.
+void scene_files(const std::filesystem::path& root) {
+    {
+        seed::Checkpoint save(root);
+        for (const char* name :
+             {"cave.world.seed", "cave.-3_12.chunk", "cave.player.delta", "level_2.0_0.chunk"})
+            check(save.read_path(name).filename() == name, "Scene save names are accepted");
+        for (const char* name :
+             {"bad name.world.seed", "a.b.world.seed", ".world.seed", "cave.notes.txt", "cave."})
+            rejects([&] { save.read_path(name); });
+        seed::write_blob(save.working_directory() / "cave.world.seed", std::vector<std::uint8_t>{1, 2});
+        seed::write_blob(save.working_directory() / "cave.0_0.chunk", std::vector<std::uint8_t>{3});
+        save.commit();
+    }
+    seed::Checkpoint reopened(root);
+    check(std::filesystem::exists(reopened.read_path("cave.world.seed")) &&
+              std::filesystem::exists(reopened.read_path("cave.0_0.chunk")),
+          "A save of scene worlds reopens");
+}
+
 int main(int argc, char** argv) {
     try {
         if (argc < 2) throw std::runtime_error("Expected private test directory");
@@ -104,6 +125,7 @@ int main(int argc, char** argv) {
         }
         std::filesystem::remove_all(root);
         std::filesystem::create_directories(root);
+        scene_files(root / "scenes");
         const auto legacy = root / "legacy-flat";
         std::filesystem::create_directories(legacy);
         state(legacy, 1);

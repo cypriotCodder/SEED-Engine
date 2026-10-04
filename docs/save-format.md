@@ -10,6 +10,10 @@ The 20-byte header contains five u32 values: magic `0x344c4453`, envelope versio
 
 `world.seed` version 2 contains u32 magic `0x444c5257`, u32 schema version 2, u64 game ID, u64 generator ID, u32 generator version, and u64 seed. The game ID and generator ID are 64-bit FNV-1a hashes of the stable names the game declares (`Game::id` and `WorldGenerator::name`). Opening a save with a different game, generator, generator version or seed is an error with a message naming which one differs; the save is not changed. Untouched generated chunks do not create files.
 
+## Several worlds in one save
+
+A game made of several scenes keeps each scene's world in the same save, every file name starting with the scene's name and a dot: `cave.world.seed`, `cave.12_-3.chunk`, `cave.player.delta`. The scene name uses letters, digits, `_` and `-` (at most 64). Leaving a scene writes its world and the player's position under its prefix; coming back reads them, so each scene remembers its own changes. Games written in C++ with one world use no prefix. Project games saved before scenes had prefixes stored their one world without one; those saves are no longer read, and such a game starts a new world.
+
 ## Chunk changes, version 4
 
 `X_Y.chunk` contains u32 magic `0x4b4e4843`, u32 schema version 4, u64 generator ID, u32 generator version, u64 seed, two signed 64-bit chunk coordinates, and u16 terrain-record count. Each terrain record is u16 tile index (row-major 32×32) plus u8 change flags. The game defines what each change bit means (`WorldGenerator::edit_bits` and `apply_edit`); in the demo, bit 0 removes a tree and bit 1 excavates terrain into water. Bits outside the game's mask are rejected. Repeated edits compact into one record per tile.
@@ -24,7 +28,7 @@ Legacy migration is disabled by user decision. Terrain-only chunk version 1, sta
 
 ## Player
 
-`player.delta` contains u32 magic `0x52594c50`, u32 version 1, u32 generator version, u64 seed, two i64 chunk coordinates, and two f32 local offsets. A player still at the initial origin needs no file.
+`player.delta` contains u32 magic `0x52594c50`, u32 version 1, u32 generator version, u64 seed, two i64 chunk coordinates, and two f32 local offsets. A player still at the initial origin needs no file. The seed is the world's own: each scene's terrain has its default seed, and the start scene the seed the game started with.
 
 ## Asset archive
 

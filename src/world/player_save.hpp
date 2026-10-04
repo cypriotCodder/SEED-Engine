@@ -3,11 +3,13 @@
 #include "io/storage.hpp"
 #include "world/coordinates.hpp"
 #include <bit>
+#include <string>
 
 namespace seed {
+// `prefix` starts the file name, as World's does: each of a game's scenes keeps its own.
 inline WorldPosition load_player(const std::filesystem::path& directory, std::uint64_t seed,
-                                 std::uint32_t generator_version) {
-    const auto file = directory / "player.delta";
+                                 std::uint32_t generator_version, const std::string& prefix = {}) {
+    const auto file = directory / (prefix + "player.delta");
     if (!std::filesystem::exists(file)) return {};
     const auto bytes = read_blob(file);
     Reader input(bytes);
@@ -24,10 +26,10 @@ inline WorldPosition load_player(const std::filesystem::path& directory, std::ui
 }
 inline void save_player(const std::filesystem::path& directory, std::uint64_t seed,
                         std::uint32_t generator_version, WorldPosition position,
-                        bool previously_saved = false) {
+                        bool previously_saved = false, const std::string& prefix = {}) {
     position.move({});
     if (position.chunk == ChunkCoord{} && position.local.x == 0 && position.local.y == 0 &&
-        !previously_saved && !std::filesystem::exists(directory / "player.delta"))
+        !previously_saved && !std::filesystem::exists(directory / (prefix + "player.delta")))
         return;
     Bytes output;
     output.u32(0x52594c50);
@@ -38,6 +40,6 @@ inline void save_player(const std::filesystem::path& directory, std::uint64_t se
     output.u64(std::uint64_t(position.chunk.y));
     output.u32(std::bit_cast<std::uint32_t>(position.local.x));
     output.u32(std::bit_cast<std::uint32_t>(position.local.y));
-    write_blob(directory / "player.delta", output.data);
+    write_blob(directory / (prefix + "player.delta"), output.data);
 }
 } // namespace seed
