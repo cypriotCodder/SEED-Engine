@@ -4,12 +4,14 @@
 #include "physics/character.hpp"
 #include "project/characters.hpp"
 #include "project/scene_file.hpp"
+#include "render/renderer.hpp"
 // Lua is compiled as C++ (see CMakeLists.txt), so its errors are C++ exceptions and unwind engine
 // code correctly. Its headers are therefore included without extern "C".
 #include "lauxlib.h"
 #include "lua.h"
 #include "lualib.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
@@ -325,6 +327,111 @@ struct ScriptApi {
         return 1;
     }
 
+    // Entities within `radius` of a point, nearest first, optionally only those with a name.
+    static int near(lua_State* lua) {
+        auto& self = host(lua);
+        auto& e = self.engine_;
+        const auto at = position_at(lua, 1);
+        const double radius = luaL_checknumber(lua, 3);
+        if (!(radius >= 0 && radius <= 256)) luaL_error(lua, "radius must be from 0 to 256 tiles");
+        const char* name = luaL_optstring(lua, 4, nullptr);
+        std::vector<std::pair<float, Entity>> found;
+        const auto owners = e.scene.transforms.owners();
+        const auto values = e.scene.transforms.values();
+        for (std::size_t i = 0; i < owners.size(); ++i) {
+            if (!nearby(values[i].position.chunk, at.chunk, 9)) continue;
+            if (name && !(owners[i].index < self.names_.size() && self.names_[owners[i].index] == name))
+                continue;
+            const auto r = relative(values[i].position, at);
+            const float d = std::sqrt(r.x * r.x + r.y * r.y);
+            if (d <= radius) found.emplace_back(d, owners[i]);
+        }
+        std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        lua_createtable(lua, static_cast<int>(found.size()), 0);
+        for (std::size_t i = 0; i < found.size(); ++i) {
+            push_entity(lua, found[i].second);
+            lua_rawseti(lua, -2, static_cast<lua_Integer>(i + 1));
+        }
+        return 1;
+    }
+
+    // ui: drawn over the game in logical pixels from the top-left corner. What a step draws
+    // stays on screen until the next step draws again.
+    static void read_color(lua_State* lua, int index, float out[4]) {
+        out[0] = out[1] = out[2] = out[3] = 1;
+        if (lua_isnoneornil(lua, index)) return;
+        luaL_checktype(lua, index, LUA_TTABLE);
+        for (int i = 0; i < 4; ++i) {
+            lua_rawgeti(lua, index, i + 1);
+            if (!lua_isnil(lua, -1)) {
+                const auto c = luaL_checknumber(lua, -1);
+                if (!(c >= 0 && c <= 1)) luaL_error(lua, "colour values must be from 0 to 1");
+                out[i] = static_cast<float>(c);
+            }
+            lua_pop(lua, 1);
+        }
+    }
+    static void add_ui(lua_State* lua, ScriptHost::UiCommand command) {
+        auto& ui = host(lua).ui_;
+        if (ui.size() >= 4096) luaL_error(lua, "too much ui in one step (4,096 items)");
+        ui.push_back(std::move(command));
+    }
+    static int ui_rect(lua_State* lua) {
+        ScriptHost::UiCommand c{};
+        c.x = static_cast<float>(luaL_checknumber(lua, 1));
+        c.y = static_cast<float>(luaL_checknumber(lua, 2));
+        c.width = static_cast<float>(luaL_checknumber(lua, 3));
+        c.height = static_cast<float>(luaL_checknumber(lua, 4));
+        read_color(lua, 5, c.color);
+        add_ui(lua, std::move(c));
+        return 0;
+    }
+    static int ui_text(lua_State* lua) {
+        ScriptHost::UiCommand c{};
+        c.x = static_cast<float>(luaL_checknumber(lua, 1));
+        c.y = static_cast<float>(luaL_checknumber(lua, 2));
+        c.text = luaL_checkstring(lua, 3);
+        if (c.text.empty()) return 0;
+        if (c.text.size() > 1024) luaL_error(lua, "ui text is at most 1,024 characters");
+        c.scale = static_cast<float>(luaL_optnumber(lua, 4, 2));
+        if (!(c.scale >= 1 && c.scale <= 16)) luaL_error(lua, "text scale must be from 1 to 16");
+        read_color(lua, 5, c.color);
+        add_ui(lua, std::move(c));
+        return 0;
+    }
+    static int ui_text_width(lua_State* lua) {
+        const auto scale = luaL_optnumber(lua, 2, 2);
+        lua_pushnumber(lua, Renderer::text_width(luaL_checkstring(lua, 1), static_cast<float>(scale)));
+        return 1;
+    }
+    static int ui_size(lua_State* lua) {
+        lua_pushinteger(lua, host(lua).screen_width_);
+        lua_pushinteger(lua, host(lua).screen_height_);
+        return 2;
+    }
+
+    // The mouse.
+    static int pointer(lua_State* lua) {
+        const auto& p = host(lua).pointer_;
+        lua_pushnumber(lua, global_coordinate(p.chunk.x, p.local.x));
+        lua_pushnumber(lua, global_coordinate(p.chunk.y, p.local.y));
+        return 2;
+    }
+    static int screen_pointer(lua_State* lua) {
+        lua_pushnumber(lua, host(lua).pointer_x_);
+        lua_pushnumber(lua, host(lua).pointer_y_);
+        return 2;
+    }
+
+    static int set_paused(lua_State* lua) {
+        host(lua).paused_ = lua_toboolean(lua, 1);
+        return 0;
+    }
+    static int paused(lua_State* lua) {
+        lua_pushboolean(lua, host(lua).paused_);
+        return 1;
+    }
+
     // atmosphere: the scene's time of day.
     static DayClock& clock(lua_State* lua) {
         auto* c = host(lua).clock_;
@@ -532,20 +639,23 @@ struct ScriptApi {
                                          {"pressed", guarded<pressed>},
                                          {"released", guarded<released>},
                                          {"axis", guarded<axis>},
+                                         {"pointer", guarded<pointer>},
+                                         {"screen_pointer", guarded<screen_pointer>},
                                          {nullptr, nullptr}};
-        static const luaL_Reg world[] = {{"find", guarded<find>},
-                                         {"spawn", guarded<spawn>},
-                                         {"tile", guarded<tile>},
-                                         {"surface", guarded<surface>},
-                                         {nullptr, nullptr}};
+        static const luaL_Reg world[] = {{"find", guarded<find>}, {"spawn", guarded<spawn>},
+                                         {"tile", guarded<tile>}, {"surface", guarded<surface>},
+                                         {"near", guarded<near>}, {nullptr, nullptr}};
         static const luaL_Reg sound[] = {{"play", guarded<play>}, {nullptr, nullptr}};
         static const luaL_Reg particles[] = {{"burst", guarded<burst>}, {nullptr, nullptr}};
         static const luaL_Reg camera[] = {{"follow", guarded<follow>},
                                           {"zoom", guarded<zoom>},
                                           {"set_zoom", guarded<set_zoom>},
                                           {nullptr, nullptr}};
-        static const luaL_Reg game[] = {
-            {"time", guarded<time>}, {"player", guarded<player>}, {nullptr, nullptr}};
+        static const luaL_Reg game[] = {{"time", guarded<time>},
+                                        {"player", guarded<player>},
+                                        {"set_paused", guarded<set_paused>},
+                                        {"paused", guarded<paused>},
+                                        {nullptr, nullptr}};
         module(lua, "input", input);
         module(lua, "world", world);
         module(lua, "sound", sound);
@@ -557,6 +667,12 @@ struct ScriptApi {
                                               {"daylight", guarded<light_of_day>},
                                               {nullptr, nullptr}};
         module(lua, "atmosphere", atmosphere);
+        static const luaL_Reg ui[] = {{"rect", guarded<ui_rect>},
+                                      {"text", guarded<ui_text>},
+                                      {"text_width", guarded<ui_text_width>},
+                                      {"size", guarded<ui_size>},
+                                      {nullptr, nullptr}};
+        module(lua, "ui", ui);
         static const luaL_Reg methods[] = {{"position", guarded<position>},
                                            {"set_position", guarded<set_position>},
                                            {"move", guarded<move>},
@@ -619,7 +735,7 @@ void ScriptHost::fail(Instance& instance, const std::string& message) {
 }
 
 void ScriptHost::attach(Entity entity, const std::string& file) {
-    Instance instance{entity, LUA_NOREF, file};
+    Instance instance{entity, LUA_NOREF, file, false, false, {}};
     std::string source;
     try {
         auto text = scripts_(file);
@@ -697,8 +813,81 @@ void ScriptHost::surfaces() {
     }
 }
 
+void ScriptHost::set_pointer(WorldPosition world, float x, float y, int width, int height) {
+    pointer_ = world;
+    pointer_x_ = x, pointer_y_ = y;
+    screen_width_ = width, screen_height_ = height;
+}
+
+void ScriptHost::draw_ui(Renderer& renderer) const {
+    for (const auto& c : ui_) {
+        const Color color{c.color[0], c.color[1], c.color[2], c.color[3]};
+        if (c.text.empty())
+            renderer.ui_rect(c.x, c.y, c.width, c.height, color);
+        else
+            renderer.text(c.x, c.y, c.text, c.scale, color);
+    }
+}
+
+void ScriptHost::touches() {
+    auto& scene = engine_.scene;
+    auto& motions = scene.components<CharacterMotion>();
+    // An entity's box: a character's collision box, else its visual's size; none for markers.
+    const auto half_of = [&](Entity e, Vec2& half) {
+        if (const auto* m = motions.find(e)) return half = m->half, true;
+        if (const auto* v = scene.visuals.find(e)) return half = v->size * 0.5F, true;
+        return false;
+    };
+    const auto owners = scene.transforms.owners();
+    const auto values = scene.transforms.values();
+    std::vector<Entity> now;
+    for (std::size_t i = 0; i < instances_.size(); ++i) {
+        if (instances_[i].failed || !scene.alive(instances_[i].entity)) continue;
+        const auto self = instances_[i].entity;
+        Vec2 half{};
+        const auto* at = scene.transforms.find(self);
+        now.clear();
+        if (at && half_of(self, half))
+            for (std::size_t k = 0; k < owners.size(); ++k) {
+                Vec2 other{};
+                if (owners[k] == self || !nearby(values[k].position.chunk, at->position.chunk, 1) ||
+                    !half_of(owners[k], other))
+                    continue;
+                const auto r = relative(values[k].position, at->position);
+                if (std::abs(r.x) < half.x + other.x && std::abs(r.y) < half.y + other.y)
+                    now.push_back(owners[k]);
+            }
+        // Calls may spawn or destroy entities, so the lists are copied before any call.
+        const auto before = instances_[i].touching;
+        instances_[i].touching = now;
+        const auto contains = [](const std::vector<Entity>& list, Entity e) {
+            return std::find(list.begin(), list.end(), e) != list.end();
+        };
+        const auto started = now;
+        for (const auto other : before)
+            if (!contains(started, other) && scene.alive(other)) {
+                for (auto& instance : instances_)
+                    if (instance.entity == self && !instance.failed) {
+                        ScriptApi::push_entity(lua_, other);
+                        call(instance, "on_leave", 1);
+                        break;
+                    }
+            }
+        for (const auto other : started)
+            if (!contains(before, other) && scene.alive(other) && scene.alive(self)) {
+                for (auto& instance : instances_)
+                    if (instance.entity == self && !instance.failed) {
+                        ScriptApi::push_entity(lua_, other);
+                        call(instance, "on_touch", 1);
+                        break;
+                    }
+            }
+    }
+}
+
 void ScriptHost::update(float dt) {
     time_ += dt;
+    ui_.clear(); // Each step draws its ui afresh.
     auto& scene = engine_.scene;
     // Scripted entities start each step where they are, so their moves interpolate smoothly.
     for (const auto& instance : instances_)

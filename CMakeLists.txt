@@ -195,7 +195,8 @@ if(BUILD_TESTING)
     # Gameplay scripts: an API walkthrough that must pass, and broken scripts that must be caught
     # (a syntax error and an endless loop) without hanging the game.
     add_test(NAME scripts_fresh_save COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/script-project-save"
-        "${CMAKE_CURRENT_BINARY_DIR}/surfaces-save" "${CMAKE_CURRENT_BINARY_DIR}/atmosphere-save")
+        "${CMAKE_CURRENT_BINARY_DIR}/surfaces-save" "${CMAKE_CURRENT_BINARY_DIR}/atmosphere-save"
+        "${CMAKE_CURRENT_BINARY_DIR}/gameplay-save")
     add_test(NAME scripts COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_project" --smoke
         --save "${CMAKE_CURRENT_BINARY_DIR}/script-project-save")
     set_tests_properties(scripts PROPERTIES PASS_REGULAR_EXPRESSION "Script checks passed.*Character checks passed|Character checks passed.*Script checks passed"
@@ -206,6 +207,12 @@ if(BUILD_TESTING)
     set_tests_properties(surfaces PROPERTIES PASS_REGULAR_EXPRESSION "Surface checks passed"
         FAIL_REGULAR_EXPRESSION "Script error|Engine error" DEPENDS scripts_fresh_save)
     set_tests_properties(scripts PROPERTIES DEPENDS scripts_fresh_save)
+    # Touch events, nearby queries, ui, the pointer and pausing, in a project of their own because
+    # pausing holds every other script's world still.
+    add_test(NAME gameplay COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/gameplay_project" --smoke
+        --save "${CMAKE_CURRENT_BINARY_DIR}/gameplay-save")
+    set_tests_properties(gameplay PROPERTIES PASS_REGULAR_EXPRESSION "Gameplay checks passed"
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error" DEPENDS scripts_fresh_save)
     add_test(NAME atmosphere COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_project" --smoke
         --save "${CMAKE_CURRENT_BINARY_DIR}/atmosphere-save")
     set_tests_properties(atmosphere PROPERTIES PASS_REGULAR_EXPRESSION "Atmosphere checks passed"

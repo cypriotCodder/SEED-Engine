@@ -1,0 +1,127 @@
+{
+  "format": 1,
+  "terrain": "main",
+  "entities": [
+    {
+      "name": "Player",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        0.5,
+        0.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "sand",
+        "size": [
+          0.6,
+          0.6
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false,
+        "player": {
+          "actions": {
+            "up": "move_up",
+            "down": "move_down",
+            "left": "move_left",
+            "right": "move_right",
+            "run": "run"
+          },
+          "input": true,
+          "zoom": 30,
+          "smoothing": 0,
+          "dead_zone": 0,
+          "resume": true
+        }
+      }
+    },
+    {
+      "name": "Collector",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        30.5,
+        12.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "stone",
+        "size": [
+          0.5,
+          0.5
+        ]
+      },
+      "character": {
+        "speed": 8,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.5,
+          0.5
+        ],
+        "blocked_by": {
+          "water": false,
+          "solid": false,
+          "buildings": false
+        },
+        "face_movement": false
+      },
+      "script": "gameplay.lua"
+    },
+    {
+      "name": "Coin",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        31.5,
+        12.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "sand",
+        "size": [
+          0.5,
+          0.5
+        ]
+      }
+    },
+    {
+      "name": "Post",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        32.5,
+        12.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "stone",
+        "size": [
+          0.5,
+          0.5
+        ]
+      }
+    }
+  ]
+}

@@ -130,11 +130,15 @@ void step(void* context, Engine& engine, float dt) {
             motion->running = a.held(runner.moves[4]);
             if (motion->walk.x != 0 || motion->walk.y != 0) motion->has_target = false; // Keys take over.
         }
-    move_characters(engine, dt);
-    runner.scripts->surfaces();
-    // The day moves on; the frame drawn next uses its light.
-    runner.time += dt;
-    runner.clock.advance(dt);
+    // A paused game (a title or pause screen) keeps running its scripts, but nothing else moves.
+    if (!runner.scripts->paused()) {
+        move_characters(engine, dt);
+        runner.scripts->surfaces();
+        runner.scripts->touches();
+        // The day moves on; the frame drawn next uses its light.
+        runner.time += dt;
+        runner.clock.advance(dt);
+    }
     engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
 }
 
@@ -179,6 +183,15 @@ void render(void* context, Engine& engine, const View& view) {
         engine.renderer.light(p.x, p.y, l.radius, l.color[0], l.color[1], l.color[2], intensity, l.height);
         ++drawn;
     }
+    runner.scripts->draw_ui(engine.renderer);
+}
+
+// Once a frame, before rendering: where the mouse is, for scripts' next step.
+void act(void* context, Engine& engine, const View& view) {
+    auto& runner = *static_cast<Runner*>(context);
+    runner.scripts->set_pointer(view.pointer, static_cast<float>(engine.input.mouse_x),
+                                static_cast<float>(engine.input.mouse_y), view.logical_width,
+                                view.logical_height);
 }
 
 // Reads a project through `files`. `save` is where its games are saved unless --save says otherwise.
@@ -267,6 +280,7 @@ int play(Runner& runner, int argc, char** argv) {
     game.setup = setup;
     game.step = step;
     game.render = render;
+    game.act = act;
     // Automated runs (tests, the editor's checks) fail on any script error; players just see it
     // reported and the game carries on.
     game.shutdown = [](void* context, Engine& engine) {

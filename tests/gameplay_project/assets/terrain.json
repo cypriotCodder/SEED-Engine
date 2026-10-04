@@ -1,0 +1,227 @@
+{
+  "format": 1,
+  "terrain": {
+    "island": true,
+    "radius": 64,
+    "coast": 0.12,
+    "warp": 24,
+    "warp_wavelength": 256,
+    "default_seed": 1,
+    "fields": [
+      {
+        "name": "elevation",
+        "base": 0.34,
+        "terms": [
+          {
+            "type": "spot",
+            "wavelength": 40,
+            "amplitude": 0.7,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 512,
+            "amplitude": 0.75,
+            "warped": true
+          },
+          {
+            "type": "fractal",
+            "wavelength": 128,
+            "amplitude": 0.6,
+            "warped": true
+          },
+          {
+            "type": "ridged",
+            "wavelength": 512,
+            "amplitude": 0.25,
+            "warped": true
+          }
+        ]
+      },
+      {
+        "name": "moisture",
+        "base": 0,
+        "terms": [
+          {
+            "type": "fractal",
+            "wavelength": 128,
+            "amplitude": 1,
+            "warped": true
+          },
+          {
+            "type": "perlin",
+            "wavelength": 512,
+            "amplitude": 0.5,
+            "warped": false
+          }
+        ]
+      },
+      {
+        "name": "temperature",
+        "base": 1,
+        "terms": [
+          {
+            "type": "distance",
+            "wavelength": 1,
+            "amplitude": -1.4,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 512,
+            "amplitude": 0.15,
+            "warped": false
+          }
+        ]
+      },
+      {
+        "name": "ring",
+        "base": 0,
+        "terms": [
+          {
+            "type": "distance",
+            "wavelength": 1,
+            "amplitude": 1,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 1024,
+            "amplitude": 0.12,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 256,
+            "amplitude": 0.04,
+            "warped": false
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "name": "Deep sea",
+        "material": "deep_water",
+        "when": [
+          {
+            "field": "elevation",
+            "max": -0.25
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Sea",
+        "material": "water",
+        "when": [
+          {
+            "field": "elevation",
+            "max": 0
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Beach",
+        "material": "sand",
+        "when": [
+          {
+            "field": "elevation",
+            "max": 0.06
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Snow",
+        "material": "snow",
+        "when": [
+          {
+            "field": "temperature",
+            "max": -0.15
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Meadow",
+        "material": "grass",
+        "when": [
+          {
+            "field": "ring",
+            "max": 0.28
+          }
+        ],
+        "solid": false,
+        "scatter": {
+          "material": "tree",
+          "one_in": 19,
+          "solid": true
+        }
+      },
+      {
+        "name": "Swamp",
+        "material": "mud",
+        "when": [
+          {
+            "field": "ring",
+            "max": 0.55
+          },
+          {
+            "field": "moisture",
+            "min": 0.3
+          },
+          {
+            "field": "elevation",
+            "max": 0.45
+          }
+        ],
+        "solid": false,
+        "scatter": {
+          "material": "tree",
+          "one_in": 12,
+          "solid": true
+        }
+      },
+      {
+        "name": "Forest",
+        "material": "forest_floor",
+        "when": [
+          {
+            "field": "ring",
+            "max": 0.55
+          }
+        ],
+        "solid": false,
+        "scatter": {
+          "material": "tree",
+          "one_in": 5,
+          "solid": true
+        }
+      },
+      {
+        "name": "Mountain",
+        "material": "stone",
+        "when": [
+          {
+            "field": "elevation",
+            "min": 0.55
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Plains",
+        "material": "dry_grass",
+        "when": [],
+        "solid": false,
+        "scatter": {
+          "material": "tree",
+          "one_in": 60,
+          "solid": true
+        }
+      }
+    ]
+  }
+}

@@ -20,7 +20,7 @@ end
 
 ## How scripts run
 
-Each attached script runs in its own environment: its globals and `local`s belong to that entity alone, and `self` is the entity. The file's top level runs when the game starts, after every scene entity exists. `start()`, if defined, runs once before the first update; `update(dt)`, if defined, runs every fixed step (60 per second; `dt` is in seconds). On a character, `on_surface(material)`, if defined, runs when it steps onto a different ground material, and once when it first stands on loaded ground.
+Each attached script runs in its own environment: its globals and `local`s belong to that entity alone, and `self` is the entity. The file's top level runs when the game starts, after every scene entity exists. `start()`, if defined, runs once before the first update; `update(dt)`, if defined, runs every fixed step (60 per second; `dt` is in seconds). `on_touch(other)` and `on_leave(other)`, if defined, run when the entity's box starts or stops overlapping another entity's: a character's box is its collision box, anything else's is its visual's size (unrotated); entities with neither have no box. On a character, `on_surface(material)`, if defined, runs when it steps onto a different ground material, and once when it first stands on loaded ground.
 
 The player moves with the keys unless its Character's "Moves with the keys" is off; its script can add to that, or take over with `walk` and `walk_to`. NPCs move only through their scripts.
 
@@ -59,7 +59,10 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | Function | |
 | --- | --- |
 | `input.held(action)`, `input.pressed(action)`, `input.released(action)` | Actions from the Input panel; `pressed` and `released` are true for one frame. |
+| `input.pointer()` | The mouse's position in the world: `x, y`. |
+| `input.screen_pointer()` | The mouse's position on screen in logical pixels from the top-left: `x, y`. |
 | `input.axis(negative, positive)` | -1, 0 or 1 from two actions. |
+| `world.near(x, y, radius [, name])` | The entities within `radius` tiles (at most 256), nearest first, optionally only those with that name. |
 | `world.find(name)` | The first entity with that name, or `nil`. |
 | `world.spawn{x=, y=, name=, material=, size=, angle=, script=}` | A new entity; `material` gives it a visual, `size` is a number or `{w, h}`, `script` attaches a script. |
 | `world.spawn{prefab=, x=, y=, name=, angle=}` | A copy of a prefab, with its look, light and script. |
@@ -74,9 +77,15 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `camera.follow(entity)` | The camera, and world streaming, follow this entity. |
 | `camera.zoom()`, `camera.set_zoom(pixels_per_tile)` | The camera's zoom, from 2 to 512. |
 | `game.player()` | The player entity. |
+| `game.set_paused(on)`, `game.paused()` | A paused game keeps running scripts (for title, pause and game-over screens) while characters, touches, surfaces and the time of day stand still. |
+| `ui.rect(x, y, w, h [, {r,g,b,a}])` | A filled rectangle over the game, in logical pixels from the top-left; colours 0 to 1. |
+| `ui.text(x, y, text [, scale [, {r,g,b,a}]])` | Text in the built-in pixel font, 6 x 8 pixels per character at scale 1 (default 2, up to 16). |
+| `ui.text_width(text [, scale])`, `ui.size()` | The width text will take; the screen's width and height. |
 | `game.time()` | Seconds of game time since the game started. |
 
 Lua's `string`, `table`, `math` and `utf8` libraries and `print` are available; `print` output appears in the editor's Console during Play.
+
+What a step draws with `ui` stays on screen until the next step, which starts from nothing; draw the whole interface in every `update`. At most 4,096 items per step.
 
 ## Limits and errors
 

@@ -13,6 +13,7 @@ struct lua_State;
 
 namespace seed {
 class Engine;
+class Renderer;
 struct DayClock;
 struct Tile;
 
@@ -23,7 +24,7 @@ bool blocks_walking(void*, const Tile* tile);
 // Runs a project's Lua gameplay scripts. Each attached script gets its own environment, so its
 // globals belong to that entity alone; `self` in it is the entity. A script may define start(),
 // called once before its first update, and update(dt), called every fixed step. Scripts see the
-// engine through a small API (input, world, sound, particles, camera, game, atmosphere; see
+// engine through a small API (input, world, ui, sound, particles, camera, game, atmosphere; see
 // docs/scripting.md) and nothing else: no files, OS or modules. A failing script is reported and
 // switched off; the game carries on.
 class ScriptHost final {
@@ -54,6 +55,17 @@ public:
     // Calls on_surface(material) on each scripted character that stepped onto a different ground
     // material in the last move_characters (or first stood on one). Call right after it.
     void surfaces();
+    // Calls on_touch(other) and on_leave(other) on scripted entities whose box (a character's
+    // collision box, else its visual's size, unrotated) starts or stops overlapping another
+    // entity's. Call after everything has moved in a step.
+    void touches();
+    // Where the mouse is, for input.pointer(): in the world, and in logical pixels on a screen of
+    // `width` x `height`. Call once a frame.
+    void set_pointer(WorldPosition world, float x, float y, int width, int height);
+    // Draws what scripts asked the ui module for in the last step, over everything else.
+    void draw_ui(Renderer& renderer) const;
+    // Whether a script paused the game (game.set_paused): scripts still update, the world waits.
+    bool paused() const { return paused_; }
     unsigned errors() const { return errors_; }
 
 private:
@@ -62,6 +74,12 @@ private:
         int environment; // Registry reference to the script's own global table.
         std::string file;
         bool started{}, failed{};
+        std::vector<Entity> touching; // What its box overlapped after the last step.
+    };
+    struct UiCommand {
+        float x, y, width, height, scale;
+        float color[4];
+        std::string text; // Empty for a rectangle.
     };
     friend struct ScriptApi;
     // Calls `function` from an instance's environment, if the script defines it.
@@ -74,6 +92,11 @@ private:
     PrefabSpawner spawn_prefab_;
     Entity player_{};
     DayClock* clock_{};
+    std::vector<UiCommand> ui_;
+    WorldPosition pointer_{};
+    float pointer_x_{}, pointer_y_{};
+    int screen_width_{1280}, screen_height_{720};
+    bool paused_{};
     lua_State* lua_{};
     std::size_t memory_{};
     std::vector<Instance> instances_;
