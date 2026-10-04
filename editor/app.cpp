@@ -102,7 +102,8 @@ App::App(Options options)
     }
     set_window_icon(window_.handle());
     // Automated runs skip the launch screen, so their screenshots and timing are the editor's own.
-    if ((!options_.smoke && !options_.ui_test) || options_.splash) splash_ = std::make_unique<Splash>();
+    if ((!options_.smoke && !options_.ui_test) || options_.splash)
+        splash_ = std::make_unique<Splash>(window_.handle());
     // A key or click recording an input binding is not also delivered to ImGui.
     window_.observe(this, [](void* self, const SDL_Event& event) {
         auto& app = *static_cast<App*>(self);
@@ -460,7 +461,8 @@ int App::run() {
         ++frames_;
         if (options_.smoke && frames_ == 60 && !options_.screenshot.empty()) screenshot(options_.screenshot);
         // A smoke run with --play lasts until the game it started has finished.
-        if (options_.smoke && frames_ >= 60 && !play_.running() && (!ui_test_ || ui_test_->finished()))
+        if (options_.smoke && frames_ >= 60 && !play_.running() && (!ui_test_ || ui_test_->finished()) &&
+            !splash_)
             quit_ = true;
         if (options_.smoke && play_.running()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         window_.present();
@@ -494,7 +496,14 @@ void App::frame() {
     }
     if (splash_) {
         splash_->draw(project_ ? "Opening " + project_->name : "Starting");
-        if (!splash_->active()) splash_.reset();
+        if (!splash_->active()) {
+            splash_.reset();
+            int w{}, h{};
+            SDL_GetWindowSize(window_.handle(), &w, &h);
+            if (options_.smoke)
+                log(Level::info, "Launch screen done; the window is " + std::to_string(w) + " x " +
+                                     std::to_string(h) + ".");
+        }
     }
 }
 

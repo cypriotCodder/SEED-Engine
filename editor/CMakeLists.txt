@@ -67,6 +67,7 @@ if(BUILD_TESTING)
     add_test(NAME editor_smoke_clean COMMAND ${CMAKE_COMMAND} -E rm -rf "${seed_editor_smoke}")
     # The launch screen: decoded from the embedded artwork and drawn over the hub.
     add_test(NAME editor_splash COMMAND seed_editor --smoke --splash --preferences "${seed_editor_smoke}/splash-preferences")
+    set_tests_properties(editor_splash PROPERTIES PASS_REGULAR_EXPRESSION "Launch screen done; the window is 1280 x 720")
     add_test(NAME editor_smoke_create COMMAND seed_editor --smoke --preferences "${seed_editor_smoke}/preferences"
         --create "${seed_editor_smoke}" "Smoke Test")
     add_test(NAME editor_smoke_open COMMAND seed_editor --smoke --preferences "${seed_editor_smoke}/preferences"
