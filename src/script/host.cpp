@@ -5,6 +5,7 @@
 #include "project/characters.hpp"
 #include "project/scene_file.hpp"
 #include "render/renderer.hpp"
+#include "script/saved_data.hpp"
 // Lua is compiled as C++ (see CMakeLists.txt), so its errors are C++ exceptions and unwind engine
 // code correctly. Its headers are therefore included without extern "C".
 #include "lauxlib.h"
@@ -433,6 +434,15 @@ struct ScriptApi {
         lua_pushstring(lua, host(lua).scene_.c_str());
         return 1;
     }
+    static int saved_scene(lua_State* lua) {
+        const auto& name = host(lua).saved_scene_;
+        if (name.empty())
+            lua_pushnil(lua);
+        else
+            lua_pushstring(lua, name.c_str());
+        return 1;
+    }
+
     static int set_paused(lua_State* lua) {
         host(lua).paused_ = lua_toboolean(lua, 1);
         return 0;
@@ -464,7 +474,7 @@ struct ScriptApi {
         return 1;
     }
 
-    // atmosphere: the scene's time of day.
+    // atmosphere: the game's time of day, and how light the scene playing is.
     static DayClock& clock(lua_State* lua) {
         auto* c = host(lua).clock_;
         if (!c) luaL_error(lua, "this game has no time of day");
@@ -481,7 +491,7 @@ struct ScriptApi {
         return 0;
     }
     static int light_of_day(lua_State* lua) {
-        lua_pushnumber(lua, daylight(static_cast<float>(clock(lua).hour)));
+        lua_pushnumber(lua, daylight(static_cast<float>(clock(lua).shown())));
         return 1;
     }
 
@@ -728,6 +738,7 @@ struct ScriptApi {
                                         {"paused", guarded<paused>},
                                         {"load_scene", guarded<load_scene>},
                                         {"scene", guarded<scene>},
+                                        {"saved_scene", guarded<saved_scene>},
                                         {nullptr, nullptr}};
         module(lua, "input", input);
         module(lua, "world", world);
@@ -898,6 +909,24 @@ void ScriptHost::surfaces() {
         lua_pushstring(lua_, engine_.materials[static_cast<MaterialId>(motion->surface)].name);
         call(instances_[i], "on_surface", 1);
     }
+}
+
+std::vector<std::uint8_t> ScriptHost::save_data() {
+    std::string skipped;
+    call_start_ = std::chrono::steady_clock::now();
+    auto bytes = save_lua_data(lua_, skipped);
+    // Reported each time the game saves, until the script stops storing them.
+    for (std::size_t start = 0; start < skipped.size();) {
+        const auto end = skipped.find('\n', start);
+        report(skipped.substr(start, end - start) + ", which cannot be saved; the save leaves it out");
+        start = end + 1;
+    }
+    return bytes;
+}
+
+void ScriptHost::load_data(std::span<const std::uint8_t> bytes) {
+    call_start_ = std::chrono::steady_clock::now();
+    load_lua_data(lua_, bytes);
 }
 
 void ScriptHost::report(const std::string& message) {

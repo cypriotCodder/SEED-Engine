@@ -1,0 +1,71 @@
+{
+  "format": 1,
+  "terrain": "main",
+  "entities": [
+    {
+      "name": "Player",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        0.5,
+        0.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "sand",
+        "size": [
+          0.6,
+          0.6
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": false,
+          "solid": false,
+          "buildings": false
+        },
+        "face_movement": false,
+        "player": {
+          "actions": {
+            "up": "move_up",
+            "down": "move_down",
+            "left": "move_left",
+            "right": "move_right",
+            "run": "run"
+          },
+          "input": true,
+          "zoom": 30,
+          "smoothing": 0,
+          "dead_zone": 0,
+          "resume": true
+        }
+      }
+    },
+    {
+      "name": "Keeper",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        2.5,
+        0.5
+      ],
+      "angle": 0,
+      "script": "main.lua"
+    }
+  ],
+  "atmosphere": {
+    "hour": 8,
+    "day_length": 60
+  }
+}

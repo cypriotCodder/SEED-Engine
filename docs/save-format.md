@@ -30,6 +30,12 @@ Legacy migration is disabled by user decision. Terrain-only chunk version 1, sta
 
 `player.delta` contains u32 magic `0x52594c50`, u32 version 1, u32 generator version, u64 seed, two i64 chunk coordinates, and two f32 local offsets. A player still at the initial origin needs no file. The seed is the world's own: each scene's terrain has its default seed, and the start scene the seed the game started with.
 
+## Game state
+
+`game.state` holds a game's own state beyond its worlds, and belongs to no scene, so it has no prefix. Only games that give `Game::save_state` and `Game::load_state` write it: it is rewritten whenever the worlds are saved (checkpoints, scene changes) and read once at startup, before `setup`. The engine's header is u32 magic `0x54415453` ("STAT") and u32 version 1; the game's payload follows, at most 4 MiB, and the game must read all of it. A save with `game.state` refuses to load in a game without `load_state`.
+
+Project games write payload version 1: u32 version 1, u8 length and the name of the scene playing (letters, digits, `_` and `-`, at most 64), f64 hour (0 to below 24), f32 day length (0 before the game has reached a scene with a day, else 10 to 86,400), then `game.data`. Each value of `game.data` is a u8 tag and its bytes: false (1), true (2), i64 integer (3), f64 number (4), string (5: u32 length and bytes) or table (6: u32 entry count, then each key and value). Keys are booleans, numbers other than NaN, and strings; a table's entries are sorted by their encoded key bytes, so the same data always saves the same bytes. `game.data` itself is a table, tables nest at most 32 deep, and the encoding is at most 4 MiB less 1 KiB. Unknown versions or tags, a NaN or table key, a repeated key, counts beyond the bytes, invalid hours or names, and trailing bytes are rejected with the save left unchanged. Saves from before `game.state` load with an empty `game.data`.
+
 ## Asset archive
 
 `demo.pak` contains u32 magic `0x4b504453`, u32 version 1, and u32 entry count (up to 64). Each entry contains u16 name length, name bytes, u8 format (1 = BC3), u16 width, u16 height, u32 block byte count, u32 block CRC32, and BC3 blocks. Names are unique. Dimensions are positive multiples of four, at most 4096. The whole archive also uses the shared compressed envelope.

@@ -40,11 +40,17 @@ struct LightComponent {
 // entity's index) keeps neighbouring flames from wavering in step.
 float light_intensity(const LightComponent& light, float daylight, double time, unsigned seed = 0);
 
-// The game clock: the hour, moving on by the atmosphere's day length.
+// The game's one clock. Until the game reaches a scene with a day, each scene starts at its own
+// hour and the clock stands still. From the first scene with a day, the clock runs at the day
+// length of the latest such scene, in every scene: a scene without a day keeps showing its own
+// hour, and the day has moved on when the player comes out.
 struct DayClock {
-    SceneAtmosphere atmosphere;
-    double hour{12};
+    SceneAtmosphere atmosphere; // The scene playing.
+    double hour{12};            // The game's hour, 0 to 24.
+    float day_length{};         // Real seconds per day; 0 until the game reaches a scene with a day.
+    void enter(const SceneAtmosphere& scene); // On starting or changing scene.
     void advance(double seconds);
     void set_hour(double value);
+    double shown() const; // The hour the scene playing is lit at.
 };
 } // namespace seed

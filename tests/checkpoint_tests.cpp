@@ -93,23 +93,25 @@ std::filesystem::path latest(const std::filesystem::path& root) {
 }
 } // namespace
 // A save can hold several worlds: a game's scenes keep their files under "<scene>." names, and a
-// save with only scene worlds commits and reopens.
+// save with only scene worlds commits and reopens. The game's own game.state has no prefix.
 void scene_files(const std::filesystem::path& root) {
     {
         seed::Checkpoint save(root);
         for (const char* name :
-             {"cave.world.seed", "cave.-3_12.chunk", "cave.player.delta", "level_2.0_0.chunk"})
+             {"cave.world.seed", "cave.-3_12.chunk", "cave.player.delta", "level_2.0_0.chunk", "game.state"})
             check(save.read_path(name).filename() == name, "Scene save names are accepted");
-        for (const char* name :
-             {"bad name.world.seed", "a.b.world.seed", ".world.seed", "cave.notes.txt", "cave."})
+        for (const char* name : {"bad name.world.seed", "a.b.world.seed", ".world.seed", "cave.notes.txt",
+                                 "cave.", "cave.game.state"})
             rejects([&] { save.read_path(name); });
         seed::write_blob(save.working_directory() / "cave.world.seed", std::vector<std::uint8_t>{1, 2});
         seed::write_blob(save.working_directory() / "cave.0_0.chunk", std::vector<std::uint8_t>{3});
+        seed::write_blob(save.working_directory() / "game.state", std::vector<std::uint8_t>{4});
         save.commit();
     }
     seed::Checkpoint reopened(root);
     check(std::filesystem::exists(reopened.read_path("cave.world.seed")) &&
-              std::filesystem::exists(reopened.read_path("cave.0_0.chunk")),
+              std::filesystem::exists(reopened.read_path("cave.0_0.chunk")) &&
+              seed::read_blob(reopened.read_path("game.state")) == std::vector<std::uint8_t>{4},
           "A save of scene worlds reopens");
 }
 

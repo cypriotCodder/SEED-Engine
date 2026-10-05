@@ -102,8 +102,15 @@ struct Game {
     // entity_payload_capacity bytes; load must read exactly what save wrote. Optional, as a pair.
     void (*save_entity)(void*, Engine&, Entity, Bytes&){};
     void (*load_entity)(void*, Engine&, Entity, Reader&){};
+    // The game's own state beyond its worlds (scores, progress, the time of day), kept in the
+    // save's game.state, which belongs to no scene. save writes it, at most game_state_capacity
+    // bytes, whenever the worlds are saved; load reads it once, before setup, only when the save
+    // has one, and must read exactly what save wrote. Optional, as a pair.
+    void (*save_state)(void*, Engine&, Bytes&){};
+    void (*load_state)(void*, Engine&, Reader&){};
     void (*shutdown)(void*, Engine&){}; // After the final checkpoint.
 };
+inline constexpr std::size_t game_state_capacity = 4 * 1024 * 1024;
 
 // The running engine. Games reach every subsystem through these members.
 class Engine final {
@@ -113,7 +120,8 @@ public:
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
-    // Writes world, building and focus deltas into the working save. Physics is joined first.
+    // Writes world, building and focus deltas, and the game's state, into the working save.
+    // Physics is joined first.
     void write_deltas(WorldPosition focus);
     // Draws every entity with a Visual near the camera, interpolated between fixed steps.
     void draw_entities(const View& view);
@@ -184,6 +192,7 @@ private:
     void* game_context_;
     void (*save_entity_)(void*, Engine&, Entity, Bytes&);
     void (*load_entity_)(void*, Engine&, Entity, Reader&);
+    void (*save_state_)(void*, Engine&, Bytes&);
     std::vector<Entity> captured_;
 };
 

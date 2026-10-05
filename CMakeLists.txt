@@ -95,7 +95,7 @@ function(seed_strict target)
     endif()
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
-    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/paint.cpp src/project/atmosphere.cpp src/assets/sound_file.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/project/game_settings.cpp src/script/host.cpp src/core/metrics.cpp
+    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/paint.cpp src/project/atmosphere.cpp src/assets/sound_file.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/project/game_settings.cpp src/script/host.cpp src/script/saved_data.cpp src/core/metrics.cpp
     src/app/app.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
@@ -187,6 +187,11 @@ if(BUILD_TESTING)
     seed_strict(seed_character_tests)
     target_link_libraries(seed_character_tests PRIVATE seed_engine)
     add_test(NAME character_movement COMMAND seed_character_tests)
+    add_executable(seed_saved_data_tests tests/saved_data_tests.cpp src/script/saved_data.cpp)
+    seed_strict(seed_saved_data_tests)
+    target_include_directories(seed_saved_data_tests PRIVATE src)
+    target_link_libraries(seed_saved_data_tests PRIVATE seed_lua)
+    add_test(NAME saved_data COMMAND seed_saved_data_tests)
     add_executable(seed_effects_tests tests/effects_tests.cpp)
     seed_strict(seed_effects_tests)
     target_link_libraries(seed_effects_tests PRIVATE seed_engine)
@@ -232,6 +237,16 @@ if(BUILD_TESTING)
         --save "${CMAKE_CURRENT_BINARY_DIR}/scenes-save")
     set_tests_properties(scenes PROPERTIES PASS_REGULAR_EXPRESSION "Scene checks passed"
         FAIL_REGULAR_EXPRESSION "Script error|Engine error" DEPENDS scripts_fresh_save)
+    # game.data, the time of day and the scene played, saved on quitting and found on the next run.
+    add_test(NAME state_fresh_save COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/state-save")
+    add_test(NAME state COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/state_project" --smoke
+        --save "${CMAKE_CURRENT_BINARY_DIR}/state-save")
+    set_tests_properties(state PROPERTIES PASS_REGULAR_EXPRESSION "State saved"
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error|State restored" DEPENDS state_fresh_save)
+    add_test(NAME state_resume COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/state_project" --smoke
+        --save "${CMAKE_CURRENT_BINARY_DIR}/state-save")
+    set_tests_properties(state_resume PROPERTIES PASS_REGULAR_EXPRESSION "State restored"
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error|State saved" DEPENDS state)
     add_test(NAME atmosphere COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/script_project" --smoke
         --save "${CMAKE_CURRENT_BINARY_DIR}/atmosphere-save")
     set_tests_properties(atmosphere PROPERTIES PASS_REGULAR_EXPRESSION "Atmosphere checks passed"

@@ -4,9 +4,11 @@
 #include "world/coordinates.hpp"
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -70,6 +72,14 @@ public:
     bool paused() const { return paused_; }
     // The scene game.scene() names; set before its scripts attach.
     void set_scene(const std::string& name) { scene_ = name; }
+    // The scene game.saved_scene() names: where the loaded save was made; empty for a new game.
+    void set_saved_scene(const std::string& name) { saved_scene_ = name; }
+    // game.data for a save: booleans, numbers, strings and tables of them. Other values (functions,
+    // entities) are left out and reported as script errors. Throws if game.data is not a table,
+    // nests deeper than 32 tables (or holds itself) or is larger than 4 MiB.
+    std::vector<std::uint8_t> save_data();
+    // Replaces game.data with what save_data wrote. Throws, changing nothing, for invalid bytes.
+    void load_data(std::span<const std::uint8_t> bytes);
     // A scene a script asked for with game.load_scene, and the spawn entity's name, once.
     std::optional<std::pair<std::string, std::string>> take_scene_request() {
         return std::exchange(scene_request_, {});
@@ -107,7 +117,7 @@ private:
     float pointer_x_{}, pointer_y_{};
     int screen_width_{1280}, screen_height_{720};
     bool paused_{};
-    std::string scene_;
+    std::string scene_, saved_scene_;
     std::optional<std::pair<std::string, std::string>> scene_request_;
     lua_State* lua_{};
     std::size_t memory_{};

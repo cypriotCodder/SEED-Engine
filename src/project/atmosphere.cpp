@@ -103,8 +103,19 @@ float light_intensity(const LightComponent& light, float day, double time, unsig
     return intensity;
 }
 
+void DayClock::enter(const SceneAtmosphere& scene) {
+    atmosphere = scene;
+    // A scene's own hour sets the clock only while no day has started.
+    if (day_length == 0) set_hour(scene.hour);
+    if (scene.day_length > 0) day_length = scene.day_length;
+}
+
 void DayClock::advance(double seconds) {
-    if (atmosphere.day_length > 0) set_hour(hour + seconds / atmosphere.day_length * 24);
+    if (day_length > 0) set_hour(hour + seconds / day_length * 24);
+}
+
+double DayClock::shown() const {
+    return atmosphere.day_length > 0 || day_length == 0 ? hour : atmosphere.hour;
 }
 
 void DayClock::set_hour(double value) {

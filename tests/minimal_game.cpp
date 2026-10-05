@@ -1,7 +1,7 @@
 // The smallest complete game, used to prove the engine is usable without the demo: it links only
 // seed_engine, reads its materials from a project assets folder made the way the editor writes it,
 // and generates, edits, streams, saves and reloads a world, including a saved entity with a game
-// component.
+// component and the game's own state.
 #include "app/app.hpp"
 #include "physics/character.hpp"
 #include <cstdio>
@@ -44,6 +44,15 @@ void load_entity(void*, seed::Engine& engine, seed::Entity entity, seed::Reader&
     engine.scene.components<Beacon>().add(entity, {in.u8()});
 }
 
+// The game's own state: how many times it has run on this save.
+std::uint32_t runs = 0;
+void save_state(void*, seed::Engine&, seed::Bytes& out) {
+    out.u32(runs);
+}
+void load_state(void*, seed::Engine&, seed::Reader& in) {
+    runs = in.u32();
+}
+
 // The single beacon in the scene, or nullptr.
 const Beacon* beacon(seed::Engine& engine, seed::WorldPosition* position = nullptr) {
     auto& beacons = engine.scene.components<Beacon>();
@@ -57,6 +66,7 @@ seed::Entity setup(void*, seed::Engine& engine, seed::WorldPosition spawn) {
     if (engine.materials.find("meadow") != meadow || engine.materials.find("pond") != pond)
         throw std::runtime_error("materials.json no longer matches the game's material IDs");
     engine.scene.add_component<Beacon>();
+    ++runs;
     return engine.scene.create({spawn, spawn, 0}, {meadow, {0.5F, 0.5F}});
 }
 
@@ -65,6 +75,7 @@ seed::Entity setup(void*, seed::Engine& engine, seed::WorldPosition spawn) {
 void loaded(void*, seed::Engine& engine) {
     const bool resumed = std::filesystem::exists(engine.checkpoint.read_path("player.delta"));
     if (resumed && !beacon(engine)) throw std::runtime_error("Saved beacon did not survive a restart");
+    if (runs != (resumed ? 2u : 1u)) throw std::runtime_error("Game state did not survive a restart");
     if (!resumed) {
         if (beacon(engine)) throw std::runtime_error("A fresh save already has a beacon");
         const auto entity = engine.create_saved({beacon_at, beacon_at, 0}, {pond, {0.4F, 0.4F}});
@@ -118,8 +129,8 @@ void shutdown(void*, seed::Engine& engine) {
     const auto moved = engine.focus_position().local.x;
     if (!chunks || moved <= 0) throw std::runtime_error("Minimal game did not stream or move");
     if (!beacon(engine)) throw std::runtime_error("Beacon was lost during play");
-    std::printf("Minimal game: %u frames, %u resident chunks, walked to x=%.2f, beacon kept.\n",
-                engine.frames, chunks, moved);
+    std::printf("Minimal game: run %u, %u frames, %u resident chunks, walked to x=%.2f, beacon kept.\n",
+                static_cast<unsigned>(runs), engine.frames, chunks, moved);
 }
 } // namespace
 
@@ -138,6 +149,8 @@ int main(int argc, char** argv) {
     game.project_assets = "minimal_game_assets";
     game.save_entity = save_entity;
     game.load_entity = load_entity;
+    game.save_state = save_state;
+    game.load_state = load_state;
     game.setup = setup;
     game.loaded = loaded;
     game.step = step;

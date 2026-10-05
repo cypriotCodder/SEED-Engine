@@ -49,6 +49,7 @@ public:
         return n;
     }
     bool done() const { return offset_ == bytes_.size(); }
+    std::size_t remaining() const { return bytes_.size() - offset_; }
     std::span<const std::uint8_t> take(std::size_t count) {
         if (count > bytes_.size() - offset_) throw std::runtime_error("Truncated binary payload");
         const auto result = bytes_.subspan(offset_, count);

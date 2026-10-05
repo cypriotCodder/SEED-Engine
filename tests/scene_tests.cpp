@@ -190,10 +190,27 @@ void atmosphere() {
     }
     check(low >= 2 * 0.4F - 1e-4F && high <= 2 && high - low > 0.5F, "Flicker wavers within its range");
     seed::DayClock clock;
-    clock.atmosphere.day_length = 240; // Ten seconds an hour.
-    clock.set_hour(23);
+    seed::SceneAtmosphere title, field, cave;
+    title.hour = 18;                         // No day: the clock stands still.
+    field.hour = 23, field.day_length = 240; // Ten seconds an hour.
+    cave.hour = 2;
+    clock.enter(title);
+    clock.advance(100);
+    check(clock.hour == 18 && clock.shown() == 18, "Before any day, a scene keeps its own hour");
+    clock.enter(field);
+    check(clock.hour == 23 && clock.day_length == 240, "The first scene with a day starts the clock");
     clock.advance(20);
     check(std::abs(clock.hour - 1) < 1e-9, "The clock wraps past midnight");
+    clock.enter(cave);
+    clock.advance(10);
+    check(std::abs(clock.hour - 2) < 1e-9 && clock.shown() == 2,
+          "The clock runs on in a scene without a day");
+    clock.set_hour(5);
+    check(clock.shown() == 2, "A scene without a day keeps its own light");
+    field.hour = 12, field.day_length = 480;
+    clock.enter(field);
+    check(clock.hour == 5 && clock.shown() == 5 && clock.day_length == 480,
+          "A later scene with a day keeps the hour and sets the pace");
 }
 
 int main(int argc, char** argv) {

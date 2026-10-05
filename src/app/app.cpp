@@ -12,6 +12,7 @@
 
 namespace seed {
 namespace {
+constexpr std::uint32_t game_state_magic = 0x54415453, game_state_version = 1; // "STAT"
 std::filesystem::path asset_path(const char* name) {
     if (std::filesystem::path(name).is_absolute()) return name;
     char* base = SDL_GetBasePath();
@@ -151,7 +152,8 @@ Engine::Engine(const Game& game, const AppOptions& opts)
       physics_hooks_(physics.hooks()),
       game_context_(game.context),
       save_entity_(game.save_entity),
-      load_entity_(game.load_entity) {
+      load_entity_(game.load_entity),
+      save_state_(game.save_state) {
     if (checkpoint.recovered()) std::puts("Recovered the previous complete checkpoint.");
     add_engine_actions(actions);
     project_assets_.register_actions(actions);
@@ -243,6 +245,14 @@ void Engine::write_deltas(WorldPosition focus_at) {
     save_player(checkpoint.working_directory(), world.seed(), world.generator().version, focus_at,
                 std::filesystem::exists(checkpoint.read_path(world.prefix() + "player.delta")),
                 world.prefix());
+    if (!save_state_) return;
+    Bytes state;
+    state.u32(game_state_magic);
+    state.u32(game_state_version);
+    save_state_(game_context_, *this, state);
+    if (state.data.size() - 8 > game_state_capacity)
+        throw std::length_error("The game's state is larger than 4 MiB");
+    write_blob(checkpoint.working_directory() / "game.state", state.data);
 }
 
 void Engine::play_music(const std::string& name, bool loop) {
@@ -478,11 +488,25 @@ int run(const Game& game, int argc, char** argv) {
             throw std::invalid_argument("A game needs an id, a name, a default save and setup()");
         if (!game.save_entity != !game.load_entity)
             throw std::invalid_argument("save_entity() and load_entity() must be given together");
+        if (!game.save_state != !game.load_state)
+            throw std::invalid_argument("save_state() and load_state() must be given together");
         const auto options = parse(game, argc, argv);
         Engine engine(game, options);
         const auto& prefix = engine.world.prefix();
         const auto spawn = load_player(engine.checkpoint.read_path(prefix + "player.delta").parent_path(),
                                        engine.world.seed(), engine.world.generator().version, prefix);
+        // The game's own state comes back before setup, so setup can already use it.
+        if (const auto path = engine.checkpoint.read_path("game.state"); std::filesystem::exists(path)) {
+            if (!game.load_state)
+                throw std::runtime_error("The save holds game state this game does not read");
+            const auto bytes = read_blob(path);
+            Reader in(bytes);
+            if (in.u32() != game_state_magic) throw std::runtime_error("game.state is not game state");
+            if (in.u32() != game_state_version) throw std::runtime_error("Unsupported game.state version");
+            if (in.remaining() > game_state_capacity) throw std::runtime_error("game.state is too large");
+            game.load_state(game.context, engine, in);
+            if (!in.done()) throw std::runtime_error("The game did not read all of game.state");
+        }
         engine.focus = game.setup(game.context, engine, spawn);
         if (!engine.scene.transforms.find(engine.focus))
             throw std::logic_error("setup() must return an entity with a Transform");

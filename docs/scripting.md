@@ -70,8 +70,8 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `world.spawn{x=, y=, name=, material=, size=, angle=, script=}` | A new entity; `material` gives it a visual, `size` is a number or `{w, h}`, `script` attaches a script. |
 | `world.spawn{prefab=, x=, y=, name=, angle=}` | A copy of a prefab, with its look, light and script. |
 | `world.tile(x, y)` | `{material=, object=, solid=, elevation=}` for a loaded tile (`object` is `nil` when nothing stands there), or `nil` far from the camera. Water has elevation below 0. |
-| `atmosphere.hour()` / `atmosphere.set_hour(h)` | The scene's time of day, 0 to 24; it moves on by the atmosphere's day length. |
-| `atmosphere.daylight()` | How bright the day is now: 1 from 09:00 to 15:00, 0 from 21:00 to 03:00. |
+| `atmosphere.hour()` / `atmosphere.set_hour(h)` | The game's time of day, 0 to 24. One clock serves the whole game and is saved with it: it starts at the hour of the first scene with a day and runs at the day length of the latest one, in every scene. Before any scene with a day, each scene starts at its own hour. |
+| `atmosphere.daylight()` | How bright the scene is now: 1 from 09:00 to 15:00, 0 from 21:00 to 03:00. A scene without a day keeps its own hour's light while the game's clock runs on. |
 | `e:light()` | `{color={r,g,b}, radius=, intensity=, height=, flicker=, night_only=}`, or `nil` without a light. |
 | `e:set_light{...}` | Changes the fields given (same names and limits as the Light component); an entity without a light gets one. |
 | `world.surface(x, y)` | `{material=, speed=, tags={...}}`: the ground material at a loaded tile, how fast characters walk on it (a multiple of their own speed, applied by the engine) and its tags from the Materials panel, or `nil` far from the camera. |
@@ -85,7 +85,8 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `game.player()` | The player entity. |
 | `game.load_scene(name [, spawn])` | Goes to another scene once this step is over: this scene's world is saved and its entities and scripts end; the other scene's world, entities and scripts take their place. The player appears at the entity named `spawn` there, else where it last left that scene (if its Character resumes), else at its scene position. |
 | `game.scene()` | The name of the scene that is playing. |
-| `game.data` | A table every script shares that lasts across scene changes, for things such as score or inventory. It is not saved yet. |
+| `game.data` | A table every script shares that lasts across scene changes and is saved with the game, for things such as score, inventory or which coins are taken. Booleans, numbers, strings and tables of them are saved; anything else (functions, entities) is left out of the save and reported as a script error. At most 32 tables deep and 4 MiB; a table holding itself cannot be saved. Loaded before any script runs. |
+| `game.saved_scene()` | The scene the loaded save was made in, or nil for a new game. A loaded game always starts in the start scene; going on to the saved scene (`game.load_scene(game.saved_scene())`), showing a title screen first or anything else is the game's choice. |
 | `game.set_paused(on)`, `game.paused()` | A paused game keeps running scripts (for title, pause and game-over screens) while characters, touches, surfaces and the time of day stand still. |
 | `ui.rect(x, y, w, h [, {r,g,b,a}])` | A filled rectangle over the game, in logical pixels from the top-left; colours 0 to 1. |
 | `ui.text(x, y, text [, scale [, {r,g,b,a}]])` | Text in the built-in pixel font, 6 x 8 pixels per character at scale 1 (default 2, up to 16). |
@@ -100,4 +101,4 @@ What a step draws with `ui` stays on screen until the next step, which starts fr
 
 Scripts cannot read or write files, reach the OS, load modules or load code at run time. A call that runs longer than 0.25 s (usually an endless loop) is stopped, and all scripts together may use 64 MiB. A script that fails, whether with a syntax error, a runtime error or a stopped call, is reported with its file, line and a stack trace, then switched off while the rest of the game carries on. In automated runs (`--smoke`) any script error fails the run.
 
-Entities created by scripts, and changes scripts make, are not saved; saves keep the player's position, terrain edits and buildings.
+Saves keep `game.data`, the time of day, the scene playing, the player's position in each scene, terrain edits and buildings. Entities created by scripts, other changes scripts make to entities, and scripts' own variables are not saved: a scene starts from its scene file each time, so record what should last (a coin taken, a door opened) in `game.data` and apply it in the entity's `start()`, for example `if game.data.taken[self:name()] then self:destroy() end`.

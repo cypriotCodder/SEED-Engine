@@ -37,7 +37,7 @@ bool base_delta_name(std::string_view name) {
 // A save may hold several worlds (a game's scenes), each file name starting with "<scene>.", the
 // scene named with letters, digits, '_' and '-'.
 bool delta_name(const std::string& name) {
-    if (base_delta_name(name)) return true;
+    if (base_delta_name(name) || name == "game.state") return true; // game.state: see Game::save_state.
     const auto dot = name.find('.');
     if (dot == 0 || dot == std::string::npos || dot > 64) return false;
     const std::string_view prefix(name.data(), dot);

@@ -6,11 +6,15 @@
 #include "project/game_settings.hpp"
 #include "project/scene_file.hpp"
 #include "script/host.hpp"
+#include "script/saved_data.hpp"
 #include "world/player_save.hpp"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <optional>
+#include <utility>
 
 namespace seed {
 namespace {
@@ -38,8 +42,12 @@ struct Runner {
     std::unique_ptr<ScriptHost> scripts;
     Entity player{};
     std::string scene_name, prefix; // The scene playing, and its save files' prefix.
-    DayClock clock;                 // The scene's time of day.
+    DayClock clock;                 // The game's time of day.
     double time{};                  // Seconds of play, for flickering lights.
+    // From the save's game.state: the scene it was made in, and game.data until scripts exist.
+    std::string saved_scene;
+    std::optional<std::vector<std::uint8_t>> saved_data;
+    std::vector<std::uint8_t> last_data; // game.data as last saved, kept if it cannot save again.
 };
 
 void read_scene(Runner& runner, const std::string& name, bool start);
@@ -94,7 +102,7 @@ void spawn_scene(Runner& runner, Engine& engine, WorldPosition spawn, bool place
     engine.camera_dead_zone = runner.player_settings.dead_zone;
     engine.camera_zoom = runner.player_settings.zoom;
     runner.scripts->set_player(runner.player);
-    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
+    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.shown()));
     runner.scripts->set_scene(runner.scene_name);
     // Scripts load once every entity exists, so their top-level code can already find the others.
     for (const auto& [e, source] : scripted)
@@ -142,6 +150,43 @@ void change_scene(Runner& runner, Engine& engine, const std::string& name, const
     engine.world.settle(engine.scene.transforms.find(runner.player)->position.chunk);
 }
 
+// game.state, version 1: the scene playing, the clock, and game.data (see ScriptHost::save_data).
+constexpr std::uint32_t state_version = 1;
+static_assert(saved_data_capacity + 1024 <= game_state_capacity, "game.state has room for the rest");
+
+void save_state(void* context, Engine&, Bytes& out) {
+    auto& runner = *static_cast<Runner*>(context);
+    out.u32(state_version);
+    out.u8(static_cast<std::uint8_t>(runner.scene_name.size()));
+    out.data.insert(out.data.end(), runner.scene_name.begin(), runner.scene_name.end());
+    out.u64(std::bit_cast<std::uint64_t>(runner.clock.hour));
+    out.u32(std::bit_cast<std::uint32_t>(runner.clock.day_length));
+    try {
+        runner.last_data = runner.scripts->save_data();
+    } catch (const std::exception& error) {
+        runner.scripts->report(std::string(error.what()) + "; the save keeps game.data as it was last saved");
+    }
+    out.data.insert(out.data.end(), runner.last_data.begin(), runner.last_data.end());
+}
+
+// Everything is checked before any of it is used; game.data itself is checked as setup loads it.
+void load_state(void* context, Engine&, Reader& in) {
+    auto& runner = *static_cast<Runner*>(context);
+    if (in.u32() != state_version) throw std::runtime_error("game.state is from a newer Seed");
+    const auto name = in.take(in.u8());
+    std::string scene(name.begin(), name.end());
+    if (!valid_prefab_name(scene)) throw std::runtime_error("game.state names an invalid scene");
+    const auto hour = std::bit_cast<double>(in.u64());
+    const auto day_length = std::bit_cast<float>(in.u32());
+    if (!(hour >= 0 && hour < 24) || !(day_length == 0 || (day_length >= 10 && day_length <= 86400)))
+        throw std::runtime_error("game.state has an invalid time of day");
+    const auto data = in.take(in.remaining());
+    runner.saved_scene = std::move(scene);
+    runner.clock.hour = hour;
+    runner.clock.day_length = day_length;
+    runner.saved_data.emplace(data.begin(), data.end());
+}
+
 Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
     engine.scene.add_component<LightComponent>();
@@ -161,6 +206,11 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
             return entity;
         });
     runner.scripts->set_clock(&runner.clock);
+    // A saved game brings back game.data before any script runs; where to go on from there is
+    // the game's choice (game.saved_scene()).
+    if (runner.saved_data) runner.scripts->load_data(*std::exchange(runner.saved_data, {}));
+    runner.scripts->set_saved_scene(runner.saved_scene);
+    runner.last_data = runner.scripts->save_data();
     // A saved game can put the player back where it was instead of at its scene position.
     const bool resumed = std::filesystem::exists(engine.checkpoint.read_path(runner.prefix + "player.delta"));
     spawn_scene(runner, engine, spawn, resumed);
@@ -195,7 +245,7 @@ void step(void* context, Engine& engine, float dt) {
     // A scene change asked for in this step happens once the step is over.
     if (auto request = runner.scripts->take_scene_request())
         change_scene(runner, engine, request->first, request->second);
-    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.hour));
+    engine.renderer.lighting = lighting_at(runner.clock.atmosphere, static_cast<float>(runner.clock.shown()));
 }
 
 void render(void* context, Engine& engine, const View& view) {
@@ -224,7 +274,7 @@ void render(void* context, Engine& engine, const View& view) {
     engine.draw_entities(view);
     engine.particles.draw(engine.renderer, view.camera);
     // Lights near the view, up to the renderer's 32; lights that are out (a lamp by day) are skipped.
-    const float day = daylight(static_cast<float>(runner.clock.hour));
+    const float day = daylight(static_cast<float>(runner.clock.shown()));
     auto& lights = engine.scene.components<LightComponent>();
     const auto owners = lights.owners();
     const auto values = lights.values();
@@ -304,8 +354,7 @@ void read_scene(Runner& runner, const std::string& name, bool start) {
     runner.data.paint = std::move(data.paint);
     runner.scene_name = name;
     runner.prefix = name + ".";
-    runner.clock.atmosphere = runner.scene.atmosphere;
-    runner.clock.set_hour(runner.scene.atmosphere.hour);
+    runner.clock.enter(runner.scene.atmosphere);
 }
 
 // Reads a project through `files`. `save` is where its games are saved unless --save says otherwise.
@@ -352,6 +401,8 @@ int play(Runner& runner, int argc, char** argv) {
     game.step = step;
     game.render = render;
     game.act = act;
+    game.save_state = save_state;
+    game.load_state = load_state;
     // Automated runs (tests, the editor's checks) fail on any script error; players just see it
     // reported and the game carries on.
     game.shutdown = [](void* context, Engine& engine) {

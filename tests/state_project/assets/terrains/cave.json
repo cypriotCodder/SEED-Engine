@@ -1,0 +1,111 @@
+{
+  "format": 1,
+  "terrain": {
+    "island": false,
+    "radius": 64,
+    "coast": 0.12,
+    "warp": 24,
+    "warp_wavelength": 256,
+    "default_seed": 7,
+    "fields": [
+      {
+        "name": "elevation",
+        "base": 0.34,
+        "terms": [
+          {
+            "type": "spot",
+            "wavelength": 40,
+            "amplitude": 0.7,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 512,
+            "amplitude": 0.75,
+            "warped": true
+          },
+          {
+            "type": "fractal",
+            "wavelength": 128,
+            "amplitude": 0.6,
+            "warped": true
+          },
+          {
+            "type": "ridged",
+            "wavelength": 512,
+            "amplitude": 0.25,
+            "warped": true
+          }
+        ]
+      },
+      {
+        "name": "moisture",
+        "base": 0,
+        "terms": [
+          {
+            "type": "fractal",
+            "wavelength": 128,
+            "amplitude": 1,
+            "warped": true
+          },
+          {
+            "type": "perlin",
+            "wavelength": 512,
+            "amplitude": 0.5,
+            "warped": false
+          }
+        ]
+      },
+      {
+        "name": "temperature",
+        "base": 1,
+        "terms": [
+          {
+            "type": "distance",
+            "wavelength": 1,
+            "amplitude": -1.4,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 512,
+            "amplitude": 0.15,
+            "warped": false
+          }
+        ]
+      },
+      {
+        "name": "ring",
+        "base": 0,
+        "terms": [
+          {
+            "type": "distance",
+            "wavelength": 1,
+            "amplitude": 1,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 1024,
+            "amplitude": 0.12,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 256,
+            "amplitude": 0.04,
+            "warped": false
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "name": "Rock",
+        "material": "stone",
+        "when": [],
+        "solid": false
+      }
+    ]
+  }
+}
