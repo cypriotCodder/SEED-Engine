@@ -13,4 +13,7 @@ std::optional<std::filesystem::path> choose_folder(const char*, const std::files
 std::optional<std::filesystem::path> choose_image(const char*) {
     return std::nullopt;
 }
+std::optional<std::filesystem::path> choose_audio(const char*, bool) {
+    return std::nullopt;
+}
 } // namespace seed::editor

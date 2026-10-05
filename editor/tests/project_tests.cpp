@@ -1,4 +1,5 @@
 #include "assets/pack.hpp"
+#include "audio_files.hpp"
 #include "export.hpp"
 #include "io/json.hpp"
 #include "io/storage.hpp"
@@ -217,7 +218,7 @@ void exporting(const fs::path& root) {
     const auto plist = seed::read_text(contents / "Info.plist");
     check(plist.find("<string>games.seed.sample-island-5eed0001</string>") != std::string::npos,
           "Bundle identifier");
-    for (const char* license : {"SDL2.txt", "LZ4.txt", "Lua.txt"})
+    for (const char* license : {"SDL2.txt", "LZ4.txt", "Lua.txt", "stb_vorbis.txt"})
         check(fs::is_regular_file(contents / "Resources" / "licenses" / license), license);
     check(!fs::exists(root / "out" / ".Sample Island.app.partial"), "No partial app left behind");
 
@@ -322,6 +323,44 @@ void textures(const fs::path& root) {
     check(cook_textures(project.root) && !fs::exists(texture_pack(project.root)),
           "The pack goes with the last texture");
 }
+// Sounds and music are imported only if they decode, ship with exported games, and a sound whose
+// recording is missing stops the export.
+void audio(const fs::path& root) {
+    fs::create_directories(root);
+    fs::copy(SEED_SAMPLE_PROJECT, root / "Sample", fs::copy_options::recursive);
+    const auto project = open_project(root / "Sample");
+    const fs::path fixtures = SEED_AUDIO_FIXTURES;
+    check(import_audio(project.root, fixtures / "blip.wav", false) == "blip.wav", "A WAV sound imports");
+    check(import_audio(project.root, fixtures / "blip.wav", false) == "blip_2.wav",
+          "Taken names are numbered");
+    check(import_audio(project.root, fixtures / "tone.ogg", true) == "tone.ogg", "Ogg music imports");
+    rejects([&] { import_audio(project.root, fixtures / "blip.wav", true); }, "WAV music accepted");
+    seed::write_text(root / "broken.ogg", "OggS but not really");
+    rejects([&] { import_audio(project.root, root / "broken.ogg", false); }, "A broken Ogg imported");
+    rejects([&] { import_audio(project.root, root / "notes.txt", false); }, "A text file imported");
+    check(list_audio(project.root, false) == std::vector<std::string>{"blip.wav", "blip_2.wav"} &&
+              list_audio(project.root, true) == std::vector<std::string>{"tone.ogg"},
+          "Sounds and music listed");
+
+    auto assets = seed::load_assets(project.root / "assets");
+    const auto previous = assets;
+    seed::SoundAsset blip;
+    blip.name = "blip";
+    blip.file = "blip.wav";
+    assets.sounds.push_back(blip);
+    seed::save_assets(project.root / "assets", assets, &previous);
+    check(seed::load_assets(project.root / "assets").sounds.back().file == "blip.wav",
+          "A sound's file reads back");
+    const auto report = export_macos_app(project, SEED_PLAYER_PATH, root / "out", false);
+    const auto archive =
+        seed::ProjectArchive::read(report.app / "Contents" / "Resources" / seed::ProjectArchive::file_name);
+    check(archive.files.count("assets/sounds/blip.wav") && archive.files.count("assets/sounds/blip_2.wav") &&
+              archive.files.count("assets/music/tone.ogg"),
+          "Exports ship sounds and music");
+    fs::remove(audio_folder(project.root, false) / "blip.wav");
+    check(export_problems(project).find("sounds/blip.wav does not exist") != std::string::npos,
+          "A missing recording stops exports");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -339,6 +378,7 @@ int main(int argc, char** argv) {
         scripts(root / "script-checks");
         exporting(root / "export");
         textures(root / "textures");
+        audio(root / "audio");
         std::cout << "Editor project checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

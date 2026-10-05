@@ -69,6 +69,15 @@ FetchContent_Declare(stb
     URL_HASH SHA256=594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3
     DOWNLOAD_NO_EXTRACT TRUE)
 FetchContent_MakeAvailable(stb)
+# stb_vorbis decodes Ogg Vorbis sounds and music; games need it, so the engine links it.
+FetchContent_Declare(stb_vorbis
+    URL https://raw.githubusercontent.com/nothings/stb/013ac3beddff3dbffafd5177e7972067cd2b5083/stb_vorbis.c
+    URL_HASH SHA256=4c7cb2ff1f7011e9d67950446b7eb9ca044f2e464d76bfbb0b84dd2e23e65636
+    DOWNLOAD_NO_EXTRACT TRUE)
+FetchContent_MakeAvailable(stb_vorbis)
+# Compiled on its own, outside the strict warning flags.
+add_library(seed_vorbis STATIC src/assets/vorbis.c)
+target_include_directories(seed_vorbis SYSTEM PUBLIC "${stb_vorbis_SOURCE_DIR}")
 
 function(seed_strict target)
     target_compile_features(${target} PUBLIC cxx_std_20)
@@ -86,12 +95,12 @@ function(seed_strict target)
     endif()
 endfunction()
 add_library(seed_engine STATIC src/platform/window.cpp src/render/renderer.cpp src/world/world.cpp src/io/storage.cpp src/physics/physics.cpp
-    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/paint.cpp src/project/atmosphere.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/project/game_settings.cpp src/script/host.cpp src/core/metrics.cpp
+    src/world/chunk_file.cpp src/io/checkpoint.cpp src/io/json.cpp src/project/assets.cpp src/project/scene_file.cpp src/project/terrain.cpp src/project/paint.cpp src/project/atmosphere.cpp src/assets/sound_file.cpp src/project/runner.cpp src/project/archive.cpp src/project/characters.cpp src/project/game_settings.cpp src/script/host.cpp src/core/metrics.cpp
     src/app/app.cpp)
 seed_strict(seed_engine)
 target_include_directories(seed_engine PUBLIC src)
 target_compile_definitions(seed_engine PUBLIC SDL_MAIN_HANDLED)
-target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads PRIVATE seed_lua)
+target_link_libraries(seed_engine PUBLIC SDL2::SDL2 seed_lz4 Threads::Threads PRIVATE seed_lua seed_vorbis)
 if(WIN32)
     target_link_libraries(seed_engine PUBLIC psapi)
 endif()
@@ -157,6 +166,11 @@ if(BUILD_TESTING)
     seed_strict(seed_scene_tests)
     target_link_libraries(seed_scene_tests PRIVATE seed_engine)
     add_test(NAME scene_files COMMAND seed_scene_tests "${CMAKE_CURRENT_BINARY_DIR}/scene-test-data")
+    add_executable(seed_audio_tests tests/audio_tests.cpp)
+    seed_strict(seed_audio_tests)
+    target_link_libraries(seed_audio_tests PRIVATE seed_engine)
+    target_compile_definitions(seed_audio_tests PRIVATE SEED_AUDIO_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/audio/tone.ogg")
+    add_test(NAME audio_files COMMAND seed_audio_tests)
     add_executable(seed_terrain_tests tests/terrain_tests.cpp)
     seed_strict(seed_terrain_tests)
     target_link_libraries(seed_terrain_tests PRIVATE seed_engine)

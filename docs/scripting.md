@@ -75,7 +75,10 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `e:light()` | `{color={r,g,b}, radius=, intensity=, height=, flicker=, night_only=}`, or `nil` without a light. |
 | `e:set_light{...}` | Changes the fields given (same names and limits as the Light component); an entity without a light gets one. |
 | `world.surface(x, y)` | `{material=, speed=, tags={...}}`: the ground material at a loaded tile, how fast characters walk on it (a multiple of their own speed, applied by the engine) and its tags from the Materials panel, or `nil` far from the camera. |
-| `sound.play(name)` | A sound from the Sounds panel. |
+| `sound.play(name)` | A sound from the Sounds panel, synthesized or recorded. |
+| `music.play(name [, loop])` | Plays `assets/music/<name>.ogg`, replacing any music; loops unless `loop` is `false`. An unknown or broken file is an error. |
+| `music.stop()`, `music.playing()` | Stops the music; whether music is playing (a song that has not looped ends by itself). |
+| `music.set_volume(v)` | Music volume, 0 to 1 (default 0.6). |
 | `particles.burst(name, x, y)` | A particle style from the Particles panel. |
 | `camera.follow(entity)` | The camera, and world streaming, follow this entity. |
 | `camera.zoom()`, `camera.set_zoom(pixels_per_tile)` | The camera's zoom, from 2 to 512. |

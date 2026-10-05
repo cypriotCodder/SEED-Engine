@@ -341,7 +341,8 @@ int play(Runner& runner, int argc, char** argv) {
     game.window_height = runner.game.height;
     game.fullscreen = runner.game.fullscreen;
     game.assets = &runner.data;
-    game.save_prefix = runner.prefix.c_str(); // Each scene keeps its own files in the save.
+    game.asset_files = subfolder(runner.files, "assets/"); // Recorded sounds and music.
+    game.save_prefix = runner.prefix.c_str();              // Each scene keeps its own files in the save.
     // Room for the runner's own components (lights and characters, 8,192 of each) beyond what the
     // engine's scene needs.
     game.scene_memory = Scene::default_memory + 1024 * 1024;

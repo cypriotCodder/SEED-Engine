@@ -442,6 +442,28 @@ struct ScriptApi {
         return 1;
     }
 
+    // music: one song at a time, from assets/music.
+    static int music_play(lua_State* lua) {
+        const std::string name = luaL_checkstring(lua, 1);
+        const bool loop = lua_isnoneornil(lua, 2) || lua_toboolean(lua, 2);
+        engine(lua).play_music(name, loop);
+        return 0;
+    }
+    static int music_stop(lua_State* lua) {
+        engine(lua).stop_music();
+        return 0;
+    }
+    static int music_volume(lua_State* lua) {
+        const auto v = luaL_checknumber(lua, 1);
+        if (!(v >= 0 && v <= 1)) luaL_error(lua, "music volume must be from 0 to 1");
+        engine(lua).audio.set_music_volume(static_cast<float>(v));
+        return 0;
+    }
+    static int music_playing(lua_State* lua) {
+        lua_pushboolean(lua, engine(lua).music_playing());
+        return 1;
+    }
+
     // atmosphere: the scene's time of day.
     static DayClock& clock(lua_State* lua) {
         auto* c = host(lua).clock_;
@@ -723,6 +745,12 @@ struct ScriptApi {
                                               {"daylight", guarded<light_of_day>},
                                               {nullptr, nullptr}};
         module(lua, "atmosphere", atmosphere);
+        static const luaL_Reg music[] = {{"play", guarded<music_play>},
+                                         {"stop", guarded<music_stop>},
+                                         {"set_volume", guarded<music_volume>},
+                                         {"playing", guarded<music_playing>},
+                                         {nullptr, nullptr}};
+        module(lua, "music", music);
         static const luaL_Reg ui[] = {{"rect", guarded<ui_rect>},
                                       {"text", guarded<ui_text>},
                                       {"text_width", guarded<ui_text_width>},

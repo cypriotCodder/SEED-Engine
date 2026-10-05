@@ -143,6 +143,12 @@ std::string export_problems(const Project& project) {
     for (const auto& file : files_in(scripts, ".lua"))
         if (const auto error = checker.syntax_error(file); !error.empty()) out += "scripts/" + error + "\n";
     if (assets.materials.empty()) out += "The project has no materials\n";
+    // Every recorded sound must be there and decode, as the game will check when it starts.
+    try {
+        load_sound_samples(folder_files(project.root / "assets"), assets.sounds);
+    } catch (const std::exception& error) {
+        out += std::string(error.what()) + "\n";
+    }
     const auto textures = list_textures(project.root);
     for (const auto& material : assets.materials)
         if (!material.texture.empty() &&
@@ -172,6 +178,13 @@ ExportReport export_macos_app(const Project& project, const fs::path& player, co
                 throw std::runtime_error("Rename " + path + ": use letters, digits, '_', '-' and '.'");
             add_json(path);
         }
+    // Recorded sounds and music, as imported (compressed Ogg stays compressed).
+    for (const auto& [folder, music] : {std::pair{"sounds", false}, std::pair{"music", true}})
+        for (const char* extension : {".wav", ".ogg"})
+            for (const auto& entry : files_in(project.root / "assets" / folder, extension))
+                if (valid_audio_file(entry.filename().string(), music))
+                    archive.files["assets/" + std::string(folder) + "/" + entry.filename().string()] =
+                        read_text(entry, 16 * 1024 * 1024);
     // Painted terrain, binary, beside its scene.
     for (const auto& file : files_in(project.root / "scenes", ".paint")) {
         const auto path = "scenes/" + file.filename().string();

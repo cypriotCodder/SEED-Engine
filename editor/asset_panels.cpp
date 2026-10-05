@@ -1,5 +1,7 @@
 #include "asset_panels.hpp"
+#include "audio_files.hpp"
 #include "folder_dialog.hpp"
+#include "io/storage.hpp"
 #include "textures.hpp"
 #include "widgets.hpp"
 #include <algorithm>
@@ -294,34 +296,131 @@ void AssetPanels::sounds() {
             auto& s = edited_.sounds[static_cast<std::size_t>(sound_)];
             field("Name");
             changed |= ImGui::InputText("##name", &s.name);
-            field("Pitch (Hz)");
-            changed |= ImGui::SliderFloat("##frequency", &s.frequency, 20, 4000, "%.0f",
-                                          ImGuiSliderFlags_Logarithmic);
-            field("Pitch variation (Hz)");
-            changed |= ImGui::SliderFloat("##variation", &s.variation, 0, 1000, "%.0f");
-            ImGui::SetItemTooltip("Repeated plays step through this range so they don't sound identical.");
-            field("Volume");
-            changed |= ImGui::SliderFloat("##gain", &s.gain, 0, 1);
-            // Shown as a fade time: the decay per sample is hard to reason about directly.
-            float fade = std::log(0.001F) / std::log(s.decay) / 48000;
-            field("Fade time (s)");
-            if (ImGui::SliderFloat("##fade", &fade, 0.01F, 5, "%.2f", ImGuiSliderFlags_Logarithmic)) {
-                s.decay = std::pow(0.001F, 1 / (fade * 48000));
-                changed = true;
+            // A recording from assets/sounds, played instead of the synthesized tone.
+            const auto project = folder_.parent_path();
+            field("Recording");
+            ImGui::SetNextItemWidth(-110);
+            if (ImGui::BeginCombo("##file", s.file.empty() ? "None (synthesized)" : s.file.c_str())) {
+                if (ImGui::Selectable("None (synthesized)", s.file.empty())) {
+                    s.file.clear();
+                    changed = true;
+                }
+                for (const auto& name : list_audio(project, false))
+                    if (ImGui::Selectable(name.c_str(), name == s.file)) {
+                        s.file = name;
+                        changed = true;
+                    }
+                ImGui::EndCombo();
             }
-            field("Tone");
-            changed |= ImGui::SliderFloat("##tone", &s.tone, 0, 1);
-            ImGui::SetItemTooltip("0 is pure noise, 1 a pure tone.");
+            ImGui::SameLine();
+            if (ImGui::Button("Import...##sound", {-1, 0}))
+                if (const auto chosen = choose_audio("Choose a WAV or Ogg Vorbis sound", false)) try {
+                        s.file = import_audio(project, *chosen, false);
+                        previews_.erase(s.file);
+                        changed = true;
+                        log_(false, "Imported sound \"" + s.file + "\" into assets/sounds.");
+                    } catch (const std::exception& error) {
+                        log_(true, error.what());
+                    }
+            ImGui::SetItemTooltip(
+                "Copy a WAV or Ogg Vorbis file (up to 10 seconds) into the project's sounds.");
+            if (!s.file.empty()) {
+                field("Volume");
+                changed |= ImGui::SliderFloat("##gain", &s.gain, 0, 1);
+                ImGui::TextDisabled(
+                    "Recordings play as they are; pitch, fade and tone shape synthesized sounds.");
+            } else {
+                field("Pitch (Hz)");
+                changed |= ImGui::SliderFloat("##frequency", &s.frequency, 20, 4000, "%.0f",
+                                              ImGuiSliderFlags_Logarithmic);
+                field("Pitch variation (Hz)");
+                changed |= ImGui::SliderFloat("##variation", &s.variation, 0, 1000, "%.0f");
+                ImGui::SetItemTooltip(
+                    "Repeated plays step through this range so they don't sound identical.");
+                field("Volume");
+                changed |= ImGui::SliderFloat("##gain", &s.gain, 0, 1);
+                // Shown as a fade time: the decay per sample is hard to reason about directly.
+                float fade = std::log(0.001F) / std::log(s.decay) / 48000;
+                field("Fade time (s)");
+                if (ImGui::SliderFloat("##fade", &fade, 0.01F, 5, "%.2f", ImGuiSliderFlags_Logarithmic)) {
+                    s.decay = std::pow(0.001F, 1 / (fade * 48000));
+                    changed = true;
+                }
+                field("Tone");
+                changed |= ImGui::SliderFloat("##tone", &s.tone, 0, 1);
+                ImGui::SetItemTooltip("0 is pure noise, 1 a pure tone.");
+            }
             ImGui::BeginDisabled(!problems_.empty() &&
                                  problems_.find("Sound \"" + s.name + "\"") != std::string::npos);
-            if (ImGui::Button("Play", {100, 0})) audio_.play(s.desc());
+            if (ImGui::Button("Play", {100, 0})) {
+                auto desc = s.desc();
+                if (!s.file.empty()) try {
+                        auto found = previews_.find(s.file);
+                        if (found == previews_.end())
+                            found =
+                                previews_
+                                    .emplace(s.file,
+                                             decode_sound(read_text(audio_folder(project, false) / s.file)))
+                                    .first;
+                        desc.samples = found->second.data();
+                        desc.sample_count = static_cast<std::uint32_t>(found->second.size());
+                    } catch (const std::exception& error) {
+                        log_(true, "sounds/" + s.file + ": " + error.what());
+                    }
+                if (s.file.empty() || desc.samples) audio_.play(desc);
+            }
             ImGui::EndDisabled();
         } else
             ImGui::TextDisabled("Select a sound.");
         ImGui::EndTable();
     }
+    music();
     if (changed) refresh();
     ImGui::End();
+}
+
+// The project's music, for scripts' music.play(name): listed, imported and previewed here.
+void AssetPanels::music() {
+    // Keep a playing preview fed; it ends by itself.
+    if (preview_music_) {
+        std::array<float, 1024> chunk{};
+        while (preview_music_ && audio_.music_space() >= chunk.size()) {
+            audio_.push_music(chunk.data(), preview_music_->read(chunk.data(), chunk.size()));
+            if (preview_music_->finished()) preview_music_.reset(), preview_music_name_.clear();
+        }
+    }
+    const auto project = folder_.parent_path();
+    ImGui::SeparatorText("Music");
+    ImGui::TextDisabled("Ogg Vorbis files in assets/music; scripts play them with music.play(name).");
+    for (const auto& file : list_audio(project, true)) {
+        const auto name = std::filesystem::path(file).stem().string();
+        ImGui::PushID(file.c_str());
+        const bool playing = preview_music_name_ == file;
+        if (ImGui::SmallButton(playing ? "Stop" : "Play")) {
+            preview_music_.reset();
+            preview_music_name_.clear();
+            audio_.clear_music();
+            if (!playing) try {
+                    preview_music_ = std::make_unique<MusicStream>(
+                        read_text(audio_folder(project, true) / file, 16 * 1024 * 1024), false);
+                    preview_music_name_ = file;
+                } catch (const std::exception& error) {
+                    log_(true, "music/" + file + ": " + error.what());
+                }
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(name.c_str());
+        ImGui::PopID();
+    }
+    if (ImGui::Button("Import Music..."))
+        if (const auto chosen = choose_audio("Choose an Ogg Vorbis music file", true)) try {
+                log_(false,
+                     "Imported music \"" + import_audio(project, *chosen, true) + "\" into assets/music.");
+            } catch (const std::exception& error) {
+                log_(true, error.what());
+            }
+    ImGui::SetItemTooltip("Copy an Ogg Vorbis file into the project's music. Music streams as it plays,\n"
+                          "so long songs cost little memory.");
 }
 
 void AssetPanels::particles() {

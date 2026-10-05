@@ -3,7 +3,7 @@
 # The licences a shipped game must carry, embedded so the editor can export them from anywhere.
 set(seed_licenses_source "${CMAKE_CURRENT_BINARY_DIR}/game_licenses.cpp")
 set(seed_licenses_body "namespace seed::editor {\nextern const char* const game_licenses[][2] = {\n")
-foreach(seed_license SDL2 LZ4 Lua)
+foreach(seed_license SDL2 LZ4 Lua stb_vorbis)
     file(READ "${CMAKE_SOURCE_DIR}/licenses/${seed_license}.txt" seed_license_text)
     string(APPEND seed_licenses_body "    {\"${seed_license}.txt\", R\"SEEDLICENSE(${seed_license_text})SEEDLICENSE\"},\n")
 endforeach()
@@ -26,7 +26,7 @@ file(GENERATE OUTPUT "${seed_brand_source}" CONTENT "${seed_brand_body}")
 # stb_image decodes imported images; it builds on its own, without the strict warning flags.
 add_library(seed_stb STATIC stb_image.c)
 target_include_directories(seed_stb SYSTEM PUBLIC "${stb_SOURCE_DIR}")
-add_library(seed_editor_core STATIC project.cpp starter.cpp scripts.cpp export.cpp textures.cpp "${seed_licenses_source}")
+add_library(seed_editor_core STATIC project.cpp starter.cpp scripts.cpp export.cpp textures.cpp audio_files.cpp "${seed_licenses_source}")
 seed_strict(seed_editor_core)
 target_include_directories(seed_editor_core PUBLIC .)
 target_link_libraries(seed_editor_core PUBLIC seed_engine PRIVATE seed_lua seed_stb)
@@ -56,7 +56,8 @@ if(BUILD_TESTING)
     target_link_libraries(seed_editor_project_tests PRIVATE seed_editor_core)
     add_dependencies(seed_editor_project_tests seed_player)
     target_compile_definitions(seed_editor_project_tests PRIVATE SEED_PLAYER_PATH="$<TARGET_FILE:seed_player>"
-        SEED_SAMPLE_PROJECT="${CMAKE_SOURCE_DIR}/tests/sample_project")
+        SEED_SAMPLE_PROJECT="${CMAKE_SOURCE_DIR}/tests/sample_project"
+        SEED_AUDIO_FIXTURES="${CMAKE_SOURCE_DIR}/tests/audio")
     add_executable(seed_editor_history_tests tests/history_tests.cpp)
     seed_strict(seed_editor_history_tests)
     target_include_directories(seed_editor_history_tests PRIVATE .)

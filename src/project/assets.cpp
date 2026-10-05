@@ -1,4 +1,5 @@
 #include "project/assets.hpp"
+#include "assets/sound_file.hpp"
 #include "io/storage.hpp"
 #include <algorithm>
 #include <charconv>
@@ -122,6 +123,7 @@ SoundAsset read_sound(const Json& entry) {
     sound.gain = get_float(entry, "gain", defaults.gain);
     sound.decay = get_float(entry, "decay", defaults.decay);
     sound.tone = get_float(entry, "tone", defaults.tone);
+    sound.file = get_string(entry, "file");
     return sound;
 }
 ParticleAsset read_particle(const Json& entry) {
@@ -189,6 +191,7 @@ Json write_sound(const SoundAsset& sound) {
     entry.set("gain", json_float(sound.gain));
     entry.set("decay", json_float(sound.decay));
     entry.set("tone", json_float(sound.tone));
+    if (!sound.file.empty()) entry.set("file", sound.file);
     return entry;
 }
 Json write_particle(const ParticleAsset& particle) {
@@ -247,9 +250,16 @@ void Assets::register_actions(Actions& out) const {
         add_action(out, action);
 }
 
-void Assets::register_effects(const Materials& registry, Sounds& out_sounds, Particles& out_particles) const {
-    for (const auto& sound : sounds)
-        out_sounds.add(sound.desc());
+void Assets::register_effects(const Materials& registry, Sounds& out_sounds, Particles& out_particles,
+                              const std::vector<std::vector<float>>* samples) const {
+    for (std::size_t i = 0; i < sounds.size(); ++i) {
+        auto desc = sounds[i].desc();
+        if (samples && i < samples->size() && !(*samples)[i].empty()) {
+            desc.samples = (*samples)[i].data();
+            desc.sample_count = static_cast<std::uint32_t>((*samples)[i].size());
+        }
+        out_sounds.add(desc);
+    }
     for (const auto& particle : particles)
         add_particle(registry, out_particles, particle);
 }
@@ -270,7 +280,12 @@ std::string Assets::problems() const {
     Particles particle_registry;
     check_all(result, "Material", materials, [&](const auto& m) { add_material(material_registry, m); });
     check_all(result, "Action", actions, [&](const auto& a) { add_action(action_registry, a); });
-    check_all(result, "Sound", sounds, [&](const auto& s) { sound_registry.add(s.desc()); });
+    check_all(result, "Sound", sounds, [&](const auto& s) {
+        if (!s.file.empty() && !valid_audio_file(s.file))
+            throw std::invalid_argument(
+                "Sound files are .wav or .ogg names of letters, digits, '_', '-' and '.'");
+        sound_registry.add(s.desc());
+    });
     check_all(result, "Particle style", particles,
               [&](const auto& p) { add_particle(material_registry, particle_registry, p); });
     const auto add_terrain_problems = [&](const std::string& label, const TerrainAsset& t) {
@@ -288,6 +303,34 @@ std::string Assets::problems() const {
         add_terrain_problems("Terrain \"" + name + "\": ", t);
     }
     return result;
+}
+
+bool valid_audio_file(std::string_view name, bool music) {
+    const auto ends = [&](std::string_view suffix) {
+        return name.size() > suffix.size() && name.ends_with(suffix);
+    };
+    return name.size() <= 100 && (ends(".ogg") || (!music && ends(".wav"))) &&
+           name.find("..") == std::string_view::npos && std::all_of(name.begin(), name.end(), [](char c) {
+               return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                      c == '_' || c == '-' || c == '.';
+           });
+}
+
+std::vector<std::vector<float>> load_sound_samples(const ProjectFiles& assets,
+                                                   const std::vector<SoundAsset>& sounds) {
+    std::vector<std::vector<float>> samples(sounds.size());
+    for (std::size_t i = 0; i < sounds.size(); ++i) {
+        if (sounds[i].file.empty()) continue;
+        const auto where = "Sound \"" + sounds[i].name + "\": sounds/" + sounds[i].file;
+        const auto bytes = assets ? assets("sounds/" + sounds[i].file) : std::nullopt;
+        if (!bytes) throw std::runtime_error(where + " does not exist");
+        try {
+            samples[i] = decode_sound(*bytes);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(where + ": " + error.what());
+        }
+    }
+    return samples;
 }
 
 bool valid_terrain_name(std::string_view name) {

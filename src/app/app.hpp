@@ -1,4 +1,5 @@
 #pragma once
+#include "assets/sound_file.hpp"
 #include "core/jobs.hpp"
 #include "core/metrics.hpp"
 #include "core/particles.hpp"
@@ -62,6 +63,9 @@ struct Game {
     const char* project_assets{};
     // Already-loaded project assets, used instead of project_assets; must outlive the Engine.
     const Assets* assets{};
+    // Reads the project's assets/ folder by relative path (sounds/, music/), for recorded sounds
+    // and music. Defaults to the project_assets folder when that is given.
+    ProjectFiles asset_files;
     std::uint64_t default_seed{};
     int window_width{1280}, window_height{720}; // Logical pixels.
     bool fullscreen{};                          // Ignored by automated (--smoke) runs.
@@ -114,6 +118,11 @@ public:
     // Draws every entity with a Visual near the camera, interpolated between fixed steps.
     void draw_entities(const View& view);
     WorldPosition focus_position();
+    // Plays assets/music/<name>.ogg, replacing any music playing. Throws if it is missing or not Ogg
+    // Vorbis. With audio off, music is checked and counts as playing, but is not decoded.
+    void play_music(const std::string& name, bool loop);
+    void stop_music();
+    bool music_playing() const { return music_ != nullptr; }
     // Saves where the focus is, then continues in another world from the project's terrain: one
     // terrain and its paint, a seed, and the save-file prefix that keeps its files apart (see
     // World). Call from Game::step. Entities are the game's to remove and create.
@@ -129,6 +138,10 @@ public:
 private:
     std::unique_ptr<PackStream> assets_;
     Assets project_assets_; // Registries point at its names, so it is declared before them.
+    ProjectFiles asset_files_;
+    std::vector<std::vector<float>> sound_samples_; // Recorded sounds; the registry points into them.
+    std::unique_ptr<MusicStream> music_;
+    void pump_music(); // Keeps the audio's music ring filled; once a frame.
 
 public:
     Materials materials;

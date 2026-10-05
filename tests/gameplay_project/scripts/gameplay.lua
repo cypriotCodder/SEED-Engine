@@ -18,6 +18,16 @@ function start()
   local sx, sy = input.screen_pointer()
   assert(type(x) == "number" and type(sy) == "number", "the pointer has a position")
   assert(not pcall(ui.text, 0, 0, "x", 99), "text scale has limits")
+  sound.play("blip") -- A recorded sound from assets/sounds.
+  music.play("theme")
+  assert(music.playing(), "music plays")
+  music.set_volume(0.3)
+  assert(not pcall(music.set_volume, 2), "music volume has limits")
+  assert(not pcall(music.play, "missing"), "missing music is an error")
+  assert(music.playing(), "and leaves the music playing")
+  music.stop()
+  assert(not music.playing(), "music stops")
+  music.play("theme", false)
 end
 
 function update(dt)

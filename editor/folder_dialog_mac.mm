@@ -34,4 +34,19 @@ std::optional<std::filesystem::path> choose_image(const char* title) {
         return std::filesystem::path(panel.URLs.firstObject.fileSystemRepresentation);
     }
 }
+std::optional<std::filesystem::path> choose_audio(const char* title, bool music) {
+    @autoreleasepool {
+        NSOpenPanel* panel = [NSOpenPanel openPanel];
+        panel.canChooseFiles = YES;
+        panel.canChooseDirectories = NO;
+        panel.allowsMultipleSelection = NO;
+        panel.message = [NSString stringWithUTF8String:title];
+        NSMutableArray<UTType*>* types = [NSMutableArray array];
+        for (NSString* extension in music ? @[ @"ogg" ] : @[ @"wav", @"ogg" ])
+            if (UTType* type = [UTType typeWithFilenameExtension:extension]) [types addObject:type];
+        panel.allowedContentTypes = types;
+        if ([panel runModal] != NSModalResponseOK || panel.URLs.count == 0) return std::nullopt;
+        return std::filesystem::path(panel.URLs.firstObject.fileSystemRepresentation);
+    }
+}
 } // namespace seed::editor

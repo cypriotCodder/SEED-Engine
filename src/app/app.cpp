@@ -46,10 +46,19 @@ Materials register_materials(const Game& game, const Assets& assets) {
     return materials;
 }
 
+ProjectFiles asset_files_of(const Game& game) {
+    if (game.asset_files) return game.asset_files;
+    if (game.project_assets && !game.assets) {
+        std::filesystem::path folder = game.project_assets;
+        return folder_files(folder.is_relative() ? asset_path(game.project_assets) : folder);
+    }
+    return {};
+}
+
 Sounds register_effects(const Game& game, const Assets& assets, const Materials& materials,
-                        Particles& particles) {
+                        Particles& particles, const std::vector<std::vector<float>>& samples) {
     Sounds sounds;
-    assets.register_effects(materials, sounds, particles);
+    assets.register_effects(materials, sounds, particles, &samples);
     if (game.effects) game.effects(game.context, sounds, particles);
     return sounds;
 }
@@ -121,6 +130,8 @@ Engine::Engine(const Game& game, const AppOptions& opts)
     : options(opts),
       assets_(game.asset_pack ? std::make_unique<PackStream>(jobs, asset_path(game.asset_pack)) : nullptr),
       project_assets_(load_project_assets(game)),
+      asset_files_(asset_files_of(game)),
+      sound_samples_(load_sound_samples(asset_files_, project_assets_.sounds)),
       materials(register_materials(game, project_assets_)),
       window(!options.smoke && !options.benchmark, game.window_width, game.window_height,
              game.fullscreen && !options.smoke && !options.benchmark),
@@ -134,7 +145,7 @@ Engine::Engine(const Game& game, const AppOptions& opts)
           [this](const auto& path) { return checkpoint.read_path(path.filename().string()); },
           game.save_prefix ? game.save_prefix : ""),
       physics(scene, jobs, {game.context, game.body_visual, game.body_lift_per_height}),
-      sounds(register_effects(game, project_assets_, materials, particles)),
+      sounds(register_effects(game, project_assets_, materials, particles, sound_samples_)),
       audio(!options.smoke && !options.benchmark, sounds),
       measurements_(options.benchmark ? options.measured_frames : 0),
       physics_hooks_(physics.hooks()),
@@ -232,6 +243,31 @@ void Engine::write_deltas(WorldPosition focus_at) {
     save_player(checkpoint.working_directory(), world.seed(), world.generator().version, focus_at,
                 std::filesystem::exists(checkpoint.read_path(world.prefix() + "player.delta")),
                 world.prefix());
+}
+
+void Engine::play_music(const std::string& name, bool loop) {
+    if (!valid_audio_file(name + ".ogg", true))
+        throw std::invalid_argument("Invalid music name \"" + name + "\"");
+    const auto bytes = asset_files_ ? asset_files_("music/" + name + ".ogg") : std::nullopt;
+    if (!bytes) throw std::runtime_error("No music named \"" + name + "\" in assets/music");
+    auto next = std::make_unique<MusicStream>(*bytes, loop); // Throws for a file that is not Ogg Vorbis.
+    audio.clear_music();
+    music_ = std::move(next);
+}
+
+void Engine::stop_music() {
+    music_.reset();
+    audio.clear_music();
+}
+
+void Engine::pump_music() {
+    if (!music_ || !audio.enabled()) return; // Without a device, music is accepted but not decoded.
+    std::array<float, 1024> chunk{};
+    while (audio.music_space() >= chunk.size()) {
+        const auto count = music_->read(chunk.data(), chunk.size());
+        audio.push_music(chunk.data(), count);
+        if (music_->finished()) return music_.reset(); // The last of it plays from the ring.
+    }
 }
 
 void Engine::change_world(const TerrainAsset& terrain, const TerrainPaint& paint, std::uint64_t seed,
@@ -363,6 +399,7 @@ void Engine::loop(const Game& game) {
         const auto render_start = MeasurementClock::now();
         const bool record = options.benchmark && frames >= warmup_frames;
         gpu.begin(record);
+        pump_music();
         renderer.begin(view.width, view.height, 0, 0, view.zoom);
         renderer.set_time(time);
         renderer.set_ui_scale(static_cast<float>(view.width) / static_cast<float>(view.logical_width));

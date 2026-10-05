@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "sounds": [
+    {
+      "name": "blip",
+      "frequency": 140,
+      "variation": 0,
+      "gain": 0.5,
+      "decay": 0.9991,
+      "tone": 0.75,
+      "file": "blip.wav"
+    }
+  ]
+}

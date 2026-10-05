@@ -41,7 +41,7 @@ seed::Assets sample() {
     assets.actions = {{"jump", {seed::Binding::key(SDL_SCANCODE_SPACE)}},
                       {"run", {seed::Binding::key(SDL_SCANCODE_LSHIFT), seed::Binding::mouse(SDL_BUTTON_X1)}},
                       {"idle", {}}};
-    assets.sounds = {{"knock", 140, 180, 0.2F, 0.9991F, 0.75F}};
+    assets.sounds = {{"knock", 140, 180, 0.2F, 0.9991F, 0.75F, "knock.ogg"}};
     seed::ParticleAsset splash;
     splash.name = "splash";
     splash.material = "water";

@@ -1,9 +1,12 @@
 #pragma once
+#include "assets/sound_file.hpp"
 #include "platform/audio.hpp"
 #include "project/assets.hpp"
 #include <SDL.h>
 #include <filesystem>
 #include <functional>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -65,6 +68,11 @@ private:
     int capturing_{-1}; // Action waiting for a key or button press, or -1.
     std::string terrain_name_{"main"};
     bool textures_changed_{};
+    // Recordings decoded for Play, by file name, and the music being previewed.
+    std::map<std::string, std::vector<float>> previews_;
+    std::unique_ptr<MusicStream> preview_music_;
+    std::string preview_music_name_;
+    void music();
     bool focus_materials_{};
 };
 } // namespace seed::editor

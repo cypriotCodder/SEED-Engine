@@ -37,6 +37,9 @@ struct ActionAsset {
 struct SoundAsset {
     std::string name;
     float frequency{140}, variation{}, gain{0.2F}, decay{0.9991F}, tone{0.75F};
+    // A recorded sound in assets/sounds (a WAV or Ogg Vorbis file name), played at `gain` instead
+    // of the synthesized tone; empty for none.
+    std::string file;
     bool operator==(const SoundAsset&) const = default;
     SoundDesc desc() const { return {name.c_str(), frequency, variation, gain, decay, tone}; }
 };
@@ -67,7 +70,10 @@ struct Assets {
     // with the registry's own message.
     void register_materials(Materials& out) const;
     void register_actions(Actions& out) const; // After add_engine_actions.
-    void register_effects(const Materials& materials, Sounds& sounds, Particles& particles) const;
+    // `samples`, when given, holds each sound's decoded recording (empty for synthesized ones), and
+    // must outlive the registry.
+    void register_effects(const Materials& materials, Sounds& sounds, Particles& particles,
+                          const std::vector<std::vector<float>>* samples = nullptr) const;
     // Registers everything into scratch registries and returns every problem found, one per
     // line; empty when the assets are valid. Uses the same checks as a running game.
     std::string problems() const;
@@ -88,7 +94,15 @@ Assets load_assets(const std::filesystem::path& folder);
 Assets load_assets(const ProjectFiles& files);
 // One terrain by name from an assets folder reader; empty (no terrain) when it does not exist.
 TerrainAsset load_terrain(const ProjectFiles& assets, const std::string& name);
-bool valid_terrain_name(std::string_view name); // Letters, digits, '_' and '-', 1 to 64.
+bool valid_terrain_name(std::string_view name);
+// Whether `name` can name a sound or music file: letters, digits, '_', '-' and '.', ending in .wav
+// or .ogg (music: .ogg), at most 100 characters.
+bool valid_audio_file(std::string_view name, bool music = false);
+// The recording of every sound that names a file, read from `assets` (the project's assets/
+// folder) and decoded; empty entries for synthesized sounds. Throws naming a missing or bad file.
+std::vector<std::vector<float>>
+load_sound_samples(const ProjectFiles& assets,
+                   const std::vector<SoundAsset>& sounds); // Letters, digits, '_' and '-', 1 to 64.
 Json terrain_file_json(const TerrainAsset& terrain);
 TerrainAsset parse_terrain_file(const Json& file);
 // Writes the files whose contents changed since `previous` (all of them if null), atomically.
