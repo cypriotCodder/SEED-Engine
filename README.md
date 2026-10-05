@@ -1,3 +1,6 @@
+<img width="2000" height="2000" alt="1" src="https://github.com/user-attachments/assets/894884a6-c3b3-4053-9f05-980f62d59e81" />
+
+
 # Seed Engine
 
 A C++20 engine for top-down, procedurally generated 2D games: chunk streaming, destructible building physics, generated materials, normal-map lighting and crash-safe checkpoints. `seed_engine` (under `src/`) is the reusable library. `seed_demo` (under `games/demo/`) is one game built on it: an explorable island with a damageable timber platform, digging and building.
