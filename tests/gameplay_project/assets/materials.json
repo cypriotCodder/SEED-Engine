@@ -115,6 +115,18 @@
         "sticky",
         "slow"
       ]
+    },
+    {
+      "name": "flag",
+      "color": [
+        200,
+        40,
+        40
+      ],
+      "pattern": "speckle",
+      "variation": 10,
+      "frames": 4,
+      "fps": 8
     }
   ]
 }

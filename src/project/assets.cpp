@@ -21,9 +21,16 @@ std::string get_string(const Json& object, std::string_view key) {
 
 // Registration of single entries. Names point into the asset, which must outlive the registry.
 void add_material(Materials& out, const MaterialAsset& material) {
-    out.add({material.name.c_str(), material.color, material.pattern, material.variation,
-             material.texture.empty() ? nullptr : material.texture.c_str(), material.texture_scale,
-             material.speed, material.tags.empty() ? nullptr : material.tags.c_str()});
+    out.add({.name = material.name.c_str(),
+             .color = material.color,
+             .pattern = material.pattern,
+             .variation = material.variation,
+             .texture = material.texture.empty() ? nullptr : material.texture.c_str(),
+             .texture_scale = material.texture_scale,
+             .frames = material.frames,
+             .fps = material.fps,
+             .speed = material.speed,
+             .tags = material.tags.empty() ? nullptr : material.tags.c_str()});
 }
 void add_action(Actions& out, const ActionAsset& action) {
     out.add(action.name.c_str(), action.bindings);
@@ -90,6 +97,9 @@ MaterialAsset read_material(const Json& entry) {
         material.variation = static_cast<int>(variation->as_int(1, 255));
     material.texture = get_string(entry, "texture");
     material.texture_scale = get_float(entry, "texture_scale", 1);
+    if (const auto* frames = entry.find("frames"))
+        material.frames = static_cast<unsigned>(frames->as_int(1, 64));
+    material.fps = get_float(entry, "fps", 0);
     material.speed = get_float(entry, "speed", 1);
     if (const auto* tags = entry.find("tags"))
         for (const auto& tag : tags->items())
@@ -143,6 +153,10 @@ Json write_material(const MaterialAsset& material) {
     if (!material.texture.empty()) {
         entry.set("texture", material.texture);
         entry.set("texture_scale", json_float(material.texture_scale));
+        if (material.frames > 1) {
+            entry.set("frames", static_cast<int>(material.frames));
+            entry.set("fps", json_float(material.fps));
+        }
     }
     // Written only when set, so projects that never use them keep their files unchanged.
     if (material.speed != 1) entry.set("speed", json_float(material.speed));

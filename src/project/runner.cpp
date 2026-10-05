@@ -185,6 +185,7 @@ void step(void* context, Engine& engine, float dt) {
     // A paused game (a title or pause screen) keeps running its scripts, but nothing else moves.
     if (!runner.scripts->paused()) {
         move_characters(engine, dt);
+        animate_characters(engine);
         runner.scripts->surfaces();
         runner.scripts->touches();
         // The day moves on; the frame drawn next uses its light.

@@ -24,6 +24,16 @@ function update(dt)
   steps = steps + 1
   ui.rect(10, 10, 120, 16, {0, 0, 0, 0.5})
   ui.text(14, 12, "Coins: " .. #touched)
+  if steps == 20 then
+    local _, playing = self:frame()
+    assert(playing, "a walking character's animation plays")
+    self:set_frame(2)
+    local frame, still_playing = self:frame()
+    assert(frame == 2 and not still_playing, "set_frame shows one frame")
+    assert(not pcall(self.set_frame, self, 4), "frames are checked against the material")
+    self:animate()
+    assert(select(2, self:frame()), "animate plays again")
+  end
   if steps == 25 then
     assert(table.concat(touched, ",") == "Coin,Post", "on_touch in order: " .. table.concat(touched, ","))
     assert(table.concat(left, ",") == "Coin,Post", "on_leave in order: " .. table.concat(left, ","))

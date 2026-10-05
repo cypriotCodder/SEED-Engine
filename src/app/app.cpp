@@ -251,7 +251,9 @@ void Engine::draw_entities(const View& view) {
         const auto& t = *scene.transforms.find(owners[i]);
         if (!nearby(t.position.chunk, view.camera.chunk, 3)) continue;
         const auto p = relative(t.previous, view.camera) + relative(t.position, t.previous) * view.alpha;
-        renderer.sprite(visuals[i].material, p.x, p.y, visuals[i].size.x, visuals[i].size.y, t.angle);
+        const auto& v = visuals[i];
+        renderer.sprite(v.material, p.x, p.y, v.size.x, v.size.y, t.angle, 1,
+                        v.still ? v.frame : Renderer::automatic);
     }
 }
 
@@ -336,6 +338,7 @@ void Engine::loop(const Game& game) {
             // The last step of the frame keeps running while the frame renders.
             physics.begin_step(transform->position);
             particles.update(step);
+            time += step;
             accumulator -= step;
         }
         View view;
@@ -361,6 +364,7 @@ void Engine::loop(const Game& game) {
         const bool record = options.benchmark && frames >= warmup_frames;
         gpu.begin(record);
         renderer.begin(view.width, view.height, 0, 0, view.zoom);
+        renderer.set_time(time);
         renderer.set_ui_scale(static_cast<float>(view.width) / static_cast<float>(view.logical_width));
         if (game.render) game.render(game.context, *this, view);
         renderer.finish();

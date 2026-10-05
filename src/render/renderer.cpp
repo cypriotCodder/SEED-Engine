@@ -245,6 +245,11 @@ Renderer::Renderer(const Pack& pack, const Materials& registry)
             // whole on each sprite is clamped, so its edges do not bleed into each other.
             const float scale = registry[static_cast<MaterialId>(m)].texture_scale;
             texture_scales_[m] = scale;
+            // An animation strip: each frame's picture is inset by half a texel, so filtering
+            // never blends in the neighbouring frame.
+            frames_[m] = static_cast<std::uint8_t>(registry[static_cast<MaterialId>(m)].frames);
+            fps_[m] = registry[static_cast<MaterialId>(m)].fps;
+            frame_inset_[m] = frames_[m] > 1 ? 0.5F / static_cast<float>(image.width) : 0.0F;
             const GLint wrap = scale > 1 ? GL_REPEAT : GL_CLAMP_TO_EDGE;
             gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap);
             gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap);
@@ -412,8 +417,16 @@ void Renderer::begin(int width, int height, float x, float y, float zoom) {
     gl_.Uniform2f(scale_uniform_, 2 * zoom / static_cast<float>(width),
                   2 * zoom / static_cast<float>(height));
 }
+unsigned Renderer::frame_of(MaterialId material, unsigned frame) const {
+    const unsigned frames = frames_[material];
+    if (frames <= 1) return 0;
+    if (frame == automatic)
+        frame = fps_[material] > 0 ? static_cast<unsigned>(std::fmod(time_ * fps_[material], 1e9)) : 0;
+    return frame % frames;
+}
+
 void Renderer::sprite(MaterialId material, float x, float y, float width, float height, float angle,
-                      float shade) {
+                      float shade, unsigned frame) {
     if (material >= material_count_) throw std::invalid_argument("Invalid material");
     // Textured materials draw their whole texture without normals; switching texture flushes.
     const bool detail = textures_[material] != 0;
@@ -442,20 +455,25 @@ void Renderer::sprite(MaterialId material, float x, float y, float width, float 
                          angle};
     if (detail) {
         auto& sprite = sprites_[size_ - 1];
-        sprite.u0 = sprite.v0 = 0;
-        sprite.u1 = sprite.v1 = 1;
+        const float frames = frames_[material], f = static_cast<float>(frame_of(material, frame));
+        sprite.u0 = f / frames + frame_inset_[material];
+        sprite.u1 = (f + 1) / frames - frame_inset_[material];
+        sprite.v0 = 0;
+        sprite.v1 = 1;
     }
 }
 void Renderer::ground(MaterialId material, float x, float y, double gx, double gy) {
-    sprite(material, x, y);
+    sprite(material, x, y, 1, 1, 0, 1, automatic);
     if (material >= material_count_ || !textures_[material] || texture_scales_[material] <= 1) return;
     // The part of the texture over this tile: its world position modulo the texture's span. Packed
     // images store their bottom row first, so v runs upwards like world y.
     const double scale = texture_scales_[material];
     const double u = gx / scale - std::floor(gx / scale), v = gy / scale - std::floor(gy / scale);
     auto& s = sprites_[size_ - 1];
-    s.u0 = static_cast<float>(u);
-    s.u1 = static_cast<float>(u + 1 / scale);
+    // Within an animation strip, the same part of the current frame's picture.
+    const double frames = frames_[material], f = frame_of(material, automatic);
+    s.u0 = static_cast<float>((f + u) / frames);
+    s.u1 = static_cast<float>((f + u + 1 / scale) / frames);
     s.v0 = static_cast<float>(v);
     s.v1 = static_cast<float>(v + 1 / scale);
 }

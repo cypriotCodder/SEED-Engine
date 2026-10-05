@@ -24,6 +24,10 @@ struct MaterialDesc {
     // How many tiles one copy of the texture covers when drawn with Renderer::ground, so
     // it repeats seamlessly across neighbouring tiles. 1 draws the whole texture on every tile.
     float texture_scale{1};
+    // A texture that is a horizontal strip of `frames` equal pictures is an animation, shown at
+    // `fps` frames per second (0 holds the first unless something picks a frame).
+    unsigned frames{1};
+    float fps{};
     // Walking speed on this ground, as a multiple of a character's own speed (0.1 to 4).
     float speed{1};
     // Labels for scripts, separated by spaces, such as "slippery hurts"; the engine gives them no
@@ -42,6 +46,9 @@ public:
         if (desc.variation <= 0) throw std::invalid_argument("Material variation must be positive");
         if (!(desc.texture_scale >= 1 && desc.texture_scale <= 256))
             throw std::invalid_argument("Material texture scale must be from 1 to 256 tiles");
+        if (desc.frames < 1 || desc.frames > 64) throw std::invalid_argument("A material has 1 to 64 frames");
+        if (!(desc.fps >= 0 && desc.fps <= 60))
+            throw std::invalid_argument("Animation speed must be 0 to 60 fps");
         if (!(desc.speed >= 0.1F && desc.speed <= 4))
             throw std::invalid_argument("Material speed must be from 0.1 to 4");
         if (desc.tags) check_tags(desc.tags);

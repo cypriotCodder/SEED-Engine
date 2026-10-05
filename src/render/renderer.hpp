@@ -37,8 +37,13 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
     void begin(int width, int height, float camera_x, float camera_y, float pixels_per_unit);
+    // For animated materials (see MaterialDesc::frames), `frame` picks the picture; `automatic`
+    // follows the clock set with set_time.
+    static constexpr unsigned automatic = ~0U;
     void sprite(MaterialId material, float x, float y, float width = 1, float height = 1, float angle = 0,
-                float shade = 1);
+                float shade = 1, unsigned frame = automatic);
+    // Seconds of game time that animated materials play by; set once a frame.
+    void set_time(double seconds) { time_ = seconds; }
     // A ground tile whose lower-left corner is at global tile coordinates (gx, gy), drawn at
     // (x, y) like sprite(). A textured material shows the part of its texture that falls on this
     // tile, so the texture continues across neighbouring tiles; other materials draw as sprite().
@@ -75,7 +80,11 @@ private:
     GLuint vao_{}, buffer_{}, program_{}, atlas_{};
     std::array<GLuint, Materials::capacity> textures_{};      // Per material; 0 draws from the atlas.
     std::array<float, Materials::capacity> texture_scales_{}; // Tiles per texture copy.
-    GLuint bound_{};                                          // Texture currently bound for sprites.
+    std::array<std::uint8_t, Materials::capacity> frames_{};  // Animation frames; 0 or 1 for none.
+    std::array<float, Materials::capacity> fps_{}, frame_inset_{};
+    double time_{};
+    unsigned frame_of(MaterialId material, unsigned frame) const;
+    GLuint bound_{}; // Texture currently bound for sprites.
     std::size_t material_count_{};
     float atlas_width_{};
     struct Light {

@@ -11,9 +11,15 @@ struct Transform {
     float angle{};
 };
 struct Visual {
+    Visual() = default;
+    Visual(MaterialId material_id, Vec2 visual_size) : material(material_id), size(visual_size) {}
     MaterialId material{};
+    // For animated materials: `frame` is shown while `still`; otherwise frames follow the clock.
+    std::uint8_t frame{};
+    bool still{};
     Vec2 size{0.7F, 0.7F};
 };
+static_assert(sizeof(Visual) == 12, "Visual grew; scenes reserve 8,192 of them");
 
 // Marks an entity that is saved with the world. The owner is the chunk whose file stores it: the
 // engine moves ownership to the chunk the entity stands in whenever that chunk is active, and the

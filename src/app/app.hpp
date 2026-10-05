@@ -155,6 +155,7 @@ public:
     float camera_smoothing{}, camera_dead_zone{};
     float camera_zoom{40}; // Logical pixels per tile, when the game has no zoom callback.
     unsigned frames{};
+    double time{}; // Seconds of game time, counted in fixed steps; animated materials play by it.
 
 private:
     friend int run(const Game&, int, char**);

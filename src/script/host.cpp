@@ -464,6 +464,45 @@ struct ScriptApi {
     }
 
     // Entity methods.
+    static Visual& visual_of(lua_State* lua, Entity entity) {
+        auto* v = engine(lua).scene.visuals.find(entity);
+        if (!v) luaL_error(lua, "that entity has no visual");
+        return *v;
+    }
+    // Shows one frame of an animated material and stops the character animating by itself.
+    static int set_frame(lua_State* lua) {
+        const auto entity = check_entity(lua, 1);
+        const auto frame = luaL_checkinteger(lua, 2);
+        auto& v = visual_of(lua, entity);
+        const auto frames = engine(lua).materials[v.material].frames;
+        if (frame < 0 || frame >= static_cast<lua_Integer>(frames))
+            luaL_error(lua, "frame must be from 0 to %d for this material", static_cast<int>(frames) - 1);
+        v.frame = static_cast<std::uint8_t>(frame);
+        v.still = true;
+        if (auto* m = engine(lua).scene.components<CharacterMotion>().find(entity)) m->animate = false;
+        return 0;
+    }
+    // The frame showing, and whether the animation is playing.
+    static int frame(lua_State* lua) {
+        const auto& v = visual_of(lua, check_entity(lua, 1));
+        const auto& m = engine(lua).materials[v.material];
+        const bool playing = !v.still && m.frames > 1 && m.fps > 0;
+        const auto shown = v.still ? v.frame
+                           : playing
+                               ? static_cast<unsigned>(std::fmod(engine(lua).time * m.fps, 1e9)) % m.frames
+                               : 0U;
+        lua_pushinteger(lua, static_cast<lua_Integer>(shown));
+        lua_pushboolean(lua, playing);
+        return 2;
+    }
+    // Lets the animation play again (for a character: while it walks).
+    static int animate(lua_State* lua) {
+        const auto entity = check_entity(lua, 1);
+        auto& v = visual_of(lua, entity);
+        v.still = false;
+        if (auto* m = engine(lua).scene.components<CharacterMotion>().find(entity)) m->animate = true;
+        return 0;
+    }
     static int light(lua_State* lua) {
         const auto* l = engine(lua).scene.components<LightComponent>().find(check_entity(lua, 1));
         if (!l) {
@@ -708,6 +747,9 @@ struct ScriptApi {
                                            {"set_speed", guarded<set_speed>},
                                            {"moving", guarded<moving>},
                                            {"light", guarded<light>},
+                                           {"set_frame", guarded<set_frame>},
+                                           {"frame", guarded<frame>},
+                                           {"animate", guarded<animate>},
                                            {"set_light", guarded<set_light>},
                                            {nullptr, nullptr}};
         luaL_newmetatable(lua, entity_type);

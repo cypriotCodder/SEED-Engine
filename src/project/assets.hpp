@@ -23,6 +23,8 @@ struct MaterialAsset {
     int variation{23};
     std::string texture;    // A texture from assets/textures, by name; empty uses the generated tile.
     float texture_scale{1}; // Tiles one copy of the texture covers on the ground.
+    unsigned frames{1};     // The texture is a horizontal strip of this many animation frames.
+    float fps{};            // Animation frames per second; 0 holds the first frame.
     float speed{1};         // Walking speed on this ground, times the character's own (0.1 to 4).
     std::string tags;       // Words for scripts, separated by spaces, such as "slippery hurts".
     bool operator==(const MaterialAsset&) const = default;

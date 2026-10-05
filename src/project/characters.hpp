@@ -25,6 +25,9 @@ struct CharacterMotion {
     static constexpr std::int16_t no_surface = -1;
     std::int16_t surface{no_surface};
     bool surface_changed{};
+    // An animated visual plays while it walks and shows its first frame when it stands; off once a
+    // script picks frames itself (e:set_frame).
+    bool animate{true};
     WorldPosition target{};
     Vec2 velocity{}; // Tiles per second, as last moved.
 };
@@ -36,4 +39,6 @@ CharacterMotion character_motion(const SceneCharacter& settings);
 // blocks it. Each walks at its speed times the speed of the ground material under it. Physics
 // must be idle (call from Game::step). Characters that reach their target stop.
 void move_characters(Engine& engine, float dt);
+// Sets each animating character's visual to play while it moves and hold its first frame when not.
+void animate_characters(Engine& engine);
 } // namespace seed

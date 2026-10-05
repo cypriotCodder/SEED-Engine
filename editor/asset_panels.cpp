@@ -200,6 +200,21 @@ void AssetPanels::materials() {
                 ImGui::SetItemTooltip(
                     "On the ground, one copy of the texture spans this many tiles and repeats\n"
                     "seamlessly. 1 shows the whole texture on every tile.");
+                int frames = static_cast<int>(m.frames);
+                field("Animation frames");
+                if (ImGui::SliderInt("##frames", &frames, 1, 64)) {
+                    m.frames = static_cast<unsigned>(frames);
+                    changed = true;
+                }
+                ImGui::SetItemTooltip(
+                    "Treat the texture as a strip of this many equal pictures, side by side,\n"
+                    "played in turn. 1 is a still texture.");
+                if (m.frames > 1) {
+                    field("Frames per second");
+                    changed |= ImGui::SliderFloat("##fps", &m.fps, 0, 60, "%.1f");
+                    ImGui::SetItemTooltip("How fast the animation plays. Characters play it while they walk\n"
+                                          "and show the first frame when they stand.");
+                }
             }
             field("Walking speed");
             changed |=

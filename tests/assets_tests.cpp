@@ -36,6 +36,8 @@ seed::Assets sample() {
     assets.materials[1].tags = "wet slow";
     assets.materials[2].pattern = seed::Pattern::planks;
     assets.materials[2].texture = "crate.bc3";
+    assets.materials[2].frames = 4;
+    assets.materials[2].fps = 12;
     assets.actions = {{"jump", {seed::Binding::key(SDL_SCANCODE_SPACE)}},
                       {"run", {seed::Binding::key(SDL_SCANCODE_LSHIFT), seed::Binding::mouse(SDL_BUTTON_X1)}},
                       {"idle", {}}};
@@ -79,6 +81,7 @@ void registration() {
     check(std::string_view(materials[2].texture) == "crate.bc3" && !materials[0].texture,
           "Texture names kept");
     check(materials[1].speed == 0.5F && materials[0].speed == 1, "Ground speeds kept");
+    check(materials[2].frames == 4 && materials[2].fps == 12 && materials[0].frames == 1, "Animation kept");
     check(materials.tagged(1, "wet") && materials.tagged(1, "slow") && !materials.tagged(1, "we") &&
               !materials.tagged(0, "wet"),
           "Tags are whole words");
@@ -107,6 +110,8 @@ void problems() {
     assets.materials.back().tags = "hot  burns"; // Two spaces.
     assets.materials.push_back(material("goo", {0, 255, 0}));
     assets.materials.back().tags = "sticky!";
+    assets.materials.push_back(material("reel", {9, 9, 9}));
+    assets.materials.back().frames = 65;    // Above 64.
     assets.actions.push_back({"quit", {}}); // Clashes with an engine action.
     seed::SoundAsset loud;
     loud.name = "loud";
@@ -117,11 +122,11 @@ void problems() {
     dust.material = "sand"; // Unknown material.
     assets.particles.push_back(dust);
     const auto report = assets.problems();
-    for (const char* expected :
-         {"Material \"grass\"", "Material \"hot\"", "Material \"ice\"", "Material \"lava\"",
-          "Material \"goo\"", "Action \"quit\"", "Sound \"loud\"", "Particle style \"dust\""})
+    for (const char* expected : {"Material \"grass\"", "Material \"hot\"", "Material \"ice\"",
+                                 "Material \"lava\"", "Material \"goo\"", "Material \"reel\"",
+                                 "Action \"quit\"", "Sound \"loud\"", "Particle style \"dust\""})
         check(report.find(expected) != std::string::npos, expected);
-    check(std::count(report.begin(), report.end(), '\n') == 8, "One line per problem");
+    check(std::count(report.begin(), report.end(), '\n') == 9, "One line per problem");
 }
 
 void bad_files(const fs::path& root) {

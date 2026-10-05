@@ -98,4 +98,17 @@ void move_characters(Engine& engine, float dt) {
         if (ground) m.surface = surface;
     }
 }
+void animate_characters(Engine& engine) {
+    auto& motions = engine.scene.components<CharacterMotion>();
+    const auto owners = motions.owners();
+    const auto values = motions.values();
+    for (std::size_t i = 0; i < owners.size(); ++i) {
+        if (!values[i].animate) continue;
+        if (auto* visual = engine.scene.visuals.find(owners[i])) {
+            const bool moving = values[i].velocity.x != 0 || values[i].velocity.y != 0;
+            visual->still = !moving;
+            visual->frame = 0;
+        }
+    }
+}
 } // namespace seed

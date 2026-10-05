@@ -1173,6 +1173,7 @@ void SceneEditor::render() {
         r.lighting.haze_amount = 0;
     }
     r.begin(width, height, 0, 0, zoom_ * sx);
+    r.set_time(ImGui::GetTime()); // Animated materials play in the preview.
     // OpenGL counts rows from the bottom of the window.
     r.set_output(static_cast<int>(view_min_.x * sx), static_cast<int>((io.DisplaySize.y - view_max_.y) * sy));
     const float half_w = (view_max_.x - view_min_.x) / 2 / zoom_,

@@ -38,6 +38,9 @@ Positions are global tile coordinates: one unit per tile, `x` to the right and `
 | `e:angle()`, `e:set_angle(radians)` | Rotation, counter-clockwise. |
 | `e:size()`, `e:set_size(w [, h])` | Visual size; the entity needs a visual. |
 | `e:set_material(name)` | Change its look to another material. |
+| `e:frame()` | For an animated material: the frame showing (from 0) and whether the animation is playing. |
+| `e:set_frame(n)` | Show frame `n` (from 0) and hold it; a character stops animating by itself. |
+| `e:animate()` | Play the animation again (a character: while it walks). |
 | `e:name()` | The name given in the scene or at spawn. |
 | `e:alive()` | `false` once destroyed. |
 | `e:destroy()` | Remove it (not the entity the camera follows). |
