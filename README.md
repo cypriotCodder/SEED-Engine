@@ -1,4 +1,4 @@
-<img width="2000" height="2000" alt="1" src="https://github.com/user-attachments/assets/894884a6-c3b3-4053-9f05-980f62d59e81" />
+<img width="800" height="900" alt="1" src="https://github.com/user-attachments/assets/894884a6-c3b3-4053-9f05-980f62d59e81" />
 
 
 # Seed Engine
