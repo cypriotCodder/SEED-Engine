@@ -1,6 +1,10 @@
 #include "app.hpp"
 #include "folder_dialog.hpp"
+#include "io/json.hpp"
+#include "io/storage.hpp"
+#include "scripts.hpp"
 #include "textures.hpp"
+#include "widgets.hpp"
 #include <SDL_opengl.h>
 #include <algorithm>
 #include <cstdio>
@@ -13,6 +17,7 @@
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
 #include <thread>
+#include <utility>
 
 namespace seed::editor {
 namespace {
@@ -22,7 +27,7 @@ constexpr const char* console_window = "Console";
 constexpr const char* settings_window = "Project Settings";
 constexpr std::size_t file_list_limit = 5000;
 constexpr std::size_t log_limit = 2000;
-constexpr int layout_version = 3; // Bump when panels are added or removed.
+constexpr int layout_version = 4; // Bump when panels are added or removed.
 
 fs::path preferences_directory(const fs::path& override_path) {
     if (!override_path.empty()) return override_path;
@@ -38,7 +43,8 @@ fs::path default_location() {
     return home ? fs::path(home) / "SeedProjects" : fs::current_path();
 }
 
-void style() {
+void style(float scale, bool compact) {
+    ImGui::GetStyle() = ImGuiStyle{};
     ImGui::StyleColorsDark();
     auto& s = ImGui::GetStyle();
     s.FontSizeBase = 15;
@@ -46,20 +52,54 @@ void style() {
     s.FrameRounding = 4;
     s.TabRounding = 4;
     s.GrabRounding = 4;
-    s.WindowPadding = {10, 10};
-    s.FramePadding = {8, 5};
-    s.ItemSpacing = {8, 6};
+    s.WindowPadding = compact ? ImVec2{8, 8} : ImVec2{12, 12};
+    s.FramePadding = compact ? ImVec2{7, 3} : ImVec2{9, 5};
+    s.ItemSpacing = compact ? ImVec2{6, 4} : ImVec2{8, 7};
+    s.ItemInnerSpacing = {6, 4};
+    s.FrameBorderSize = 1;
+    s.TabBorderSize = 0;
+    s.ScrollbarSize = compact ? 12 : 14;
+    s.SeparatorTextPadding = {0, 6};
     auto* colors = s.Colors;
-    colors[ImGuiCol_WindowBg] = {0.11F, 0.12F, 0.13F, 1};
-    colors[ImGuiCol_TitleBgActive] = {0.16F, 0.29F, 0.24F, 1};
-    colors[ImGuiCol_Header] = {0.20F, 0.36F, 0.30F, 0.8F};
-    colors[ImGuiCol_HeaderHovered] = {0.26F, 0.46F, 0.38F, 0.9F};
-    colors[ImGuiCol_Button] = {0.20F, 0.36F, 0.30F, 0.8F};
-    colors[ImGuiCol_ButtonHovered] = {0.28F, 0.50F, 0.41F, 1};
-    colors[ImGuiCol_TabSelected] = {0.20F, 0.36F, 0.30F, 1};
-    colors[ImGuiCol_TabHovered] = {0.28F, 0.50F, 0.41F, 1};
+    colors[ImGuiCol_Text] = {0.88F, 0.90F, 0.91F, 1};
+    colors[ImGuiCol_TextDisabled] = {0.55F, 0.59F, 0.61F, 1};
+    colors[ImGuiCol_WindowBg] = {0.105F, 0.12F, 0.13F, 1};
+    colors[ImGuiCol_PopupBg] = {0.13F, 0.15F, 0.16F, 1};
+    colors[ImGuiCol_Border] = {0.26F, 0.30F, 0.32F, 0.65F};
+    colors[ImGuiCol_FrameBg] = {0.075F, 0.09F, 0.10F, 1};
+    colors[ImGuiCol_FrameBgHovered] = {0.16F, 0.19F, 0.20F, 1};
+    colors[ImGuiCol_FrameBgActive] = {0.20F, 0.25F, 0.26F, 1};
+    colors[ImGuiCol_TitleBg] = {0.085F, 0.10F, 0.11F, 1};
+    colors[ImGuiCol_TitleBgActive] = {0.16F, 0.19F, 0.20F, 1};
+    colors[ImGuiCol_MenuBarBg] = {0.085F, 0.10F, 0.11F, 1};
+    colors[ImGuiCol_Header] = {0.19F, 0.24F, 0.25F, 1};
+    colors[ImGuiCol_HeaderHovered] = {0.24F, 0.30F, 0.31F, 1};
+    colors[ImGuiCol_HeaderActive] = {0.22F, 0.39F, 0.32F, 1};
+    colors[ImGuiCol_Button] = {0.18F, 0.21F, 0.23F, 1};
+    colors[ImGuiCol_ButtonHovered] = {0.25F, 0.29F, 0.31F, 1};
+    colors[ImGuiCol_ButtonActive] = {0.22F, 0.40F, 0.33F, 1};
+    colors[ImGuiCol_Tab] = {0.12F, 0.14F, 0.15F, 1};
+    colors[ImGuiCol_TabSelected] = {0.20F, 0.25F, 0.26F, 1};
+    colors[ImGuiCol_TabSelectedOverline] = {0.45F, 0.80F, 0.62F, 1};
+    colors[ImGuiCol_TabHovered] = {0.25F, 0.31F, 0.32F, 1};
+    colors[ImGuiCol_TabDimmed] = colors[ImGuiCol_Tab];
+    colors[ImGuiCol_TabDimmedSelected] = {0.17F, 0.20F, 0.22F, 1};
+    colors[ImGuiCol_TabDimmedSelectedOverline] = {0.32F, 0.45F, 0.40F, 1};
+    colors[ImGuiCol_CheckboxSelectedBg] = {0.20F, 0.36F, 0.29F, 1};
     colors[ImGuiCol_CheckMark] = {0.45F, 0.80F, 0.62F, 1};
+    colors[ImGuiCol_SliderGrab] = {0.38F, 0.64F, 0.51F, 1};
+    colors[ImGuiCol_SliderGrabActive] = colors[ImGuiCol_CheckMark];
+    colors[ImGuiCol_Separator] = colors[ImGuiCol_Border];
+    colors[ImGuiCol_SeparatorHovered] = {0.38F, 0.64F, 0.51F, 1};
+    colors[ImGuiCol_SeparatorActive] = colors[ImGuiCol_CheckMark];
+    colors[ImGuiCol_ResizeGrip] = {0.32F, 0.40F, 0.42F, 0.35F};
+    colors[ImGuiCol_ResizeGripHovered] = colors[ImGuiCol_SeparatorHovered];
+    colors[ImGuiCol_ResizeGripActive] = colors[ImGuiCol_CheckMark];
+    colors[ImGuiCol_TextSelectedBg] = {0.28F, 0.53F, 0.42F, 0.55F};
+    colors[ImGuiCol_NavCursor] = colors[ImGuiCol_CheckMark];
     colors[ImGuiCol_DockingPreview] = {0.45F, 0.80F, 0.62F, 0.6F};
+    s.ScaleAllSizes(scale);
+    s.FontScaleMain = scale;
 }
 
 void open_with_system(const fs::path& path) {
@@ -94,7 +134,19 @@ App::App(Options options)
     auto& io = ImGui::GetIO();
     io.IniFilename = nullptr; // Set per project; the hub has a fixed layout.
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
-    style();
+    try {
+        const auto path = preferences_ / "appearance.json";
+        if (fs::exists(path)) {
+            const auto settings = parse_json(read_text(path, 4096));
+            const auto scale = settings.at("scale_percent").as_int(80, 150);
+            const bool compact = settings.at("compact").as_bool();
+            ui_scale_ = static_cast<int>(scale);
+            compact_ui_ = compact;
+        }
+    } catch (const std::exception& error) {
+        log(Level::warning, std::string("Could not load appearance preferences: ") + error.what());
+    }
+    style(static_cast<float>(ui_scale_) / 100, compact_ui_);
     if (!ImGui_ImplSDL2_InitForOpenGL(window_.handle(), window_.context()) ||
         !ImGui_ImplOpenGL3_Init("#version 410 core")) {
         ImGui::DestroyContext();
@@ -129,7 +181,14 @@ App::App(Options options)
 }
 
 App::~App() {
-    if (project_ && !layout_file_.empty()) ImGui::SaveIniSettingsToDisk(layout_file_.c_str());
+    if (project_ && !layout_file_.empty()) {
+        ImGui::SaveIniSettingsToDisk(layout_file_.c_str());
+        try {
+            save_workspace();
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "Could not save workspace: %s\n", error.what());
+        }
+    }
     ImGui::GetIO().IniFilename = nullptr;
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
@@ -167,6 +226,7 @@ void App::open(const fs::path& path) {
     // layouts would leave the new ones floating, so they give way to the new default instead.
     layout_file_ =
         (user_state_directory(*project_) / ("layout-" + std::to_string(layout_version) + ".ini")).string();
+    load_workspace();
     reset_layout_ = !fs::exists(layout_file_);
     if (!reset_layout_) ImGui::LoadIniSettingsFromDisk(layout_file_.c_str());
     ImGui::GetIO().IniFilename = layout_file_.c_str();
@@ -187,6 +247,8 @@ void App::create(const fs::path& parent, const std::string& name) {
 void App::close_project() {
     if (!project_) return;
     play_.stop();
+    save_workspace();
+    scene_.maximized = false;
     if (dirty()) log(Level::warning, "Discarded unsaved changes.");
     assets_.unload();
     scene_.unload();
@@ -459,11 +521,11 @@ int App::run() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData()); // Also draws the Scene view.
         if (const auto error = scene_.take_error(); !error.empty()) log(Level::error, "Scene view: " + error);
         ++frames_;
-        if (options_.smoke && frames_ == 60 && !options_.screenshot.empty()) screenshot(options_.screenshot);
         // A smoke run with --play lasts until the game it started has finished.
         if (options_.smoke && frames_ >= 60 && !play_.running() && (!ui_test_ || ui_test_->finished()) &&
             !splash_)
             quit_ = true;
+        if (options_.smoke && quit_ && !options_.screenshot.empty()) screenshot(options_.screenshot);
         if (options_.smoke && play_.running()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         window_.present();
         if (pending_) {
@@ -614,13 +676,18 @@ void App::hub() {
 
 void App::workspace() {
     menu_bar();
+    if (!ImGui::GetIO().WantTextInput &&
+        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Space, ImGuiInputFlags_RouteGlobal))
+        scene_.maximized = !scene_.maximized;
     const ImGuiID dockspace = ImGui::GetID("Workspace");
     if (reset_layout_) {
         build_default_layout(dockspace);
         reset_layout_ = false;
     }
     ImGui::DockSpaceOverViewport(dockspace, ImGui::GetMainViewport(),
-                                 ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoCloseButton);
+                                 scene_.maximized ? ImGuiDockNodeFlags_KeepAliveOnly
+                                                  : ImGuiDockNodeFlags_PassthruCentralNode |
+                                                        ImGuiDockNodeFlags_NoCloseButton);
     if (std::chrono::steady_clock::now() - files_scanned_ > std::chrono::seconds(2)) {
         refresh_files();
         update_textures(false); // Picks up images added or edited outside the editor.
@@ -631,10 +698,12 @@ void App::workspace() {
     scene_.set_game_view(edited_game_.width, edited_game_.height);
     if (scene_.draw(assets_.edit())) assets_.changed();
     assets_.set_terrain(scene_.scene().terrain); // The Terrain panel edits this scene's terrain.
-    if (show_project_) project_panel();
-    if (show_console_) console_panel();
-    if (show_settings_) settings_panel();
-    assets_.draw();
+    if (!scene_.maximized) {
+        if (show_project_) project_panel();
+        if (show_console_) console_panel();
+        if (show_settings_) settings_panel();
+        assets_.draw();
+    }
     about_popup();
     unsaved_popup();
     export_popup();
@@ -646,29 +715,93 @@ void App::workspace() {
 }
 
 void App::build_default_layout(unsigned dockspace) {
+    scene_.maximized = false;
     ImGui::DockBuilderRemoveNode(dockspace);
     ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
     ImGuiID center = dockspace;
-    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.2F, nullptr, &center);
-    const ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.26F, nullptr, &center);
+    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20F, nullptr, &center);
+    const bool scene_mode = workspace_ == Workspace::scene;
+    const ImGuiID right =
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, scene_mode ? 0.29F : 0.46F, nullptr, &center);
     const ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.26F, nullptr, &center);
-    const ImGuiID left_bottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.45F, nullptr, &left);
+    const ImGuiID left_bottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.42F, nullptr, &left);
     ImGui::DockBuilderDockWindow(SceneEditor::hierarchy_id, left);
     ImGui::DockBuilderDockWindow(SceneEditor::prefabs_id, left_bottom);
     ImGui::DockBuilderDockWindow(project_window, left_bottom);
-    ImGui::DockBuilderDockWindow(settings_window, right);
-    ImGui::DockBuilderDockWindow(SceneEditor::inspector_id, right);
+    ImGui::DockBuilderDockWindow(settings_window, left_bottom);
+    ImGui::DockBuilderDockWindow(SceneEditor::inspector_id, scene_mode ? right : left);
     ImGui::DockBuilderDockWindow(console_window, bottom);
-    // The centre holds the Scene view, with the asset panels as further tabs.
     ImGui::DockBuilderDockWindow(SceneEditor::scene_id, center);
+    // Asset editors never replace the scene. In Scene mode they open below it.
     for (const char* id : AssetPanels::window_ids)
-        ImGui::DockBuilderDockWindow(id, center);
+        ImGui::DockBuilderDockWindow(id, scene_mode ? bottom : right);
     ImGui::DockBuilderFinish(dockspace);
-    show_project_ = show_console_ = show_settings_ = true;
-    assets_.show_materials = assets_.show_input = assets_.show_sounds = assets_.show_particles =
-        assets_.show_terrain = true;
+    show_project_ = show_console_ = true;
+    show_settings_ = false;
+    assets_.show_materials = workspace_ == Workspace::assets;
+    assets_.show_terrain = workspace_ == Workspace::terrain;
+    assets_.show_input = assets_.show_sounds = assets_.show_particles = false;
     scene_.show_scene = scene_.show_hierarchy = scene_.show_inspector = scene_.show_prefabs = true;
+}
+
+void App::workspace_menu() {
+    if (ImGui::BeginMenu("Workspace")) {
+        const char* names[] = {"Scene", "Terrain", "Assets"};
+        for (int i = 0; i < 3; ++i) {
+            if (ImGui::MenuItem(names[i], nullptr, static_cast<int>(workspace_) == i)) {
+                workspace_ = static_cast<Workspace>(i);
+                reset_layout_ = true;
+            }
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Maximize Scene", "Shift+Cmd+Space", scene_.maximized))
+            scene_.maximized = !scene_.maximized;
+        ImGui::EndMenu();
+    }
+}
+
+void App::save_workspace() {
+    if (!project_) return;
+    auto state = Json::object();
+    state.set("preset", static_cast<int>(workspace_));
+    auto panels = Json::array();
+    for (bool visible :
+         {show_project_, show_console_, show_settings_, scene_.show_scene, scene_.show_hierarchy,
+          scene_.show_inspector, scene_.show_prefabs, assets_.show_materials, assets_.show_terrain,
+          assets_.show_input, assets_.show_sounds, assets_.show_particles})
+        panels.push(visible);
+    state.set("panels", panels);
+    write_text(user_state_directory(*project_) / "workspace.json", to_json(state));
+}
+
+void App::load_workspace() {
+    workspace_ = Workspace::scene;
+    scene_.maximized = false;
+    show_project_ = show_console_ = true;
+    show_settings_ = false;
+    scene_.show_scene = scene_.show_hierarchy = scene_.show_inspector = scene_.show_prefabs = true;
+    assets_.show_materials = assets_.show_terrain = assets_.show_input = assets_.show_sounds =
+        assets_.show_particles = false;
+    try {
+        const auto path = user_state_directory(*project_) / "workspace.json";
+        if (!fs::exists(path)) return;
+        const auto state = parse_json(read_text(path, 4096));
+        const auto preset = static_cast<Workspace>(state.at("preset").as_int(0, 2));
+        const auto& panels = state.at("panels").items();
+        bool* flags[] = {&show_project_,       &show_console_,          &show_settings_,
+                         &scene_.show_scene,   &scene_.show_hierarchy,  &scene_.show_inspector,
+                         &scene_.show_prefabs, &assets_.show_materials, &assets_.show_terrain,
+                         &assets_.show_input,  &assets_.show_sounds,    &assets_.show_particles};
+        if (panels.size() != std::size(flags)) throw std::runtime_error("Invalid workspace panel list");
+        for (const auto& panel : panels)
+            (void)panel.as_bool();
+        workspace_ = preset;
+        for (std::size_t i = 0; i < panels.size(); ++i)
+            *flags[i] = panels[i].as_bool();
+    } catch (const std::exception& error) {
+        log(Level::warning, std::string("Could not load workspace: ") + error.what());
+    }
 }
 
 void App::menu_bar() {
@@ -703,6 +836,7 @@ void App::menu_bar() {
         if (ImGui::MenuItem("Redo", "Shift+Cmd+Z", false, history_.can_redo())) step_history(true);
         ImGui::EndMenu();
     }
+    workspace_menu();
     if (ImGui::BeginMenu("Window")) {
         ImGui::MenuItem("Scene", nullptr, &scene_.show_scene);
         ImGui::MenuItem("Hierarchy", nullptr, &scene_.show_hierarchy);
@@ -719,6 +853,7 @@ void App::menu_bar() {
         ImGui::MenuItem("Particles", nullptr, &assets_.show_particles);
         ImGui::MenuItem("Terrain", nullptr, &assets_.show_terrain);
         ImGui::Separator();
+        appearance_menu();
         if (ImGui::MenuItem("Reset Layout")) reset_layout_ = true;
         ImGui::EndMenu();
     }
@@ -726,9 +861,56 @@ void App::menu_bar() {
         if (ImGui::MenuItem("About Seed Editor")) show_about_ = true;
         ImGui::EndMenu();
     }
+    const auto errors =
+        std::count_if(log_.begin(), log_.end(), [](const auto& line) { return line.level == Level::error; });
+    if (errors > 0 && ImGui::SmallButton((std::to_string(errors) + " errors").c_str())) {
+        show_console_ = focus_console_ = true;
+        scene_.maximized = false;
+        console_levels_ = {false, false, true};
+        console_search_.clear();
+    }
     play_controls();
     ImGui::EndMainMenuBar();
     if (close) leave([this] { close_project(); });
+}
+
+void App::appearance_menu() {
+    if (!ImGui::BeginMenu("Appearance")) return;
+    bool changed = false;
+    ImGui::TextDisabled("Interface scale");
+    for (const int percent : {80, 90, 100, 110, 125, 150}) {
+        const auto label = std::to_string(percent) + "%";
+        if (ImGui::MenuItem(label.c_str(), nullptr, ui_scale_ == percent)) {
+            ui_scale_ = percent;
+            changed = true;
+        }
+    }
+    ImGui::Separator();
+    ImGui::TextDisabled("Density");
+    if (ImGui::MenuItem("Comfortable", nullptr, !compact_ui_)) {
+        compact_ui_ = false;
+        changed = true;
+    }
+    if (ImGui::MenuItem("Compact", nullptr, compact_ui_)) {
+        compact_ui_ = true;
+        changed = true;
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Restore defaults")) {
+        ui_scale_ = 100;
+        compact_ui_ = false;
+        changed = true;
+    }
+    if (changed)
+        later([this] {
+            style(static_cast<float>(ui_scale_) / 100, compact_ui_);
+            auto settings = Json::object();
+            settings.set("scale_percent", ui_scale_);
+            settings.set("compact", compact_ui_);
+            fs::create_directories(preferences_);
+            write_text(preferences_ / "appearance.json", to_json(settings));
+        });
+    ImGui::EndMenu();
 }
 
 void App::project_panel() {
@@ -777,29 +959,83 @@ void App::project_panel() {
 }
 
 void App::console_panel() {
+    if (std::exchange(focus_console_, false)) ImGui::SetNextWindowFocus();
     if (!ImGui::Begin(console_window, &show_console_)) {
         ImGui::End();
         return;
     }
-    if (ImGui::SmallButton("Clear")) log_.clear();
+    for (int i = 0; i < 3; ++i) {
+        const auto level = static_cast<Level>(i);
+        const auto count =
+            std::count_if(log_.begin(), log_.end(), [=](const auto& line) { return line.level == level; });
+        const auto label = std::string(level_name(level)) + " (" + std::to_string(count) + ")";
+        if (i) toolbar_next(button_width(label.c_str()) + ImGui::GetFrameHeight());
+        ImGui::Checkbox(label.c_str(), &console_levels_[static_cast<std::size_t>(i)]);
+    }
+    toolbar_next(ImGui::GetFontSize() * 12);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##console search", "Search messages", &console_search_);
+    ImGui::Checkbox("Group repeats", &console_group_);
+    toolbar_next(button_width("Follow") + ImGui::GetFrameHeight());
+    const bool follow_clicked = ImGui::Checkbox("Follow", &console_follow_);
+    auto rows = console_rows(log_, console_levels_, console_search_, console_group_);
+    toolbar_next(button_width("Copy visible"));
+    if (ImGui::SmallButton("Copy visible")) {
+        std::string text;
+        for (const auto& row : rows)
+            text += console_text(log_[row.index], row.count) + "\n";
+        ImGui::SetClipboardText(text.c_str());
+    }
+    toolbar_next(button_width("Clear"));
+    if (ImGui::SmallButton("Clear")) {
+        log_.clear();
+        rows.clear();
+    }
     ImGui::Separator();
     ImGui::BeginChild("Lines");
-    for (const auto& line : log_) {
+    const bool at_bottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 2;
+    if (ImGui::IsWindowHovered() &&
+        (ImGui::GetIO().MouseWheel > 0 || (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && !at_bottom)))
+        console_follow_ = false;
+    for (const auto& row : rows) {
+        const auto& line = log_[row.index];
         const ImVec4 color = line.level == Level::error     ? ImVec4{0.95F, 0.45F, 0.40F, 1}
                              : line.level == Level::warning ? ImVec4{0.95F, 0.78F, 0.40F, 1}
                                                             : ImGui::GetStyleColorVec4(ImGuiCol_Text);
-        ImGui::TextDisabled("%s", line.time.c_str());
-        ImGui::SameLine();
+        ImGui::PushID(static_cast<int>(row.index));
         ImGui::PushStyleColor(ImGuiCol_Text, color);
         ImGui::PushTextWrapPos(0);
-        ImGui::TextUnformatted(line.text.c_str());
+        const auto text = console_text(line, row.count);
+        ImGui::TextUnformatted(text.c_str());
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
+        if (ImGui::BeginPopupContextItem("message actions")) {
+            if (ImGui::MenuItem("Copy message")) ImGui::SetClipboardText(text.c_str());
+            for (const auto& entity : scene_.scene().entities) {
+                if (entity.name.empty() || line.text.find("\"" + entity.name + "\"") == std::string::npos)
+                    continue;
+                if (ImGui::MenuItem(("Show entity: " + entity.name).c_str()))
+                    scene_.reveal_entity(entity.name);
+            }
+            for (const auto& material : assets_.assets().materials) {
+                if (material.name.empty() || line.text.find("\"" + material.name + "\"") == std::string::npos)
+                    continue;
+                if (ImGui::MenuItem(("Inspect material: " + material.name).c_str()))
+                    assets_.select_material(material.name);
+            }
+            for (const auto& name : Scripts::list(project_->root / "scripts")) {
+                if (line.text.find(name) == std::string::npos) continue;
+                if (ImGui::MenuItem(("Open script: " + name).c_str()))
+                    later([this, name] { open_with_system(project_->root / "scripts" / name); });
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
     }
-    if (log_scroll_) {
-        ImGui::SetScrollHereY(1);
-        log_scroll_ = false;
-    }
+    if (rows.empty())
+        ImGui::TextDisabled(log_.empty() ? "No messages yet." : "No messages match these filters.");
+    if (console_follow_ && (log_scroll_ || follow_clicked)) ImGui::SetScrollHereY(1);
+    log_scroll_ = false;
     ImGui::EndChild();
     ImGui::End();
 }

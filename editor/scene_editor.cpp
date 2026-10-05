@@ -2,8 +2,10 @@
 #include "folder_dialog.hpp"
 #include "io/storage.hpp"
 #include "project.hpp"
+#include "selection_edit.hpp"
 #include "starter.hpp"
 #include "textures.hpp"
+#include "widgets.hpp"
 #include "world/noise.hpp"
 #include <algorithm>
 #include <cctype>
@@ -460,10 +462,11 @@ bool SceneEditor::draw(Assets& assets) {
     assets_ = &assets;
     sync(assets);
     clamp_selection();
-    if (show_scene)
+    if (show_scene || maximized)
         scene_view();
     else
         view_visible_ = false;
+    if (maximized) return false;
     if (show_hierarchy) hierarchy();
     bool changed = false;
     if (show_inspector) {
@@ -767,10 +770,10 @@ void SceneEditor::toolbar() {
     const auto tool_button = [&](const char* label, Tool tool, const char* tip) {
         const bool active = tool_ == tool;
         if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (tool != Tool::move) toolbar_next(button_width(label));
         if (ImGui::Button(label)) tool_ = tool;
         if (active) ImGui::PopStyleColor();
         ImGui::SetItemTooltip("%s", tip);
-        ImGui::SameLine();
     };
     tool_button("Move", Tool::move,
                 "Drag the arrows to move along an axis, or the centre to move freely (W).");
@@ -787,27 +790,34 @@ void SceneEditor::toolbar() {
         terrain_selected_ = true;
         atmosphere_selected_ = false;
     }
-    ImGui::SetNextItemWidth(95);
+    const float snap_width = ImGui::GetFontSize() * 7;
+    toolbar_next(snap_width);
+    ImGui::SetNextItemWidth(snap_width);
     ImGui::Combo("##snap", &snap_, snap_labels, 4);
     ImGui::SetItemTooltip("Moves land on this grid, sizes use it, and rotation snaps to 15 degrees.\n"
                           "Hold Shift while dragging to flip snapping.");
-    ImGui::SameLine();
-    ImGui::Checkbox("Lit", &lit_);
-    ImGui::SetItemTooltip("Show the game's lighting and lights instead of flat full brightness.");
-    ImGui::SameLine();
-    ImGui::Checkbox("Terrain", &show_terrain_);
-    if (terrain_)
-        ImGui::SetItemTooltip(
-            "Show the generated world for the seed in the Terrain panel.\nLast refill: %.1f ms", cache_ms_);
-    else
-        ImGui::SetItemTooltip("%s", terrain_error_.empty() ? "This project has no terrain yet."
-                                                           : terrain_error_.c_str());
-    ImGui::SameLine();
+    toolbar_next(button_width("View"));
+    if (ImGui::Button("View")) ImGui::OpenPopup("scene display");
+    ImGui::SetItemTooltip("Lighting and terrain display options.");
+    if (ImGui::BeginPopup("scene display")) {
+        ImGui::Checkbox("Lit", &lit_);
+        ImGui::SetItemTooltip("Show the game's lighting and lights instead of flat full brightness.");
+        ImGui::Checkbox("Terrain", &show_terrain_);
+        if (terrain_)
+            ImGui::SetItemTooltip(
+                "Show the generated world for the seed in the Terrain panel.\nLast refill: %.1f ms",
+                cache_ms_);
+        else
+            ImGui::SetItemTooltip("%s", terrain_error_.empty() ? "This project has no terrain yet."
+                                                               : terrain_error_.c_str());
+        ImGui::EndPopup();
+    }
+    toolbar_next(button_width("Frame"));
     ImGui::BeginDisabled(selection_.empty());
     if (ImGui::Button("Frame")) frame_selection();
     ImGui::SetItemTooltip("Centre the view on the selection (F).");
     ImGui::EndDisabled();
-    ImGui::SameLine();
+    toolbar_next(ImGui::GetFontSize() * 4);
     ImGui::TextDisabled(zoom_ >= 3.2F ? "%.0f%%" : "%.1f%%", zoom_ / 32 * 100);
 }
 
@@ -815,8 +825,17 @@ void SceneEditor::scene_view() {
     // The Scene tab is in front after a project opens; the request waits until docking settles.
     if (focus_ && --focus_ == 0) ImGui::SetNextWindowFocus();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
-    const bool open = ImGui::Begin(title("Scene", dirty(), scene_id).c_str(), &show_scene,
-                                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    if (maximized) {
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->WorkPos);
+        ImGui::SetNextWindowSize(ImGui::GetMainViewport()->WorkSize);
+    }
+    const bool open =
+        ImGui::Begin(title("Scene", dirty(), maximized ? "###SceneMaximized" : scene_id).c_str(),
+                     maximized ? nullptr : &show_scene,
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+                         (maximized ? ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+                                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
+                                    : 0));
     ImGui::PopStyleVar();
     view_visible_ = false;
     if (!open) {
@@ -827,10 +846,12 @@ void SceneEditor::scene_view() {
     auto* draw = ImGui::GetWindowDrawList();
 
     const ImVec2 top = ImGui::GetCursorScreenPos();
-    const float bar = ImGui::GetFrameHeightWithSpacing() + 6;
-    ImGui::SetCursorScreenPos({top.x + 8, top.y + 4});
+    const float inset = ImGui::GetStyle().FramePadding.x;
+    ImGui::SetCursorScreenPos({top.x + inset, top.y + 4});
+    ImGui::BeginGroup();
     toolbar();
-    const ImVec2 view_top{top.x, top.y + bar};
+    ImGui::EndGroup();
+    const ImVec2 view_top{top.x, ImGui::GetItemRectMax().y + ImGui::GetStyle().ItemSpacing.y};
     ImGui::SetCursorScreenPos(view_top);
     const ImVec2 size = ImGui::GetContentRegionAvail();
     if (size.x < 2 || size.y < 2) {
@@ -1386,11 +1407,11 @@ void SceneEditor::brush_section(const Assets& assets) {
     for (int i = 0; i < 7; ++i) {
         const bool on = brush_.kind == static_cast<Brush>(i);
         if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (i > 0) toolbar_next(button_width(kinds[i]));
         if (ImGui::Button(kinds[i])) brush_.kind = static_cast<Brush>(i);
         if (on) ImGui::PopStyleColor();
         ImGui::SetItemTooltip("%s", tips[i]);
         mark((std::string("brush ") + kinds[i]).c_str());
-        if (i % 4 != 3 && i != 6) ImGui::SameLine();
     }
     ImGui::TextUnformatted("Size (tiles)");
     ImGui::SetNextItemWidth(-1);
@@ -1461,7 +1482,7 @@ void SceneEditor::brush_section(const Assets& assets) {
 
 void SceneEditor::scene_menu() {
     const bool locked = dirty();
-    ImGui::SetNextItemWidth(-60);
+    ImGui::SetNextItemWidth(-button_width("Edit") - ImGui::GetStyle().ItemSpacing.x);
     ImGui::BeginDisabled(locked);
     if (ImGui::BeginCombo("##scene", name_.c_str())) {
         for (const auto& name : scene_names_)
@@ -1569,8 +1590,11 @@ void SceneEditor::prefabs_panel() {
         log_(false, "Deleted prefab \"" + remove +
                         "\"; its copies stay as plain entities. Save to remove the file.");
     }
-    if (prefabs_.empty())
+    if (prefabs_.empty()) {
+        ImGui::PushTextWrapPos(0);
         ImGui::TextDisabled("Select an entity and press New from Selection to make a reusable prefab.");
+        ImGui::PopTextWrapPos();
+    }
     ImGui::EndChild();
     ImGui::End();
 }
@@ -1627,10 +1651,10 @@ void SceneEditor::hierarchy() {
         mark("create npc");
         ImGui::EndPopup();
     }
-    ImGui::SameLine();
+    toolbar_next(button_width("Duplicate"));
     ImGui::BeginDisabled(selection_.empty());
     if (ImGui::SmallButton("Duplicate")) duplicate_selection();
-    ImGui::SameLine();
+    toolbar_next(button_width("Delete"));
     if (ImGui::SmallButton("Delete")) delete_selection();
     ImGui::EndDisabled();
     ImGui::SetNextItemWidth(-1);
@@ -1863,7 +1887,7 @@ bool SceneEditor::visual_material(SceneVisual& v, Assets& assets) {
     auto& materials = assets.materials;
     bool changed = false, make_new = false;
     ImGui::TextUnformatted("Material");
-    ImGui::SetNextItemWidth(-60);
+    ImGui::SetNextItemWidth(-button_width("Edit") - ImGui::GetStyle().ItemSpacing.x);
     if (ImGui::BeginCombo("##material", v.material.c_str())) {
         for (const auto& m : materials)
             if (ImGui::Selectable(m.name.c_str(), m.name == v.material)) v.material = m.name;
@@ -1909,7 +1933,7 @@ bool SceneEditor::visual_material(SceneVisual& v, Assets& assets) {
     // A texture drawn instead of the material's generated tile.
     const auto project = folder_.parent_path();
     ImGui::TextUnformatted("Texture");
-    ImGui::SetNextItemWidth(-90);
+    ImGui::SetNextItemWidth(-button_width("Import...") - ImGui::GetStyle().ItemSpacing.x);
     if (ImGui::BeginCombo("##visual texture", m.texture.empty() ? "None (generated)" : m.texture.c_str())) {
         if (ImGui::Selectable("None (generated)", m.texture.empty())) {
             m.texture.clear();
@@ -1964,6 +1988,221 @@ bool SceneEditor::visual_material(SceneVisual& v, Assets& assets) {
     return changed;
 }
 
+void SceneEditor::reveal_entity(const std::string& name) {
+    for (std::size_t i = 0; i < edited_.entities.size(); ++i) {
+        if (edited_.entities[i].name != name) continue;
+        select_only(static_cast<int>(i));
+        frame_selection();
+        show_scene = show_inspector = true;
+        focus_ = 2;
+        return;
+    }
+}
+
+void SceneEditor::multi_inspector(const Assets& assets) {
+    std::vector<SceneEntity*> entities;
+    entities.push_back(&edited_.entities[static_cast<std::size_t>(primary_)]);
+    for (int index : selection_)
+        if (index != primary_) entities.push_back(&edited_.entities[static_cast<std::size_t>(index)]);
+    ImGui::Text("%zu entities selected", entities.size());
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled("Mixed fields show the value from the first applicable entity. Edit a field or press "
+                        "Set to apply only that field.");
+    ImGui::PopTextWrapPos();
+
+    const auto label = [&](const char* name, bool mixed) {
+        ImGui::TextUnformatted(name);
+        if (mixed) {
+            ImGui::SameLine();
+            ImGui::TextColored({0.85F, 0.73F, 0.43F, 1}, "Mixed");
+        }
+    };
+    const auto number = [&](const char* name, auto get, float low, float high) {
+        float* first = nullptr;
+        for (auto* entity : entities)
+            if ((first = get(*entity))) break;
+        if (!first) return;
+        ImGui::PushID(name);
+        const bool mixed = selection_mixed(entities, get);
+        label(name, mixed);
+        float value = *first;
+        ImGui::SetNextItemWidth(mixed ? -button_width("Set") - ImGui::GetStyle().ItemSpacing.x : -1);
+        bool changed =
+            ImGui::DragFloat("##value", &value, 0.05F, low, high, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        mark(name);
+        if (mixed) {
+            ImGui::SameLine();
+            changed |= ImGui::Button("Set");
+            ImGui::SetItemTooltip("Apply the displayed value to every selected entity with this component.");
+        }
+        if (changed && std::isfinite(value)) set_selection_field(entities, get, value);
+        ImGui::PopID();
+    };
+    const auto toggle_field = [&](const char* name, auto get) {
+        bool* first = nullptr;
+        for (auto* entity : entities)
+            if ((first = get(*entity))) break;
+        if (!first) return;
+        const bool mixed = selection_mixed(entities, get);
+        bool value = *first;
+        const auto text = std::string(name) + (mixed ? " (Mixed)" : "");
+        if (ImGui::Checkbox((text + "###" + name).c_str(), &value)) set_selection_field(entities, get, value);
+    };
+    ImGui::SeparatorText("Transform");
+    ImGui::Checkbox("Absolute positions", &absolute_position_);
+    mark("absolute positions");
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled(absolute_position_
+                            ? "Set one axis to the same coordinate for all selected entities."
+                            : "Relative: changing an axis moves the group by the same offset.");
+    ImGui::PopTextWrapPos();
+    for (int axis = 0; axis < 2; ++axis) {
+        const auto coordinate = [axis](const SceneEntity& entity) {
+            return axis == 0 ? global_coordinate(entity.position.chunk.x, entity.position.local.x)
+                             : global_coordinate(entity.position.chunk.y, entity.position.local.y);
+        };
+        double value = coordinate(*entities.front());
+        const bool mixed = std::any_of(entities.begin(), entities.end(),
+                                       [&](const auto* entity) { return coordinate(*entity) != value; });
+        ImGui::PushID(axis);
+        label(axis == 0 ? "Position X" : "Position Y", mixed);
+        const bool can_set = mixed && absolute_position_;
+        ImGui::SetNextItemWidth(can_set ? -button_width("Set") - ImGui::GetStyle().ItemSpacing.x : -1);
+        bool changed =
+            ImGui::DragScalar("##position", ImGuiDataType_Double, &value, 0.05F, nullptr, nullptr, "%.2f");
+        mark(axis == 0 ? "multi position x" : "multi position y");
+        if (can_set) {
+            ImGui::SameLine();
+            changed |= ImGui::Button("Set");
+            mark(axis == 0 ? "set position x" : "set position y");
+        }
+        if (changed && std::isfinite(value)) {
+            try {
+                set_selection_position(entities, axis, value, absolute_position_);
+            } catch (const std::exception& error) {
+                log_(true, error.what());
+            }
+        }
+        ImGui::PopID();
+    }
+    // Angles are stored in radians, but displayed and edited in degrees.
+    const auto angle = [](SceneEntity& e) {
+        return &e.angle;
+    };
+    const bool mixed_angle = selection_mixed(entities, angle);
+    label("Rotation (degrees)", mixed_angle);
+    float degrees = entities.front()->angle * 180 / pi;
+    ImGui::SetNextItemWidth(mixed_angle ? -button_width("Set") - ImGui::GetStyle().ItemSpacing.x : -1);
+    bool angle_changed =
+        ImGui::DragFloat("##rotation", &degrees, 1, -360, 360, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+    if (mixed_angle) {
+        ImGui::SameLine();
+        angle_changed |= ImGui::Button("Set##rotation");
+    }
+    if (angle_changed && std::isfinite(degrees)) set_selection_field(entities, angle, degrees * pi / 180);
+
+    const auto component = [&](const char* name, auto member, auto create) {
+        const auto count = std::count_if(entities.begin(), entities.end(),
+                                         [&](const auto* e) { return (e->*member).has_value(); });
+        const auto heading =
+            std::string(name) + " (" + std::to_string(count) + "/" + std::to_string(entities.size()) + ")";
+        if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) return false;
+        ImGui::PushID(name);
+        if (count < static_cast<std::ptrdiff_t>(entities.size()) && ImGui::SmallButton("Add to missing"))
+            for (auto* e : entities)
+                if (!(e->*member)) (e->*member) = create();
+        if (count > 0) {
+            if (count < static_cast<std::ptrdiff_t>(entities.size()))
+                toolbar_next(button_width("Remove from all"));
+            if (ImGui::SmallButton("Remove from all"))
+                for (auto* e : entities)
+                    (e->*member).reset();
+        }
+        ImGui::PopID();
+        return true;
+    };
+    if (component("Visual", &SceneEntity::visual, [&] {
+            SceneVisual visual;
+            if (!assets.materials.empty()) visual.material = assets.materials.front().name;
+            return visual;
+        })) {
+        const auto material = [](SceneEntity& e) {
+            return e.visual ? &e.visual->material : nullptr;
+        };
+        std::string* first = nullptr;
+        for (auto* e : entities)
+            if ((first = material(*e))) break;
+        if (first) {
+            label("Material", selection_mixed(entities, material));
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::BeginCombo("##multi material",
+                                  selection_mixed(entities, material) ? "Mixed" : first->c_str())) {
+                for (const auto& m : assets.materials)
+                    if (ImGui::Selectable(m.name.c_str())) set_selection_field(entities, material, m.name);
+                ImGui::EndCombo();
+            }
+        }
+        number("Size X", [](SceneEntity& e) { return e.visual ? &e.visual->size.x : nullptr; }, 0.05F, 64);
+        number("Size Y", [](SceneEntity& e) { return e.visual ? &e.visual->size.y : nullptr; }, 0.05F, 64);
+    }
+    if (component("Light", &SceneEntity::light, [] { return SceneLight{}; })) {
+        const char* channels[] = {"Red", "Green", "Blue"};
+        for (int i = 0; i < 3; ++i)
+            number(
+                channels[i],
+                [i](SceneEntity& e) {
+                    return e.light ? &e.light->color[static_cast<std::size_t>(i)] : nullptr;
+                },
+                0, 1);
+        number("Radius", [](SceneEntity& e) { return e.light ? &e.light->radius : nullptr; }, 0.5F, 64);
+        number("Intensity", [](SceneEntity& e) { return e.light ? &e.light->intensity : nullptr; }, 0, 8);
+        number("Height", [](SceneEntity& e) { return e.light ? &e.light->height : nullptr; }, 0.1F, 16);
+        number("Flicker", [](SceneEntity& e) { return e.light ? &e.light->flicker : nullptr; }, 0, 1);
+        toggle_field("Only at night",
+                     [](SceneEntity& e) { return e.light ? &e.light->night_only : nullptr; });
+    }
+    if (component("Character", &SceneEntity::character, [] { return SceneCharacter{}; })) {
+        number(
+            "Walk speed", [](SceneEntity& e) { return e.character ? &e.character->speed : nullptr; }, 0, 100);
+        number(
+            "Run speed", [](SceneEntity& e) { return e.character ? &e.character->run_speed : nullptr; }, 0,
+            100);
+        number(
+            "Acceleration", [](SceneEntity& e) { return e.character ? &e.character->acceleration : nullptr; },
+            0, 10000);
+        number(
+            "Collision X", [](SceneEntity& e) { return e.character ? &e.character->collision.x : nullptr; },
+            0.05F, 16);
+        number(
+            "Collision Y", [](SceneEntity& e) { return e.character ? &e.character->collision.y : nullptr; },
+            0.05F, 16);
+        toggle_field("Water blocks",
+                     [](SceneEntity& e) { return e.character ? &e.character->water : nullptr; });
+        toggle_field("Solid blocks",
+                     [](SceneEntity& e) { return e.character ? &e.character->solid : nullptr; });
+        toggle_field("Buildings block",
+                     [](SceneEntity& e) { return e.character ? &e.character->buildings : nullptr; });
+        toggle_field("Face movement",
+                     [](SceneEntity& e) { return e.character ? &e.character->face_movement : nullptr; });
+        ImGui::TextWrapped("Select one character to edit player controls and camera settings.");
+    }
+    ImGui::SeparatorText("Script");
+    const auto script = [](SceneEntity& e) {
+        return &e.script;
+    };
+    const bool mixed_script = selection_mixed(entities, script);
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::BeginCombo("##multi script", mixed_script ? "Mixed"
+                                            : entities.front()->script.empty()
+                                                ? "None"
+                                                : entities.front()->script.c_str())) {
+        if (ImGui::Selectable("None")) set_selection_field(entities, script, std::string{});
+        for (const auto& name : Scripts::list(folder_.parent_path() / "scripts"))
+            if (ImGui::Selectable(name.c_str())) set_selection_field(entities, script, name);
+        ImGui::EndCombo();
+    }
+}
+
 bool SceneEditor::inspector(Assets& assets) {
     if (!ImGui::Begin(inspector_id, &show_inspector)) {
         ImGui::End();
@@ -1975,22 +2214,15 @@ bool SceneEditor::inspector(Assets& assets) {
         ImGui::End();
         return false;
     }
-    // The Inspector edits the primary entity. With several selected, each change is then applied
-    // to the others too: a move as the same offset, anything else as the new value.
-    auto& e = edited_.entities[static_cast<std::size_t>(primary_)];
-    const SceneEntity before = e;
-    const bool several = selection_.size() > 1;
-    if (several) {
-        ImGui::TextColored({0.45F, 0.9F, 0.65F, 1}, "%zu entities selected", selection_.size());
-        ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("Showing \"%s\". Changes apply to every selected entity that has the field.",
-                            e.name.c_str());
-        ImGui::PopTextWrapPos();
-    } else {
-        ImGui::TextUnformatted("Name");
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputText("##name", &e.name);
+    if (selection_.size() > 1) {
+        multi_inspector(assets);
+        ImGui::End();
+        return false;
     }
+    auto& e = edited_.entities[static_cast<std::size_t>(primary_)];
+    ImGui::TextUnformatted("Name");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputText("##name", &e.name);
 
     double position[2] = {global_coordinate(e.position.chunk.x, e.position.local.x),
                           global_coordinate(e.position.chunk.y, e.position.local.y)};
@@ -2077,7 +2309,7 @@ bool SceneEditor::inspector(Assets& assets) {
             ImGui::SetItemTooltip("How much the light wavers, as a flame or a failing lamp does.");
             ImGui::Checkbox("Only at night", &l.night_only);
             ImGui::SetItemTooltip("Lit as the scene's daylight fades, like a street lamp; out by day.");
-            ImGui::TextDisabled("Turn on Lit in the Scene view to see lights.");
+            ImGui::TextDisabled("Turn on View > Lit in the Scene view to see lights.");
         }
         if (!keep) e.light.reset();
     }
@@ -2086,7 +2318,7 @@ bool SceneEditor::inspector(Assets& assets) {
     if (!e.script.empty()) {
         bool keep = true;
         if (ImGui::CollapsingHeader("Script", &keep, ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::SetNextItemWidth(-70);
+            ImGui::SetNextItemWidth(-button_width("Edit") - ImGui::GetStyle().ItemSpacing.x);
             if (ImGui::BeginCombo("##script", e.script.c_str())) {
                 for (const auto& name : Scripts::list(script_folder))
                     if (ImGui::Selectable(name.c_str(), name == e.script)) e.script = name;
@@ -2145,43 +2377,6 @@ bool SceneEditor::inspector(Assets& assets) {
             ImGui::EndMenu();
         }
         ImGui::EndPopup();
-    }
-    if (several && !(e == before)) {
-        const auto moved = relative(e.position, before.position);
-        for (const int i : selection_) {
-            if (i == primary_) continue;
-            auto& other = edited_.entities[static_cast<std::size_t>(i)];
-            if (!(e.position == before.position)) other.position.move(moved);
-            if (e.angle != before.angle) other.angle = e.angle;
-            // Components: added or removed on all, or each changed field copied where present.
-            if (e.visual.has_value() != before.visual.has_value())
-                other.visual = e.visual ? (other.visual ? other.visual : e.visual) : std::nullopt;
-            else if (e.visual && other.visual) {
-                if (e.visual->material != before.visual->material)
-                    other.visual->material = e.visual->material;
-                if (!(e.visual->size == before.visual->size)) other.visual->size = e.visual->size;
-            }
-            if (e.light.has_value() != before.light.has_value())
-                other.light = e.light ? (other.light ? other.light : e.light) : std::nullopt;
-            else if (e.light && other.light) {
-                if (e.light->color != before.light->color) other.light->color = e.light->color;
-                if (e.light->radius != before.light->radius) other.light->radius = e.light->radius;
-                if (e.light->intensity != before.light->intensity)
-                    other.light->intensity = e.light->intensity;
-                if (e.light->height != before.light->height) other.light->height = e.light->height;
-            }
-            if (e.script != before.script) other.script = e.script;
-            if (e.character != before.character) {
-                const auto player = other.character ? other.character->player : std::nullopt;
-                if (!e.character)
-                    other.character.reset();
-                else {
-                    other.character = e.character;
-                    other.character->player = player;
-                }
-            }
-            if (e.prefab != before.prefab) other.prefab = e.prefab;
-        }
     }
     // This entity's problems, from the same checks that block saving.
     SceneFile one;

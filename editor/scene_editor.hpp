@@ -55,6 +55,7 @@ public:
         game_view_ = {static_cast<float>(width), static_cast<float>(height)};
     }
     const std::vector<int>& selection() const { return selection_; }
+    void reveal_entity(const std::string& name);
     // Where a world position appears in the Scene view, in ImGui's screen coordinates.
     ImVec2 screen_of(WorldPosition position) const { return to_screen(position); }
     // Where the Hierarchy drew things last frame, for automated UI tests: each entity's row and its
@@ -84,6 +85,7 @@ public:
     // An error raised while drawing the view during ImGui's rendering, cleared by the call.
     std::string take_error() { return std::exchange(render_error_, {}); }
 
+    bool maximized{};
     bool show_scene{true}, show_hierarchy{true}, show_inspector{true}, show_prefabs{true};
     static constexpr const char* scene_id = "###Scene";
     static constexpr const char* hierarchy_id = "Hierarchy";
@@ -144,6 +146,8 @@ private:
     void hierarchy();
     // Returns true when it changed `assets` (materials made or edited from the Visual section).
     bool inspector(Assets& assets);
+    void multi_inspector(const Assets& assets);
+    bool absolute_position_{};
     bool visual_material(SceneVisual& visual, Assets& assets);
     void character_section(SceneEntity& e, const Assets& assets);
     // The Inspector for the scene's Terrain object; returns true when it changed `assets`.

@@ -1,5 +1,6 @@
 #pragma once
 #include "asset_panels.hpp"
+#include "console.hpp"
 #include "export.hpp"
 #include "history.hpp"
 #include "platform/window.hpp"
@@ -8,6 +9,7 @@
 #include "scene_editor.hpp"
 #include "splash.hpp"
 #include "ui_test.hpp"
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -41,11 +43,7 @@ public:
     int run();
 
 private:
-    enum class Level { info, warning, error };
-    struct LogLine {
-        Level level;
-        std::string time, text;
-    };
+    using Level = LogLevel;
     struct FileEntry {
         std::filesystem::path path;
         int depth{};
@@ -82,11 +80,17 @@ private:
     void hub();
     void workspace();
     void menu_bar();
+    void appearance_menu();
     void project_panel();
     void console_panel();
     void settings_panel();
     void about_popup();
     void build_default_layout(unsigned dockspace);
+    void workspace_menu();
+    void save_workspace();
+    void load_workspace();
+    enum class Workspace { scene, terrain, assets };
+    Workspace workspace_{Workspace::scene};
     void screenshot(const std::filesystem::path& path);
 
     Options options_;
@@ -96,6 +100,8 @@ private:
     std::optional<Project> project_;
     std::string layout_file_; // ImGui keeps a pointer to this string.
     bool reset_layout_{};
+    int ui_scale_{100};
+    bool compact_ui_{};
     bool quit_{};
 
     // Hub form state.
@@ -113,6 +119,9 @@ private:
     std::chrono::steady_clock::time_point files_scanned_{};
     std::vector<LogLine> log_;
     bool log_scroll_{};
+    std::array<bool, 3> console_levels_{true, true, true};
+    std::string console_search_;
+    bool console_group_{true}, console_follow_{true}, focus_console_{};
     unsigned frames_{};
     unsigned calm_frames_{};
     std::function<void()> pending_;

@@ -123,42 +123,45 @@ void AssetPanels::terrain() {
         }
         ImGui::Separator();
     }
-    // World shape and preview seed.
-    ImGui::SetNextItemWidth(160);
-    ImGui::InputScalar("Seed", ImGuiDataType_U64, &t.default_seed);
+    // Keep world controls readable beside the Scene, including in narrow dock nodes.
+    const bool compact = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * 44;
+    ImGui::TextUnformatted("Seed");
+    ImGui::SetNextItemWidth(-button_width("Randomize") - ImGui::GetStyle().ItemSpacing.x);
+    ImGui::InputScalar("##seed", ImGuiDataType_U64, &t.default_seed);
     ImGui::SetItemTooltip("The world the Scene view shows, and the game's default seed.");
     ImGui::SameLine();
     if (ImGui::Button("Randomize")) t.default_seed = std::random_device{}() & 0xffffffffU;
     ImGui::Checkbox("Island", &t.island);
     ImGui::SetItemTooltip("A disc of land in endless ocean. Off: the world goes on forever.");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(170);
-    ImGui::SliderFloat("Radius (chunks)", &t.radius, 4, 2000, "%.0f", ImGuiSliderFlags_Logarithmic);
+    ImGui::TextUnformatted("Radius (chunks)");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::SliderFloat("##radius", &t.radius, 4, 2000, "%.0f", ImGuiSliderFlags_Logarithmic);
     if (t.island) {
-        ImGui::SetNextItemWidth(170);
-        ImGui::SliderFloat("Coast width", &t.coast, 0, 0.5F);
+        ImGui::TextUnformatted("Coast width");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderFloat("##coast", &t.coast, 0, 0.5F);
     }
-    ImGui::SetNextItemWidth(170);
-    ImGui::SliderFloat("Warp (tiles)", &t.warp, 0, 128, "%.0f");
+    ImGui::TextUnformatted("Warp (tiles)");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::SliderFloat("##warp", &t.warp, 0, 128, "%.0f");
     ImGui::SetItemTooltip("Bends coastlines and borders so they look less like smooth blobs.");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(90);
-    wavelength_combo("Warp wavelength", t.warp_wavelength);
+    ImGui::TextUnformatted("Warp wavelength");
+    ImGui::SetNextItemWidth(-1);
+    wavelength_combo("##warp wavelength", t.warp_wavelength);
 
     if (ImGui::BeginTabBar("terrain tabs")) {
         if (ImGui::BeginTabItem("Rules")) {
-            ImGui::TextDisabled("Each tile takes the first rule whose ranges all hold.");
-            if (ImGui::BeginTable("rules", 2, ImGuiTableFlags_Resizable)) {
-                ImGui::TableSetupColumn("list", ImGuiTableColumnFlags_WidthFixed, 150);
+            ImGui::TextWrapped("Each tile takes the first rule whose ranges all hold.");
+            if (ImGui::BeginTable("rules", compact ? 1 : 2, ImGuiTableFlags_Resizable)) {
+                if (!compact) ImGui::TableSetupColumn("list", ImGuiTableColumnFlags_WidthFixed, 150);
                 ImGui::TableNextColumn();
-                list(t.rules, rule_, "rule", TerrainAsset::rule_capacity, "Earlier rules win.");
+                list(t.rules, rule_, "rule", TerrainAsset::rule_capacity, "Earlier rules win.", compact);
                 ImGui::TableNextColumn();
                 if (rule_ >= 0 && rule_ < static_cast<int>(t.rules.size())) {
                     auto& r = t.rules[static_cast<std::size_t>(rule_)];
                     ImGui::SetNextItemWidth(-1);
                     ImGui::InputText("##name", &r.name);
                     ImGui::TextUnformatted("Material");
-                    ImGui::SameLine(110);
                     ImGui::SetNextItemWidth(-1);
                     material_combo("##material", r.material, edited_.materials);
                     ImGui::Checkbox("Solid", &r.solid);
@@ -173,14 +176,12 @@ void AssetPanels::terrain() {
                             break;
                         }
                         ImGui::SameLine();
-                        ImGui::SetNextItemWidth(110);
+                        ImGui::SetNextItemWidth(-1);
                         field_combo("##field", c.field, t.fields);
-                        ImGui::SameLine();
-                        ImGui::TextUnformatted("from");
+                        ImGui::TextUnformatted("From");
                         ImGui::SameLine();
                         bound("##min", c.min, -std::numeric_limits<float>::infinity());
-                        ImGui::SameLine();
-                        ImGui::TextUnformatted("to");
+                        ImGui::TextUnformatted("To");
                         ImGui::SameLine();
                         bound("##max", c.max, std::numeric_limits<float>::infinity());
                         ImGui::PopID();
@@ -196,12 +197,10 @@ void AssetPanels::terrain() {
                     ImGui::SetItemTooltip("Place an object (a tree, a rock) on some of this rule's tiles.");
                     if (r.scatter) {
                         ImGui::TextUnformatted("Material");
-                        ImGui::SameLine(110);
                         ImGui::SetNextItemWidth(-1);
                         material_combo("##scatter", r.scatter->material, edited_.materials);
                         int one_in = static_cast<int>(r.scatter->one_in);
                         ImGui::TextUnformatted("One tile in");
-                        ImGui::SameLine(110);
                         ImGui::SetNextItemWidth(-1);
                         if (ImGui::DragInt("##one_in", &one_in, 0.2F, 1, 100000))
                             r.scatter->one_in = static_cast<std::uint32_t>(std::max(1, one_in));
@@ -214,23 +213,26 @@ void AssetPanels::terrain() {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Fields")) {
-            ImGui::TextDisabled("Each field is its base plus the sum of its terms, per tile.");
-            if (ImGui::BeginTable("fields", 2, ImGuiTableFlags_Resizable)) {
-                ImGui::TableSetupColumn("list", ImGuiTableColumnFlags_WidthFixed, 150);
+            ImGui::TextWrapped("Each field is its base plus the sum of its terms, per tile.");
+            if (ImGui::BeginTable("fields", compact ? 1 : 2, ImGuiTableFlags_Resizable)) {
+                if (!compact) ImGui::TableSetupColumn("list", ImGuiTableColumnFlags_WidthFixed, 150);
                 ImGui::TableNextColumn();
-                list(t.fields, field_, "field", TerrainAsset::field_capacity, nullptr);
+                list(t.fields, field_, "field", TerrainAsset::field_capacity, nullptr, compact);
                 ImGui::TableNextColumn();
                 if (field_ >= 0 && field_ < static_cast<int>(t.fields.size())) {
                     auto& f = t.fields[static_cast<std::size_t>(field_)];
                     ImGui::SetNextItemWidth(-1);
                     ImGui::InputText("##name", &f.name);
                     if (f.name == "elevation")
-                        ImGui::TextDisabled("Elevation is the tile height: below 0 is water%s.",
-                                            t.island ? "; the coast pulls it down near the rim" : "");
+                        ImGui::TextWrapped("Elevation is the tile height: below 0 is water%s.",
+                                           t.island ? "; the coast pulls it down near the rim" : "");
                     ImGui::SetNextItemWidth(120);
                     ImGui::DragFloat("Base", &f.base, 0.01F);
-                    if (ImGui::BeginTable("terms", 5,
-                                          ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
+                    if (ImGui::BeginTable(
+                            "terms", 5,
+                            ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollX,
+                            {0, ImGui::GetFrameHeightWithSpacing() * static_cast<float>(f.terms.size() + 2)},
+                            ImGui::GetFontSize() * 28)) {
                         ImGui::TableSetupColumn("Type");
                         ImGui::TableSetupColumn("Wavelength");
                         ImGui::TableSetupColumn("Amount");

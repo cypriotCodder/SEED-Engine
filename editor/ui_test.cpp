@@ -240,6 +240,49 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
     });
     key(ImGuiKey_Z, true);
     add(3, [this] { check(scene_.scene().atmosphere.day_length == 0, "Cmd+Z takes it back"); });
+    // Bulk editing: relative movement preserves spacing, absolute X preserves every Y, and both undo.
+    auto originals = std::make_shared<SceneFile>();
+    click([this] { return row(0, 0); });
+    click([this] { return row(1, 0); }, true);
+    add(3, [this, originals] {
+        *originals = scene_.scene();
+        check(scene_.selection().size() == 2, "multiple selection opens the multi-entity Inspector");
+    });
+    drag([this] { return scene_.control("multi position x"); }, {30, 0});
+    add(3, [this, originals] {
+        const auto delta = relative(scene_.scene().entities[0].position, originals->entities[0].position);
+        check(std::abs(delta.x) > 0.01F && std::abs(delta.y) < 0.001F,
+              "relative Inspector X moves the selection");
+        for (std::size_t i = 1; i < 2; ++i) {
+            const auto moved = relative(scene_.scene().entities[i].position, originals->entities[i].position);
+            check(std::abs(moved.x - delta.x) < 0.001F && std::abs(moved.y) < 0.001F,
+                  "relative Inspector movement preserves spacing");
+        }
+    });
+    key(ImGuiKey_Z, true);
+    add(3,
+        [this, originals] { check(scene_.scene() == *originals, "one undo restores a multi-entity drag"); });
+    click([this] { return scene_.control("absolute positions"); });
+    click([this] { return scene_.control("set position x"); });
+    add(3, [this, originals] {
+        const auto& all = scene_.scene().entities;
+        for (std::size_t i = 0; i < 2; ++i) {
+            check(all[i].position.chunk.x == all[0].position.chunk.x &&
+                      all[i].position.local.x == all[0].position.local.x,
+                  "Set resolves mixed X even when the displayed value is unchanged");
+            check(all[i].position.chunk.y == originals->entities[i].position.chunk.y &&
+                      all[i].position.local.y == originals->entities[i].position.local.y,
+                  "absolute X preserves each Y coordinate");
+        }
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this, originals] {
+        check(scene_.scene() == *originals, "one undo restores an absolute multi-entity edit");
+    });
+    key(ImGuiKey_Space, true, true);
+    add(4, [this] { check(scene_.maximized, "the workspace shortcut maximizes the Scene view"); });
+    key(ImGuiKey_Space, true, true);
+    add(4, [this] { check(!scene_.maximized, "the workspace shortcut restores the docked Scene view"); });
 }
 
 void UiTest::type(const char* text) {
