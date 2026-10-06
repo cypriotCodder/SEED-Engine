@@ -20,6 +20,9 @@
 #include <utility>
 
 namespace seed::editor {
+extern const unsigned char interface_font[];
+extern const int interface_font_size;
+extern const char interface_font_license[];
 namespace {
 namespace fs = std::filesystem;
 constexpr const char* project_window = "Project";
@@ -43,11 +46,11 @@ fs::path default_location() {
     return home ? fs::path(home) / "SeedProjects" : fs::current_path();
 }
 
-void style(float scale, bool compact) {
+void style(float scale, bool compact, int font_size) {
     ImGui::GetStyle() = ImGuiStyle{};
     ImGui::StyleColorsDark();
     auto& s = ImGui::GetStyle();
-    s.FontSizeBase = 15;
+    s.FontSizeBase = static_cast<float>(font_size);
     s.WindowRounding = 6;
     s.FrameRounding = 4;
     s.TabRounding = 4;
@@ -140,13 +143,23 @@ App::App(Options options)
             const auto settings = parse_json(read_text(path, 4096));
             const auto scale = settings.at("scale_percent").as_int(80, 150);
             const bool compact = settings.at("compact").as_bool();
+            const int font_size =
+                settings.find("font_size") ? static_cast<int>(settings.at("font_size").as_int(14, 22)) : 17;
+            ui_font_size_ = font_size;
             ui_scale_ = static_cast<int>(scale);
             compact_ui_ = compact;
         }
     } catch (const std::exception& error) {
         log(Level::warning, std::string("Could not load appearance preferences: ") + error.what());
     }
-    style(static_cast<float>(ui_scale_) / 100, compact_ui_);
+    ImFontConfig font_config;
+    font_config.FontDataOwnedByAtlas = false;
+    std::snprintf(font_config.Name, sizeof(font_config.Name), "Karla Regular");
+    io.FontDefault =
+        io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(interface_font), interface_font_size,
+                                       static_cast<float>(ui_font_size_), &font_config);
+    if (!io.FontDefault) throw std::runtime_error("Could not load the editor interface font");
+    style(static_cast<float>(ui_scale_) / 100, compact_ui_, ui_font_size_);
     if (!ImGui_ImplSDL2_InitForOpenGL(window_.handle(), window_.context()) ||
         !ImGui_ImplOpenGL3_Init("#version 410 core")) {
         ImGui::DestroyContext();
@@ -877,6 +890,18 @@ void App::menu_bar() {
 void App::appearance_menu() {
     if (!ImGui::BeginMenu("Appearance")) return;
     bool changed = false;
+    ImGui::TextDisabled("Font: Karla");
+    if (ImGui::BeginMenu("Text size")) {
+        for (const int size : {14, 15, 16, 17, 18, 20, 22}) {
+            const auto label = std::to_string(size) + " px";
+            if (ImGui::MenuItem(label.c_str(), nullptr, ui_font_size_ == size)) {
+                ui_font_size_ = size;
+                changed = true;
+            }
+        }
+        ImGui::EndMenu();
+    }
+    ImGui::Separator();
     ImGui::TextDisabled("Interface scale");
     for (const int percent : {80, 90, 100, 110, 125, 150}) {
         const auto label = std::to_string(percent) + "%";
@@ -898,15 +923,17 @@ void App::appearance_menu() {
     ImGui::Separator();
     if (ImGui::MenuItem("Restore defaults")) {
         ui_scale_ = 100;
+        ui_font_size_ = 17;
         compact_ui_ = false;
         changed = true;
     }
     if (changed)
         later([this] {
-            style(static_cast<float>(ui_scale_) / 100, compact_ui_);
+            style(static_cast<float>(ui_scale_) / 100, compact_ui_, ui_font_size_);
             auto settings = Json::object();
             settings.set("scale_percent", ui_scale_);
             settings.set("compact", compact_ui_);
+            settings.set("font_size", ui_font_size_);
             fs::create_directories(preferences_);
             write_text(preferences_ / "appearance.json", to_json(settings));
         });
@@ -1101,6 +1128,12 @@ void App::about_popup() {
         ImGui::TextUnformatted("Seed Editor 0.1.0");
         ImGui::TextDisabled("Dear ImGui %s, SDL %d.%d.%d", IMGUI_VERSION, SDL_MAJOR_VERSION,
                             SDL_MINOR_VERSION, SDL_PATCHLEVEL);
+        if (ImGui::CollapsingHeader("Interface font licence")) {
+            ImGui::BeginChild("font licence", {ImGui::GetFontSize() * 35, ImGui::GetFontSize() * 12},
+                              ImGuiChildFlags_Borders);
+            ImGui::TextWrapped("%s", interface_font_license);
+            ImGui::EndChild();
+        }
         if (ImGui::Button("Close", {120, 0})) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }

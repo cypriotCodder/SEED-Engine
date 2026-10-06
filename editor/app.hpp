@@ -101,6 +101,7 @@ private:
     std::string layout_file_; // ImGui keeps a pointer to this string.
     bool reset_layout_{};
     int ui_scale_{100};
+    int ui_font_size_{17};
     bool compact_ui_{};
     bool quit_{};
 
