@@ -1,0 +1,63 @@
+{
+  "format": 1,
+  "terrain": "island",
+  "entities": [
+    {
+      "name": "Player",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        2.5,
+        2.5
+      ],
+      "angle": 0,
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false,
+        "player": {
+          "actions": {
+            "up": "move_up",
+            "down": "move_down",
+            "left": "move_left",
+            "right": "move_right",
+            "run": "run"
+          },
+          "input": false,
+          "zoom": 28,
+          "smoothing": 0.15,
+          "dead_zone": 0.5,
+          "resume": true
+        }
+      }
+    },
+    {
+      "name": "Title",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        2.5,
+        2.5
+      ],
+      "angle": 0,
+      "script": "title.lua"
+    }
+  ],
+  "atmosphere": {
+    "hour": 17.5
+  }
+}

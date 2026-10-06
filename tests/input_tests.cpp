@@ -67,6 +67,18 @@ int main() {
         rebound.held[SDL_SCANCODE_K] = true;
         actions.update(rebound);
         check(actions.held(jump), "New binding inactive");
+        // Replays hold actions as a key would, alongside real input.
+        seed::Input idle;
+        actions.set_scripted(jump, true);
+        actions.update(idle);
+        check(actions.pressed(jump) && actions.held(jump), "Scripted press edge");
+        actions.update(idle);
+        check(!actions.pressed(jump) && actions.held(jump), "Scripted hold");
+        actions.set_scripted(jump, false);
+        actions.update(idle);
+        check(actions.released(jump) && !actions.held(jump), "Scripted release edge");
+        actions.update(rebound);
+        check(actions.held(jump) && !actions.released(jump), "Keys still work after a replay lets go");
         std::cout << "Input action checks passed.\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

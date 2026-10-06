@@ -1,0 +1,14 @@
+# Coin Island from a new save: start a new game, take the three coins on the way east, walk up to
+# the crab and get bitten, then go through the door to the cave and take the gem. The game is
+# saved on quitting, in the cave.
+5 confirm down
+7 confirm up
+12 move_right down
+120 move_right up
+120 move_up down
+150 move_up up
+200 move_down down
+224 move_down up
+224 move_right down
+400 move_right up
+420 end

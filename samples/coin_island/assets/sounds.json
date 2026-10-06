@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "sounds": [
+    {
+      "name": "coin",
+      "frequency": 880,
+      "variation": 0,
+      "gain": 0.5,
+      "decay": 0.9995,
+      "tone": 1,
+      "file": "coin.wav"
+    },
+    {
+      "name": "hurt",
+      "frequency": 140,
+      "variation": 0,
+      "gain": 0.6,
+      "decay": 0.9995,
+      "tone": 0.2,
+      "file": "hurt.wav"
+    },
+    {
+      "name": "door",
+      "frequency": 160,
+      "variation": 0,
+      "gain": 0.6,
+      "decay": 0.9995,
+      "tone": 1,
+      "file": "door.wav"
+    },
+    {
+      "name": "gem",
+      "frequency": 1200,
+      "variation": 200,
+      "gain": 0.4,
+      "decay": 0.9997,
+      "tone": 0.9
+    }
+  ]
+}

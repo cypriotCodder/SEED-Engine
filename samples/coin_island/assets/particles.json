@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "particles": [
+    {
+      "name": "sparkle",
+      "material": "spark",
+      "count": 16,
+      "speed": 3,
+      "speed_range": 1.5,
+      "life": 0.5,
+      "size": 0.15,
+      "drag": 0.1,
+      "spin": 4,
+      "shade": 0.2
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "seed_project": 1,
+  "name": "Coin Island",
+  "game_id": "coin-island-5eed0c01",
+  "game": {
+    "start_scene": "title",
+    "title": "Coin Island",
+    "width": 1280,
+    "height": 720,
+    "fullscreen": false
+  }
+}

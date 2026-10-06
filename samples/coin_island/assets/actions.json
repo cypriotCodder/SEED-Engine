@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "actions": [
+    {
+      "name": "confirm",
+      "bindings": [
+        "Return",
+        "Space"
+      ]
+    },
+    {
+      "name": "new_game",
+      "bindings": [
+        "N"
+      ]
+    },
+    {
+      "name": "pause",
+      "bindings": [
+        "P"
+      ]
+    }
+  ]
+}

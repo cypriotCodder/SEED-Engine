@@ -1,0 +1,312 @@
+{
+  "format": 1,
+  "terrain": "island",
+  "entities": [
+    {
+      "name": "Start",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        2.5,
+        2.5
+      ],
+      "angle": 0
+    },
+    {
+      "name": "FromCave",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        16.5,
+        2.5
+      ],
+      "angle": 0
+    },
+    {
+      "name": "Lamp",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        4.5,
+        4.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "lamp",
+        "size": [
+          0.4,
+          0.4
+        ]
+      },
+      "light": {
+        "color": [
+          1,
+          0.8,
+          0.5
+        ],
+        "radius": 7,
+        "intensity": 2.5,
+        "height": 2,
+        "flicker": 0.1,
+        "night_only": true
+      }
+    },
+    {
+      "name": "Lamp",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        13.5,
+        4.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "lamp",
+        "size": [
+          0.4,
+          0.4
+        ]
+      },
+      "light": {
+        "color": [
+          1,
+          0.8,
+          0.5
+        ],
+        "radius": 7,
+        "intensity": 2.5,
+        "height": 2,
+        "flicker": 0.1,
+        "night_only": true
+      }
+    },
+    {
+      "name": "CaveDoor",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        18.5,
+        2.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "door",
+        "size": [
+          1,
+          1.4
+        ]
+      },
+      "script": "door.lua"
+    },
+    {
+      "name": "Coin1",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        5.5,
+        2.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "coin",
+        "size": [
+          0.7,
+          0.7
+        ]
+      },
+      "script": "coin.lua"
+    },
+    {
+      "name": "Coin2",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        8.5,
+        2.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "coin",
+        "size": [
+          0.7,
+          0.7
+        ]
+      },
+      "script": "coin.lua"
+    },
+    {
+      "name": "Coin3",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        11.5,
+        2.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "coin",
+        "size": [
+          0.7,
+          0.7
+        ]
+      },
+      "script": "coin.lua"
+    },
+    {
+      "name": "Coin4",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        5.5,
+        8.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "coin",
+        "size": [
+          0.7,
+          0.7
+        ]
+      },
+      "script": "coin.lua"
+    },
+    {
+      "name": "Coin5",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        9.5,
+        11.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "coin",
+        "size": [
+          0.7,
+          0.7
+        ]
+      },
+      "script": "coin.lua"
+    },
+    {
+      "name": "Crab",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        14.5,
+        6.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "crab",
+        "size": [
+          0.9,
+          0.9
+        ]
+      },
+      "character": {
+        "speed": 2.2,
+        "run_speed": 2.2,
+        "acceleration": 0,
+        "collision": [
+          0.7,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false
+      },
+      "script": "crab.lua"
+    },
+    {
+      "name": "Player",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        2.5,
+        2.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "hero",
+        "size": [
+          1,
+          1
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false,
+        "player": {
+          "actions": {
+            "up": "move_up",
+            "down": "move_down",
+            "left": "move_left",
+            "right": "move_right",
+            "run": "run"
+          },
+          "input": true,
+          "zoom": 40,
+          "smoothing": 0.15,
+          "dead_zone": 0.5,
+          "resume": true
+        }
+      }
+    },
+    {
+      "name": "Game",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        2.5,
+        2.5
+      ],
+      "angle": 0,
+      "script": "game.lua"
+    }
+  ],
+  "atmosphere": {
+    "hour": 17,
+    "day_length": 240
+  }
+}

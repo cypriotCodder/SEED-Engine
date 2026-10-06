@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "terrain": {
+    "island": true,
+    "radius": 1,
+    "coast": 0.3,
+    "warp": 6,
+    "warp_wavelength": 64,
+    "default_seed": 77,
+    "fields": [
+      {
+        "name": "elevation",
+        "base": 0.45,
+        "terms": [
+          {
+            "type": "perlin",
+            "wavelength": 16,
+            "amplitude": 0.1,
+            "warped": false
+          }
+        ]
+      },
+      {
+        "name": "wild",
+        "base": -0.45,
+        "terms": [
+          {
+            "type": "distance",
+            "wavelength": 1,
+            "amplitude": 1,
+            "warped": false
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "name": "Underground lake",
+        "material": "cave_water",
+        "when": [
+          {
+            "field": "elevation",
+            "max": 0
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Rubble",
+        "material": "cave_floor",
+        "when": [
+          {
+            "field": "wild",
+            "min": 0
+          }
+        ],
+        "solid": false,
+        "scatter": {
+          "material": "rock",
+          "one_in": 5,
+          "solid": true
+        }
+      },
+      {
+        "name": "Floor",
+        "material": "cave_floor",
+        "when": [],
+        "solid": false
+      }
+    ]
+  }
+}

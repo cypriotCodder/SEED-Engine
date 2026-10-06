@@ -1,0 +1,171 @@
+{
+  "format": 1,
+  "materials": [
+    {
+      "name": "deep_water",
+      "color": [
+        22,
+        58,
+        98
+      ],
+      "pattern": "water",
+      "variation": 10
+    },
+    {
+      "name": "water",
+      "color": [
+        34,
+        92,
+        132
+      ],
+      "pattern": "water",
+      "variation": 12
+    },
+    {
+      "name": "sand",
+      "color": [
+        214,
+        196,
+        140
+      ],
+      "pattern": "speckle",
+      "variation": 12,
+      "speed": 0.8,
+      "tags": [
+        "beach"
+      ]
+    },
+    {
+      "name": "grass",
+      "color": [
+        86,
+        150,
+        70
+      ],
+      "pattern": "speckle",
+      "variation": 18
+    },
+    {
+      "name": "cave_floor",
+      "color": [
+        78,
+        70,
+        66
+      ],
+      "pattern": "speckle",
+      "variation": 14
+    },
+    {
+      "name": "cave_water",
+      "color": [
+        20,
+        34,
+        52
+      ],
+      "pattern": "water",
+      "variation": 8
+    },
+    {
+      "name": "tree",
+      "color": [
+        40,
+        104,
+        52
+      ],
+      "pattern": "round",
+      "variation": 20
+    },
+    {
+      "name": "rock",
+      "color": [
+        112,
+        106,
+        100
+      ],
+      "pattern": "round",
+      "variation": 16
+    },
+    {
+      "name": "hero",
+      "color": [
+        52,
+        120,
+        200
+      ],
+      "pattern": "speckle",
+      "variation": 12,
+      "texture": "hero",
+      "texture_scale": 1,
+      "frames": 4,
+      "fps": 8
+    },
+    {
+      "name": "crab",
+      "color": [
+        214,
+        72,
+        52
+      ],
+      "pattern": "speckle",
+      "variation": 12,
+      "texture": "crab",
+      "texture_scale": 1,
+      "frames": 2,
+      "fps": 4
+    },
+    {
+      "name": "coin",
+      "color": [
+        250,
+        200,
+        50
+      ],
+      "pattern": "speckle",
+      "variation": 12,
+      "texture": "coin",
+      "texture_scale": 1,
+      "frames": 4,
+      "fps": 8
+    },
+    {
+      "name": "door",
+      "color": [
+        120,
+        78,
+        40
+      ],
+      "pattern": "planks",
+      "variation": 20
+    },
+    {
+      "name": "gem",
+      "color": [
+        120,
+        220,
+        255
+      ],
+      "pattern": "round",
+      "variation": 30
+    },
+    {
+      "name": "lamp",
+      "color": [
+        250,
+        230,
+        160
+      ],
+      "pattern": "round",
+      "variation": 10
+    },
+    {
+      "name": "spark",
+      "color": [
+        255,
+        230,
+        120
+      ],
+      "pattern": "round",
+      "variation": 20
+    }
+  ]
+}

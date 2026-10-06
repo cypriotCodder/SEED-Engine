@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -89,6 +91,8 @@ AppOptions parse(const Game& game, int argc, char** argv) {
             options.smoke = true;
         else if (arg == "--screenshot" && i + 1 < argc)
             options.screenshot = argv[++i];
+        else if (arg == "--replay" && i + 1 < argc)
+            options.replay = argv[++i];
         else if (arg == "--save" && i + 1 < argc) {
             options.save = argv[++i];
             options.explicit_save = true;
@@ -111,12 +115,13 @@ AppOptions parse(const Game& game, int argc, char** argv) {
             if (result.ec != std::errc{} || result.ptr != value.data() + value.size())
                 throw std::invalid_argument("Invalid 64-bit seed");
         } else if (!game.option || !game.option(game.context, arg))
-            throw std::invalid_argument(std::string("Usage: ") + game.name + " [--smoke] " +
-                                        (game.usage ? game.usage : "") +
-                                        "[--screenshot FILE.ppm] [--seed N] [--save DIRECTORY] "
-                                        "[--benchmark REPORT.json --frames N --workload static|stream]");
+            throw std::invalid_argument(
+                std::string("Usage: ") + game.name + " [--smoke] " + (game.usage ? game.usage : "") +
+                "[--screenshot FILE.ppm] [--replay FILE] [--seed N] [--save DIRECTORY] "
+                "[--benchmark REPORT.json --frames N --workload static|stream]");
     }
     if (game.validate) game.validate(game.context, options);
+    if (options.replay && !options.smoke) throw std::invalid_argument("--replay needs --smoke");
     if (options.benchmark && (!options.explicit_save || options.screenshot || options.smoke))
         throw std::invalid_argument("Benchmark requires --save and excludes smoke and screenshot");
     if (options.benchmark && std::filesystem::exists(options.save) &&
@@ -158,6 +163,7 @@ Engine::Engine(const Game& game, const AppOptions& opts)
     add_engine_actions(actions);
     project_assets_.register_actions(actions);
     if (game.actions) game.actions(game.context, actions);
+    if (options.replay) read_replay(options.replay);
     ChunkHooks hooks;
     hooks.context = this;
     hooks.activate = [](void* context, ChunkCoord coord, Chunk& chunk) {
@@ -176,6 +182,46 @@ Engine::Engine(const Game& game, const AppOptions& opts)
         engine.physics_hooks_.store(engine.physics_hooks_.context, coord, chunk);
     };
     world.observe(hooks);
+}
+
+void Engine::read_replay(const char* path) {
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error(std::string("Cannot read the replay ") + path);
+    std::string line;
+    bool ended = false;
+    for (unsigned number = 1; std::getline(file, line); ++number) {
+        const auto fail = [&](const char* why) {
+            throw std::runtime_error(std::string(path) + ":" + std::to_string(number) + ": " + why);
+        };
+        if (const auto comment = line.find('#'); comment != std::string::npos) line.resize(comment);
+        std::istringstream words(line);
+        std::string frame_text, action, state, extra;
+        if (!(words >> frame_text)) continue;
+        if (ended) fail("nothing may follow `end`");
+        words >> action >> state >> extra;
+        unsigned frame{};
+        const auto r = std::from_chars(frame_text.data(), frame_text.data() + frame_text.size(), frame);
+        if (r.ec != std::errc{} || r.ptr != frame_text.data() + frame_text.size() || frame >= 36000)
+            fail("a frame is a whole number below 36,000");
+        if (!replay_.empty() && frame < replay_.back().frame) fail("frames go back");
+        if (action == "end" && state.empty()) {
+            if (!replay_.empty() && frame <= replay_.back().frame)
+                fail("the run must end after the last action");
+            last_frame_ = frame;
+            ended = true;
+            continue;
+        }
+        if ((state != "down" && state != "up") || !extra.empty()) fail("expected `<frame> <action> down|up`");
+        ActionId id{};
+        try {
+            id = actions.find(action);
+        } catch (const std::out_of_range&) {
+            fail(("no action named \"" + action + "\"").c_str());
+        }
+        if (replay_.size() == 10000) fail("more than 10,000 lines");
+        replay_.push_back({frame, id, state == "down"});
+    }
+    if (!ended) throw std::runtime_error(std::string(path) + ": the replay needs an `<frame> end` line");
 }
 
 Entity Engine::create_saved(Transform transform, Visual visual) {
@@ -344,6 +390,8 @@ void Engine::loop(const Game& game) {
                              : std::clamp(std::chrono::duration<float>(now - previous).count(), 0.0F, 0.1F);
         previous = now;
         window.poll(input);
+        for (; replay_next_ < replay_.size() && replay_[replay_next_].frame == frames; ++replay_next_)
+            actions.set_scripted(replay_[replay_next_].action, replay_[replay_next_].down);
         actions.update(input);
         if (options.benchmark) {
             // Benchmarks ignore every input except quitting.
@@ -418,7 +466,7 @@ void Engine::loop(const Game& game) {
         gpu.end();
         const auto render_end = MeasurementClock::now();
         if (options.screenshot &&
-            ((options.smoke && frames == 59) || actions.pressed(engine_action::screenshot)))
+            ((options.smoke && frames + 1 == last_frame_) || actions.pressed(engine_action::screenshot)))
             renderer.screenshot(options.screenshot, view.width, view.height);
         window.present();
         const auto frame_end = MeasurementClock::now();
@@ -443,7 +491,7 @@ void Engine::loop(const Game& game) {
             window.title(title);
         }
         ++frames;
-        if (options.smoke && frames >= 60) input.quit = true;
+        if (options.smoke && frames >= last_frame_) input.quit = true;
         if (options.benchmark && frames >= options.measured_frames + warmup_frames) input.quit = true;
         if (!automated && !checkpoint.saving() &&
             (actions.pressed(engine_action::checkpoint) || milliseconds(last_save, frame_end) >= 60000)) {

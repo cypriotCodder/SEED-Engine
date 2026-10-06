@@ -1,0 +1,11 @@
+# Coin Island from a new save: walk up to the crab and stand there until it has taken every heart,
+# then go back to the title.
+5 confirm down
+7 confirm up
+12 move_right down
+120 move_right up
+120 move_up down
+150 move_up up
+420 confirm down
+422 confirm up
+440 end

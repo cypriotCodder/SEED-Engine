@@ -23,6 +23,17 @@ foreach(seed_image splash icon)
 endforeach()
 string(APPEND seed_brand_body "} // namespace seed::editor\n")
 file(GENERATE OUTPUT "${seed_brand_source}" CONTENT "${seed_brand_body}")
+# Embed the interface font and its licence; installed editors need no system font or extra asset.
+set(seed_font_source "${CMAKE_CURRENT_BINARY_DIR}/interface_font.cpp")
+set(seed_font_file "${CMAKE_CURRENT_SOURCE_DIR}/resources/Karla-Regular.ttf")
+set(seed_font_license "${CMAKE_SOURCE_DIR}/licenses/Karla.txt")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${seed_font_file}" "${seed_font_license}")
+file(READ "${seed_font_file}" seed_font_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," seed_font_bytes "${seed_font_hex}")
+file(SIZE "${seed_font_file}" seed_font_size)
+file(READ "${seed_font_license}" seed_font_notice)
+file(GENERATE OUTPUT "${seed_font_source}" CONTENT
+    "namespace seed::editor {\nextern const unsigned char interface_font[] = {${seed_font_bytes}};\nextern const int interface_font_size = ${seed_font_size};\nextern const char interface_font_license[] = R\"SEEDFONT(${seed_font_notice})SEEDFONT\";\n}\n")
 # stb_image decodes imported images; it builds on its own, without the strict warning flags.
 add_library(seed_stb STATIC stb_image.c)
 target_include_directories(seed_stb SYSTEM PUBLIC "${stb_SOURCE_DIR}")
@@ -37,7 +48,7 @@ else()
     set(seed_folder_dialog folder_dialog_none.cpp)
 endif()
 add_executable(seed_editor main.cpp app.cpp asset_panels.cpp terrain_panel.cpp scene_editor.cpp play.cpp ui_test.cpp
-    splash.cpp "${seed_brand_source}" ${seed_folder_dialog})
+    splash.cpp "${seed_brand_source}" "${seed_font_source}" ${seed_folder_dialog})
 seed_strict(seed_editor)
 target_link_libraries(seed_editor PRIVATE seed_editor_core seed_imgui)
 add_dependencies(seed_editor seed_player)
@@ -95,6 +106,36 @@ if(BUILD_TESTING)
     add_test(NAME exported_game COMMAND "${seed_exported}" --smoke --save "${seed_editor_smoke}/exported-save")
     set_tests_properties(editor_export PROPERTIES DEPENDS editor_play TIMEOUT 120)
     set_tests_properties(exported_game PROPERTIES DEPENDS editor_export TIMEOUT 120)
+    # The sample game, played: a copy is opened in the editor (which packs its textures) and
+    # exported, then replays play it through the player and the exported app. A new game takes
+    # coins, gets bitten and finds the gem; continuing that save wins; another new game is lost.
+    set(seed_coin "${seed_editor_smoke}/coin_island")
+    set(seed_coin_play $<TARGET_FILE:seed_player> --project "${seed_coin}/Coin Island" --smoke --replay)
+    set(seed_coin_replays "${CMAKE_SOURCE_DIR}/tests/coin_island")
+    add_test(NAME coin_island_copy COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/samples/coin_island" "${seed_coin}/Coin Island")
+    add_test(NAME coin_island_editor COMMAND seed_editor --smoke --preferences "${seed_coin}/preferences"
+        --open "${seed_coin}/Coin Island" --export "${seed_coin}/Export")
+    add_test(NAME coin_island_new_game COMMAND ${seed_coin_play} "${seed_coin_replays}/new_game.replay"
+        --save "${seed_coin}/save")
+    add_test(NAME coin_island_continue COMMAND ${seed_coin_play} "${seed_coin_replays}/continue.replay"
+        --save "${seed_coin}/save")
+    add_test(NAME coin_island_game_over COMMAND ${seed_coin_play} "${seed_coin_replays}/game_over.replay"
+        --save "${seed_coin}/lost-save")
+    add_test(NAME coin_island_exported COMMAND "${seed_coin}/Export/Coin Island.app/Contents/MacOS/Coin Island"
+        --smoke --replay "${seed_coin_replays}/new_game.replay" --save "${seed_coin}/exported-save")
+    set(seed_coin_new_game "Title: no saved game.*Entered the island.*Coin 3/5.*Ouch! Health 2.*Entered the cave.*Found the gem!")
+    set_tests_properties(coin_island_copy PROPERTIES DEPENDS editor_smoke_clean)
+    set_tests_properties(coin_island_editor PROPERTIES DEPENDS coin_island_copy TIMEOUT 120)
+    set_tests_properties(coin_island_new_game PROPERTIES DEPENDS coin_island_editor
+        PASS_REGULAR_EXPRESSION "${seed_coin_new_game}" FAIL_REGULAR_EXPRESSION "Script error|Engine error")
+    set_tests_properties(coin_island_continue PROPERTIES DEPENDS coin_island_new_game
+        PASS_REGULAR_EXPRESSION "Title: a saved game in the cave, 3 coins, health 2.*Entered the cave.*Entered the island.*Coin 5/5.*You win!.*Title: no saved game."
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error")
+    set_tests_properties(coin_island_game_over PROPERTIES DEPENDS coin_island_editor
+        PASS_REGULAR_EXPRESSION "Health 0.*Game over.*Title: no saved game." FAIL_REGULAR_EXPRESSION "Script error|Engine error")
+    set_tests_properties(coin_island_exported PROPERTIES DEPENDS coin_island_editor TIMEOUT 120
+        PASS_REGULAR_EXPRESSION "${seed_coin_new_game}" FAIL_REGULAR_EXPRESSION "Script error|Engine error")
     # Scripted mouse and keyboard editing of a fresh copy of the sample project.
     add_test(NAME editor_ui_copy COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/tests/sample_project" "${seed_editor_smoke}/UiTest")

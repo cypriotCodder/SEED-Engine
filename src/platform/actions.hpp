@@ -61,11 +61,17 @@ public:
         throw std::out_of_range("Unknown action: " + std::string(name));
     }
 
+    // Holds or lets go of an action as if a bound key were, from the next update; for replays
+    // (see AppOptions::replay). Real input still works alongside.
+    void set_scripted(ActionId id, bool down) { at(id).scripted = down; }
+
     // Recomputes every action from this frame's raw input.
     void update(const Input& input) {
         for (std::size_t i = 0; i < size_; ++i) {
             auto& action = actions_[i];
-            bool held = false, pressed = false, released = false;
+            bool held = action.scripted, pressed = action.scripted && !action.was_scripted,
+                 released = !action.scripted && action.was_scripted;
+            action.was_scripted = action.scripted;
             for (const auto& binding : action.bindings) {
                 if (binding.kind == Binding::Kind::key) {
                     const auto key = static_cast<std::size_t>(binding.code);
@@ -111,6 +117,7 @@ private:
         const char* name{};
         std::array<Binding, bindings_per_action> bindings{};
         bool held{}, pressed{}, released{};
+        bool scripted{}, was_scripted{};
     };
     Action& at(ActionId id) {
         if (id >= size_) throw std::out_of_range("Unregistered action");

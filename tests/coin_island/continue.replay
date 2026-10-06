@@ -1,0 +1,15 @@
+# Coin Island on the save new_game.replay left: continue in the cave, go back out to the island,
+# take the last two coins and win, then go back to the title.
+5 confirm down
+7 confirm up
+12 move_left down
+200 move_left up
+200 move_up down
+308 move_up up
+308 move_left down
+356 move_left up
+356 move_down down
+392 move_down up
+430 confirm down
+432 confirm up
+460 end

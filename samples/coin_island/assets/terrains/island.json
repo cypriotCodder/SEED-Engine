@@ -1,0 +1,106 @@
+{
+  "format": 1,
+  "terrain": {
+    "island": true,
+    "radius": 3,
+    "coast": 0.25,
+    "warp": 12,
+    "warp_wavelength": 128,
+    "default_seed": 2024,
+    "fields": [
+      {
+        "name": "elevation",
+        "base": 0.35,
+        "terms": [
+          {
+            "type": "spot",
+            "wavelength": 48,
+            "amplitude": 0.4,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 64,
+            "amplitude": 0.12,
+            "warped": true
+          }
+        ]
+      },
+      {
+        "name": "wild",
+        "base": -0.3,
+        "terms": [
+          {
+            "type": "distance",
+            "wavelength": 1,
+            "amplitude": 1,
+            "warped": false
+          },
+          {
+            "type": "perlin",
+            "wavelength": 32,
+            "amplitude": 0.05,
+            "warped": false
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "name": "Deep sea",
+        "material": "deep_water",
+        "when": [
+          {
+            "field": "elevation",
+            "max": -0.2
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Sea",
+        "material": "water",
+        "when": [
+          {
+            "field": "elevation",
+            "max": 0
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Beach",
+        "material": "sand",
+        "when": [
+          {
+            "field": "elevation",
+            "max": 0.08
+          }
+        ],
+        "solid": false
+      },
+      {
+        "name": "Woods",
+        "material": "grass",
+        "when": [
+          {
+            "field": "wild",
+            "min": 0
+          }
+        ],
+        "solid": false,
+        "scatter": {
+          "material": "tree",
+          "one_in": 6,
+          "solid": true
+        }
+      },
+      {
+        "name": "Meadow",
+        "material": "grass",
+        "when": [],
+        "solid": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,207 @@
+{
+  "format": 1,
+  "terrain": "cave",
+  "entities": [
+    {
+      "name": "Entry",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        3.5,
+        3.5
+      ],
+      "angle": 0
+    },
+    {
+      "name": "ExitDoor",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        1.5,
+        3.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "door",
+        "size": [
+          1,
+          1.4
+        ]
+      },
+      "script": "door.lua"
+    },
+    {
+      "name": "Torch",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        5.5,
+        6.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "lamp",
+        "size": [
+          0.3,
+          0.3
+        ]
+      },
+      "light": {
+        "color": [
+          1,
+          0.55,
+          0.2
+        ],
+        "radius": 6,
+        "intensity": 3,
+        "height": 2,
+        "flicker": 0.5
+      }
+    },
+    {
+      "name": "Torch",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        5.5,
+        0.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "lamp",
+        "size": [
+          0.3,
+          0.3
+        ]
+      },
+      "light": {
+        "color": [
+          1,
+          0.55,
+          0.2
+        ],
+        "radius": 6,
+        "intensity": 3,
+        "height": 2,
+        "flicker": 0.5
+      }
+    },
+    {
+      "name": "Gem",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        8.5,
+        3.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "gem",
+        "size": [
+          0.6,
+          0.6
+        ]
+      },
+      "light": {
+        "color": [
+          0.4,
+          0.8,
+          1
+        ],
+        "radius": 3,
+        "intensity": 2,
+        "height": 2
+      },
+      "script": "gem.lua"
+    },
+    {
+      "name": "Player",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        3.5,
+        3.5
+      ],
+      "angle": 0,
+      "visual": {
+        "material": "hero",
+        "size": [
+          1,
+          1
+        ]
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false,
+        "player": {
+          "actions": {
+            "up": "move_up",
+            "down": "move_down",
+            "left": "move_left",
+            "right": "move_right",
+            "run": "run"
+          },
+          "input": true,
+          "zoom": 40,
+          "smoothing": 0.15,
+          "dead_zone": 0.5,
+          "resume": true
+        }
+      }
+    },
+    {
+      "name": "Game",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        3.5,
+        3.5
+      ],
+      "angle": 0,
+      "script": "game.lua"
+    }
+  ],
+  "atmosphere": {
+    "ambient": [
+      0.07,
+      0.07,
+      0.11
+    ],
+    "background": [
+      0.01,
+      0.01,
+      0.02
+    ],
+    "haze": [
+      0.02,
+      0.02,
+      0.04
+    ],
+    "haze_amount": 0.5
+  }
+}

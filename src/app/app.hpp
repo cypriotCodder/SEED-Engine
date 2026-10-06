@@ -25,8 +25,12 @@ struct AppOptions {
     std::uint64_t seed{};
     std::filesystem::path save;
     bool explicit_save{};
-    bool smoke{};                  // 60 fixed frames, no audio or vsync, then exit.
-    const char* screenshot{};      // Written on the last smoke frame or on F12.
+    bool smoke{};             // 60 fixed frames, no audio or vsync, then exit.
+    const char* screenshot{}; // Written on the last smoke frame or on F12.
+    // With smoke: a text file of timed actions that plays the game, one per line, `<frame>
+    // <action> down|up`, frames counted from 0 and never going back, and finally `<frame> end`,
+    // the frame the run quits on instead of the 60th (at most 36,000). `#` starts a comment.
+    const char* replay{};
     const char* benchmark{};       // JSON report path; implies a fixed, input-free run.
     unsigned measured_frames{600}; // Benchmark frames after warmup.
     bool stream_workload{};        // Benchmark route that crosses chunk unload boundaries.
@@ -194,6 +198,15 @@ private:
     void (*load_entity_)(void*, Engine&, Entity, Reader&);
     void (*save_state_)(void*, Engine&, Bytes&);
     std::vector<Entity> captured_;
+    struct ReplayEvent {
+        unsigned frame;
+        ActionId action;
+        bool down;
+    };
+    std::vector<ReplayEvent> replay_;
+    std::size_t replay_next_{};
+    unsigned last_frame_{60}; // Where a smoke run ends.
+    void read_replay(const char* path);
 };
 
 // Parses the command line, runs the game until quit, and returns the process exit code. Errors
