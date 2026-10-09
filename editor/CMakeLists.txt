@@ -37,10 +37,38 @@ file(GENERATE OUTPUT "${seed_font_source}" CONTENT
 # stb_image decodes imported images; it builds on its own, without the strict warning flags.
 add_library(seed_stb STATIC stb_image.c)
 target_include_directories(seed_stb SYSTEM PUBLIC "${stb_SOURCE_DIR}")
-add_library(seed_editor_core STATIC project.cpp starter.cpp scripts.cpp export.cpp textures.cpp audio_files.cpp "${seed_licenses_source}")
+# Editor updates: the signed feed the editor checks for new releases, and the public key that feed
+# must be signed with (hex, uncompressed P-256). Either empty turns update checks off. See
+# docs/releasing.md for making the key and publishing releases.
+set(SEED_UPDATE_FEED "https://github.com/cypriotCodder/seed-releases/releases/latest/download/update.json"
+    CACHE STRING "The editor's update feed URL; empty turns updates off")
+set(SEED_UPDATE_PUBLIC_KEY "043c16b9a7d260954bf649ad074f27354208177530f00675d88ec59490ab2db7ce7cf539b3010875f4b1c498275a4705e04acc5b7af2cc7d085ee6ea350c3539e3"
+    CACHE STRING "Hex public key the update feed is signed with; empty turns updates off")
+if(NOT SEED_UPDATE_PUBLIC_KEY STREQUAL "" AND NOT SEED_UPDATE_PUBLIC_KEY MATCHES "^04[0-9a-fA-F]+$")
+    message(FATAL_ERROR "SEED_UPDATE_PUBLIC_KEY must be the hex key printed by tools/release_editor.py keygen")
+endif()
+string(LENGTH "${SEED_UPDATE_PUBLIC_KEY}" seed_update_key_length)
+if(NOT seed_update_key_length EQUAL 0 AND NOT seed_update_key_length EQUAL 130)
+    message(FATAL_ERROR "SEED_UPDATE_PUBLIC_KEY must be 130 hex digits (an uncompressed P-256 key)")
+endif()
+
+if(APPLE)
+    set(seed_update_platform update_mac.mm)
+else()
+    set(seed_update_platform update_none.cpp)
+endif()
+add_library(seed_editor_core STATIC project.cpp starter.cpp scripts.cpp export.cpp textures.cpp audio_files.cpp
+    update.cpp ${seed_update_platform} "${seed_licenses_source}")
 seed_strict(seed_editor_core)
 target_include_directories(seed_editor_core PUBLIC .)
 target_link_libraries(seed_editor_core PUBLIC seed_engine PRIVATE seed_lua seed_stb)
+# One version for the launch screen, About, the app bundle and update checks.
+target_compile_definitions(seed_editor_core PUBLIC SEED_EDITOR_VERSION="${PROJECT_VERSION}")
+if(APPLE)
+    target_link_libraries(seed_editor_core PUBLIC "-framework Foundation" "-framework Security")
+    # Compiled as C++ with an Objective-C++ flag, so the project needs no OBJCXX language.
+    set_source_files_properties(update_mac.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-xobjective-c++;-fobjc-arc")
+endif()
 
 if(APPLE)
     set(seed_folder_dialog folder_dialog_mac.mm)
@@ -52,7 +80,8 @@ add_executable(seed_editor main.cpp app.cpp asset_panels.cpp terrain_panel.cpp s
 seed_strict(seed_editor)
 target_link_libraries(seed_editor PRIVATE seed_editor_core seed_imgui)
 add_dependencies(seed_editor seed_player)
-target_compile_definitions(seed_editor PRIVATE SEED_PLAYER_PATH="$<TARGET_FILE:seed_player>")
+target_compile_definitions(seed_editor PRIVATE SEED_PLAYER_PATH="$<TARGET_FILE:seed_player>"
+    SEED_UPDATE_FEED="${SEED_UPDATE_FEED}" SEED_UPDATE_PUBLIC_KEY="${SEED_UPDATE_PUBLIC_KEY}")
 if(APPLE)
     target_link_libraries(seed_editor PRIVATE "-framework AppKit" "-framework UniformTypeIdentifiers")
     # Compiled as C++ with an Objective-C++ flag, so the project needs no OBJCXX language.
@@ -60,6 +89,19 @@ if(APPLE)
         COMPILE_OPTIONS "-xobjective-c++;-fobjc-arc")
 endif()
 install(TARGETS seed_editor RUNTIME DESTINATION bin)
+if(APPLE)
+    # Seed Editor.app: the editor and player in a signed bundle, the form releases and updates use.
+    set(seed_editor_bundle "${CMAKE_CURRENT_BINARY_DIR}/Seed Editor.app")
+    # Followed by -DVERSION and -DBUNDLE, then -P and the script.
+    set(seed_editor_bundle_command ${CMAKE_COMMAND} -DEDITOR=$<TARGET_FILE:seed_editor>
+        -DPLAYER=$<TARGET_FILE:seed_player> -DICON=${CMAKE_CURRENT_SOURCE_DIR}/resources/icon.jpg)
+    set(seed_editor_bundle_script "${CMAKE_SOURCE_DIR}/cmake/editor_bundle.cmake")
+    add_custom_command(OUTPUT "${seed_editor_bundle}/Contents/Info.plist"
+        COMMAND ${seed_editor_bundle_command} -DVERSION=${PROJECT_VERSION} "-DBUNDLE=${seed_editor_bundle}"
+            -P "${seed_editor_bundle_script}"
+        DEPENDS seed_editor seed_player "${seed_editor_bundle_script}" VERBATIM)
+    add_custom_target(seed_editor_app ALL DEPENDS "${seed_editor_bundle}/Contents/Info.plist")
+endif()
 
 if(BUILD_TESTING)
     add_executable(seed_editor_project_tests tests/project_tests.cpp)
@@ -69,6 +111,11 @@ if(BUILD_TESTING)
     target_compile_definitions(seed_editor_project_tests PRIVATE SEED_PLAYER_PATH="$<TARGET_FILE:seed_player>"
         SEED_SAMPLE_PROJECT="${CMAKE_SOURCE_DIR}/tests/sample_project"
         SEED_AUDIO_FIXTURES="${CMAKE_SOURCE_DIR}/tests/audio")
+    add_executable(seed_editor_update_tests tests/update_tests.cpp)
+    seed_strict(seed_editor_update_tests)
+    target_link_libraries(seed_editor_update_tests PRIVATE seed_editor_core)
+    add_test(NAME editor_updates COMMAND seed_editor_update_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/update"
+        "${CMAKE_CURRENT_BINARY_DIR}/update-test-data")
     add_executable(seed_editor_history_tests tests/history_tests.cpp)
     seed_strict(seed_editor_history_tests)
     target_include_directories(seed_editor_history_tests PRIVATE .)
@@ -136,6 +183,40 @@ if(BUILD_TESTING)
         PASS_REGULAR_EXPRESSION "Health 0.*Game over.*Title: no saved game." FAIL_REGULAR_EXPRESSION "Script error|Engine error")
     set_tests_properties(coin_island_exported PROPERTIES DEPENDS coin_island_editor TIMEOUT 120
         PASS_REGULAR_EXPRESSION "${seed_coin_new_game}" FAIL_REGULAR_EXPRESSION "Script error|Engine error")
+    # Updating a real Seed Editor.app: an app marked 99.0.0 is packed and its feed signed with the
+    # test-only key in tests/update, then a copy of this build's app checks that feed, downloads and
+    # verifies the update, and installs it as it quits.
+    find_package(Python3 COMPONENTS Interpreter)
+    find_program(SEED_OPENSSL openssl)
+    if(APPLE AND Python3_Interpreter_FOUND AND SEED_OPENSSL)
+        set(seed_update_test "${CMAKE_CURRENT_BINARY_DIR}/update-test")
+        set(seed_update_app "${seed_update_test}/Applications/Seed Editor.app")
+        string(REPLACE "%" "%25" seed_update_url "${seed_update_test}/feed/update.json")
+        string(REPLACE " " "%20" seed_update_url "file://${seed_update_url}")
+        add_test(NAME editor_update_clean COMMAND ${CMAKE_COMMAND} -E rm -rf "${seed_update_test}")
+        add_test(NAME editor_update_release COMMAND ${seed_editor_bundle_command} -DVERSION=99.0.0
+            "-DBUNDLE=${seed_update_test}/release/Seed Editor.app" -P "${seed_editor_bundle_script}")
+        add_test(NAME editor_update_feed COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/tools/release_editor.py"
+            package "${seed_update_test}/release/Seed Editor.app" "${seed_update_test}/feed"
+            --key "${CMAKE_CURRENT_SOURCE_DIR}/tests/update/test-key.pem")
+        add_test(NAME editor_update_installed COMMAND /usr/bin/ditto "${seed_editor_bundle}" "${seed_update_app}")
+        add_test(NAME editor_update COMMAND "${seed_update_app}/Contents/MacOS/seed_editor" --smoke
+            --preferences "${seed_update_test}/preferences" --update-feed "${seed_update_url}" --update-key
+            04d1902a9ce5970d41cca0f0095758f327b47546ef3a5679efa846fe43776046d254af9a03a10ec0e16a920eb0333e1c3bfc984606b9710eb2b92d8e3cd3251142)
+        add_test(NAME editor_update_installed_version COMMAND /usr/bin/plutil -extract CFBundleShortVersionString raw
+            "${seed_update_app}/Contents/Info.plist")
+        add_test(NAME editor_update_runs COMMAND "${seed_update_app}/Contents/MacOS/seed_editor" --version)
+        set_tests_properties(editor_update_release editor_update_installed PROPERTIES DEPENDS editor_update_clean)
+        set_tests_properties(editor_update_feed PROPERTIES DEPENDS editor_update_release)
+        set_tests_properties(editor_update PROPERTIES DEPENDS "editor_update_feed;editor_update_installed" TIMEOUT 120
+            PASS_REGULAR_EXPRESSION "downloaded and verified.*Installed Seed Editor 99\\.0\\.0\\."
+            FAIL_REGULAR_EXPRESSION "Could not")
+        set_tests_properties(editor_update_installed_version PROPERTIES DEPENDS editor_update
+            PASS_REGULAR_EXPRESSION "^99\\.0\\.0")
+        set_tests_properties(editor_update_runs PROPERTIES DEPENDS editor_update PASS_REGULAR_EXPRESSION "^Seed Editor ")
+    else()
+        message(STATUS "Skipping the Seed Editor.app update test: it needs macOS, Python 3 and openssl")
+    endif()
     # Scripted mouse and keyboard editing of a fresh copy of the sample project.
     add_test(NAME editor_ui_copy COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/tests/sample_project" "${seed_editor_smoke}/UiTest")

@@ -1,0 +1,4 @@
+{
+  "manifest": "{\n  \"format\": 1,\n  \"product\": \"seed-editor\",\n  \"version\": \"9.0.0\",\n  \"notes\": \"Test release notes.\\nSecond line.\",\n  \"file\": \"Seed-Editor-9.0.0-macos.zip\",\n  \"size\": 69,\n  \"sha256\": \"beb450444510f2653ef4161be71aa715bd040ed94f9b8bcada148e6bbf683bc8\"\n}",
+  "signature": "3044022061394c169c2c2078f8fdb2b71f12391957f11f4021b353bf3504c3448ead212f02200345e8649f02c2eb66a3c4cc7dbdf1b0df1a8e8009c2ae14d971cab1523f98ad"
+}

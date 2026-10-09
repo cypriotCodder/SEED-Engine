@@ -9,6 +9,7 @@
 #include "scene_editor.hpp"
 #include "splash.hpp"
 #include "ui_test.hpp"
+#include "update.hpp"
 #include <array>
 #include <chrono>
 #include <filesystem>
@@ -30,6 +31,9 @@ struct Options {
     bool ui_test{}; // Drive the opened project's Scene view with scripted input and check it.
     std::filesystem::path export_to; // Export the opened project here (replacing), then carry on.
     bool splash{};                   // Show the launch screen even in a smoke run (automated runs skip it).
+    // Check this update feed at startup, signed with this hex key, instead of the built-in ones;
+    // with smoke, wait for the check and install a verified update on quitting.
+    std::string update_feed, update_key;
 };
 
 // The Seed editor: a hub for creating and opening projects, and a dockable workspace for the open
@@ -85,6 +89,9 @@ private:
     void console_panel();
     void settings_panel();
     void about_popup();
+    void update_popup();
+    // Installs a downloaded update as the editor quits, then reopens the editor if asked to.
+    void install_update_on_quit();
     void build_default_layout(unsigned dockspace);
     void workspace_menu();
     void save_workspace();
@@ -96,6 +103,7 @@ private:
     Options options_;
     Window window_;
     std::filesystem::path preferences_;
+    Updater updater_;
     RecentProjects recent_;
     std::optional<Project> project_;
     std::string layout_file_; // ImGui keeps a pointer to this string.
@@ -113,6 +121,7 @@ private:
 
     // Workspace state.
     bool show_project_{true}, show_console_{true}, show_settings_{true}, show_about_{};
+    bool show_update_{}, restart_{};
     std::string edited_name_;
     GameSettings edited_game_;
     bool settings_changed() const { return edited_name_ != project_->name || edited_game_ != project_->game; }

@@ -12,6 +12,9 @@ struct ExportReport {
     std::string signing; // What codesign said, when it failed or was missing.
 };
 
+// Runs a system tool quietly; returns its exit status, or -1 when it could not be started.
+int run_tool(const std::vector<std::string>& command);
+
 // Checks everything a game needs before shipping it: asset and scene problems, script syntax,
 // and that every script a scene names exists. Returns one problem per line; empty when ready.
 std::string export_problems(const Project& project);

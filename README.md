@@ -45,6 +45,7 @@ Code style is defined by `.clang-format`. `sh tools/format.sh` reformats project
 - **Scripts**: Lua 5.4 gameplay scripts attached to entities with the Inspector's Script component, checked for syntax as you work. See [scripting](docs/scripting.md).
 - **Play** (Cmd+P) saves the project and runs it as a real game in its own window, with the game's output in the Console; **Stop** or closing the game window returns to editing. Every Play starts a fresh world, so the project's saves are untouched.
 - **File → Export macOS App…** builds a standalone `<Name>.app`: the player, the project checked and packed into one compressed `game.seedpack`, an `Info.plist`, and the licences of the libraries a game contains. The executable is stripped and the app signed ad hoc so it runs on this Mac. Exported games save in `~/Library/Application Support/Seed/<game id>/`. Export refuses projects with problems, including script syntax errors and missing scripts.
+- **Updates**: `Seed Editor.app` (built by the `seed_editor_app` target as `build/<preset>/editor/Seed Editor.app`) checks a signed release feed at most once a day, or from **Help → Check for Updates…**. A newer release downloads in the background and is verified against the release key and the feed's SHA-256; the hub and menu bar then offer **Restart to Update**, **Later** (it installs when you quit) or **Skip This Version**. **Help → Check Automatically** turns daily checks off. Editors run from a build folder, and builds without `SEED_UPDATE_PUBLIC_KEY`, never check. See [releasing](docs/releasing.md).
 - Cmd+Z and Shift+Cmd+Z undo and redo any edit in these panels (100 steps, per scene). Cmd+S saves; closing or quitting with unsaved changes asks first.
 
 Projects are folders of JSON text files, described in [the project format](docs/project-format.md). `seed_player` runs a project with no game code: its assets and terrain, its main scene, and a player (the scene entity named `Player`, or one at a `Spawn` marker) moved with the `move_up`/`move_down`/`move_left`/`move_right` actions, which default to WASD and the arrow keys. `seed_player --project tests/sample_project` runs the sample project.
@@ -55,7 +56,7 @@ Projects are folders of JSON text files, described in [the project format](docs/
 ./build/release/editor/seed_editor
 ```
 
-Distributing to other Macs needs a Developer ID signature and notarization, which export does not do yet. `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
+Distributing to other Macs needs a Developer ID signature and notarization, which export does not do yet; `tools/release_editor.py` can sign the editor with a Developer ID, but notarizing it is a manual step ([releasing](docs/releasing.md)). `-DSEED_BUILD_EDITOR=OFF` skips building the editor.
 
 ## Making a new game
 

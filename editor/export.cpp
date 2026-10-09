@@ -67,7 +67,8 @@ std::string info_plist(const Project& project) {
 )";
 }
 
-// Runs a system tool quietly; returns its exit status, or -1 when it could not be started.
+} // namespace
+
 int run_tool(const std::vector<std::string>& command) {
     std::vector<char*> argv;
     for (const auto& part : command)
@@ -86,7 +87,6 @@ int run_tool(const std::vector<std::string>& command) {
     if (waitpid(pid, &status, 0) != pid) return -1;
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
-} // namespace
 
 std::string export_problems(const Project& project) {
     std::string out;

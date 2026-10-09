@@ -4,6 +4,7 @@
 #include "io/storage.hpp"
 #include "scripts.hpp"
 #include "textures.hpp"
+#include "update_platform.hpp"
 #include "widgets.hpp"
 #include <SDL_opengl.h>
 #include <algorithm>
@@ -39,6 +40,25 @@ fs::path preferences_directory(const fs::path& override_path) {
     fs::path path(base);
     SDL_free(base);
     return path;
+}
+
+Updater::Config update_config(const Options& options, const fs::path& preferences) {
+    Updater::Config config;
+    config.feed_url = options.update_feed.empty() ? SEED_UPDATE_FEED : options.update_feed;
+    config.public_key = from_hex(options.update_key.empty() ? SEED_UPDATE_PUBLIC_KEY : options.update_key);
+    config.current = parse_version(editor_version);
+    config.folder = preferences / "updates";
+    config.app = running_bundle();
+    return config;
+}
+
+// Why this run should not check for updates, if it should not. An explicit feed always checks.
+std::string updates_off(const Options& options) {
+    if (!options.update_feed.empty()) return {};
+    if (options.smoke || options.ui_test) return "Automated runs do not check for updates.";
+    if (running_bundle().empty())
+        return "Updates apply to Seed Editor.app; this editor runs from a build folder.";
+    return {};
 }
 
 fs::path default_location() {
@@ -125,6 +145,7 @@ App::App(Options options)
     : options_(std::move(options)),
       window_(true),
       preferences_(preferences_directory(options_.preferences)),
+      updater_(update_config(options_, preferences_), updates_off(options_)),
       recent_(preferences_ / "recent-projects.json"),
       new_location_(default_location().string()),
       assets_([this](bool error, const std::string& text) { log(error ? Level::error : Level::info, text); },
@@ -362,7 +383,11 @@ void App::start_play() {
 }
 
 std::filesystem::path App::player_path() const {
-    // seed_player sits beside the editor when installed; in a build tree CMake records its path.
+    // seed_player sits beside the editor when installed, and beside it in Seed Editor.app's
+    // Contents/MacOS; in a build tree CMake records its path.
+    if (const auto app = running_bundle(); !app.empty())
+        if (auto player = app / "Contents" / "MacOS" / "seed_player"; std::filesystem::exists(player))
+            return player;
     char* base = SDL_GetBasePath();
     auto player = std::filesystem::path(base ? base : "") / "seed_player";
     SDL_free(base);
@@ -497,6 +522,7 @@ int App::run() {
         if (!options_.export_to.empty() && !export_app(options_.export_to, true) && options_.smoke)
             throw std::runtime_error("Export failed");
         if (options_.play) start_play();
+        if (!options_.update_feed.empty()) updater_.check(true);
         if (options_.ui_test)
             ui_test_ = std::make_unique<UiTest>(scene_, [this](bool error, const std::string& text) {
                 log(error ? Level::error : Level::info, text);
@@ -518,6 +544,9 @@ int App::run() {
         }
         window_.poll(input);
         play_.poll();
+        for (const auto& [problem, text] : updater_.poll())
+            log(problem ? Level::warning : Level::info, text);
+        updater_.check_if_due();
         if (input.quit) {
             input.quit = false;
             leave([this] { quit_ = true; });
@@ -536,7 +565,7 @@ int App::run() {
         ++frames_;
         // A smoke run with --play lasts until the game it started has finished.
         if (options_.smoke && frames_ >= 60 && !play_.running() && (!ui_test_ || ui_test_->finished()) &&
-            !splash_)
+            !splash_ && !updater_.busy())
             quit_ = true;
         if (options_.smoke && quit_ && !options_.screenshot.empty()) screenshot(options_.screenshot);
         if (options_.smoke && play_.running()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -554,6 +583,7 @@ int App::run() {
         }
         if (!options_.smoke) std::this_thread::sleep_until(frame_start + std::chrono::microseconds(16667));
     }
+    install_update_on_quit();
     if (ui_test_ && !ui_test_->passed()) return 1;
     return options_.play && play_.last_exit() != 0 ? 1 : 0;
 }
@@ -564,6 +594,7 @@ void App::frame() {
             workspace();
         else
             hub();
+        update_popup();
     } catch (const std::exception& error) {
         // Every user action reports failure here rather than closing the editor.
         log(Level::error, error.what());
@@ -595,6 +626,13 @@ void App::hub() {
     ImGui::PopFont();
     ImGui::SetCursorPosX(32);
     ImGui::TextDisabled("Create a project or open one to start building your game.");
+    if (const auto update = updater_.status(); update.state == Updater::State::ready) {
+        ImGui::SetCursorPosX(32);
+        ImGui::TextColored({0.45F, 0.80F, 0.62F, 1}, "Seed Editor %s is ready to install.",
+                           to_string(update.update->version).c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Details")) show_update_ = true;
+    }
     ImGui::Dummy({0, 12});
     ImGui::SetCursorPosX(32);
     ImGui::BeginChild("HubBody", {-32, -32});
@@ -872,8 +910,21 @@ void App::menu_bar() {
     }
     if (ImGui::BeginMenu("Help")) {
         if (ImGui::MenuItem("About Seed Editor")) show_about_ = true;
+        ImGui::Separator();
+        if (ImGui::MenuItem("Check for Updates...", nullptr, false, updater_.enabled() && !updater_.busy())) {
+            updater_.check(true);
+            show_update_ = true;
+        }
+        if (ImGui::MenuItem("Check Automatically", nullptr, updater_.automatic(), updater_.enabled()))
+            updater_.set_automatic(!updater_.automatic());
+        if (!updater_.enabled() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", updater_.status().message.c_str());
         ImGui::EndMenu();
     }
+    if (const auto update = updater_.status();
+        update.state == Updater::State::ready &&
+        ImGui::SmallButton(("Update to " + to_string(update.update->version)).c_str()))
+        show_update_ = true;
     const auto errors =
         std::count_if(log_.begin(), log_.end(), [](const auto& line) { return line.level == Level::error; });
     if (errors > 0 && ImGui::SmallButton((std::to_string(errors) + " errors").c_str())) {
@@ -1125,7 +1176,7 @@ void App::about_popup() {
         show_about_ = false;
     }
     if (ImGui::BeginPopupModal("About Seed Editor", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Seed Editor 0.1.0");
+        ImGui::Text("Seed Editor %s", editor_version);
         ImGui::TextDisabled("Dear ImGui %s, SDL %d.%d.%d", IMGUI_VERSION, SDL_MAJOR_VERSION,
                             SDL_MINOR_VERSION, SDL_PATCHLEVEL);
         if (ImGui::CollapsingHeader("Interface font licence")) {
@@ -1136,6 +1187,82 @@ void App::about_popup() {
         }
         if (ImGui::Button("Close", {120, 0})) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
+    }
+}
+
+void App::update_popup() {
+    constexpr const char* title = "Seed Editor Update";
+    if (show_update_) {
+        ImGui::OpenPopup(title);
+        show_update_ = false;
+    }
+    if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    using State = Updater::State;
+    const auto status = updater_.status();
+    const float width = ImGui::GetFontSize() * 28;
+    const auto version = status.update ? to_string(status.update->version) : std::string();
+    ImGui::PushTextWrapPos(width);
+    switch (status.state) {
+    case State::checking:
+        ImGui::TextUnformatted("Checking for updates...");
+        break;
+    case State::downloading:
+        ImGui::Text("Downloading Seed Editor %s. You can keep working.", version.c_str());
+        break;
+    case State::up_to_date:
+        ImGui::Text("Seed Editor %s is up to date.", editor_version);
+        break;
+    case State::ready:
+        ImGui::Text("Seed Editor %s is downloaded and verified. You have %s.", version.c_str(),
+                    editor_version);
+        if (!status.update->notes.empty()) {
+            ImGui::SeparatorText("What's new");
+            ImGui::BeginChild("notes", {width, ImGui::GetFontSize() * 9}, ImGuiChildFlags_Borders);
+            ImGui::TextWrapped("%s", status.update->notes.c_str());
+            ImGui::EndChild();
+        }
+        ImGui::TextDisabled("If you choose Later, it installs when you quit.");
+        break;
+    case State::failed:
+        ImGui::TextUnformatted("Could not check for updates.");
+        break;
+    case State::idle:
+    case State::off:
+        break;
+    }
+    if (!status.message.empty()) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "%s", status.message.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy({0, 6});
+    if (status.state == State::ready) {
+        if (ImGui::Button("Restart to Update")) {
+            leave([this] { restart_ = quit_ = true; });
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Later", {110, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape))
+            ImGui::CloseCurrentPopup();
+        ImGui::SameLine();
+        if (ImGui::Button("Skip This Version")) {
+            updater_.skip();
+            log(Level::info, "Seed Editor " + version + " will not be offered again; a later release will.");
+            ImGui::CloseCurrentPopup();
+        }
+    } else if (ImGui::Button("Close", {110, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape))
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+void App::install_update_on_quit() {
+    try {
+        if (const auto installed = updater_.install()) {
+            log(Level::info, "Installed Seed Editor " + to_string(*installed) + ".");
+            if (restart_ && run_tool({"/usr/bin/open", "-n", updater_.app().string()}) != 0)
+                std::fprintf(stderr, "Could not reopen %s\n", updater_.app().c_str());
+        }
+    } catch (const std::exception& error) {
+        // The window is gone; the next start shows the update again, so this goes to the terminal.
+        log(Level::error, std::string("Could not install the update: ") + error.what());
+        if (!options_.smoke) std::fprintf(stderr, "Could not install the update: %s\n", error.what());
     }
 }
 

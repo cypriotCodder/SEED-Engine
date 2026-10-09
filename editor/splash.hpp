@@ -4,8 +4,9 @@
 #include <string>
 
 namespace seed::editor {
-// The editor's version, shown on the launch screen and in Help > About.
-constexpr const char* editor_version = "0.01";
+// The editor's version (the CMake project version), shown on the launch screen and in Help > About
+// and compared with releases when checking for updates.
+constexpr const char* editor_version = SEED_EDITOR_VERSION;
 
 // Gives the window (and, on macOS, the Dock) the Seed icon.
 void set_window_icon(SDL_Window* window);
