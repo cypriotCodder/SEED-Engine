@@ -50,6 +50,10 @@ public:
     // Applies game-defined edit bits to a resident tile and records them in the chunk's saved
     // changes. Returns false if the tile's chunk is not active.
     bool edit(WorldPosition position, std::uint8_t bits);
+    // Replaces a resident tile outright and saves it whole. Throws for a material or object the
+    // generator's `materials` does not cover, or a non-finite elevation; returns false if the tile's
+    // chunk is not active.
+    bool set_tile(WorldPosition position, const Tile& tile);
     const Tile* tile(WorldPosition position) const;
     bool active(ChunkCoord coord) const;
     template<class F>

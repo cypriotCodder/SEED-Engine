@@ -15,7 +15,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <new>
+#include <optional>
+#include <queue>
 #include <string_view>
 
 namespace seed {
@@ -24,6 +27,83 @@ bool blocks_walking(void*, const Tile* tile) {
 }
 
 // The Lua-facing half of ScriptHost: every function Lua calls, with access to its internals.
+namespace {
+// A* over loaded tiles from tile (sx, sy) to (gx, gy), stepping to the eight neighbours; a diagonal
+// step needs both tiles beside it open. Returns the tiles walked through after the start, with
+// straight runs reduced to their ends; nothing if the goal is blocked, unloaded or not reached
+// within `budget` tiles searched.
+std::optional<std::vector<std::pair<std::int64_t, std::int64_t>>> find_route(const World& world,
+                                                                             std::int64_t sx, std::int64_t sy,
+                                                                             std::int64_t gx, std::int64_t gy,
+                                                                             std::size_t budget) {
+    using Cell = std::pair<std::int64_t, std::int64_t>;
+    const auto open_at = [&](std::int64_t x, std::int64_t y) {
+        return !blocks_walking(
+            nullptr, world.tile(from_global(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5)));
+    };
+    if (!open_at(gx, gy)) return std::nullopt;
+    const auto estimate = [&](Cell c) {
+        const auto dx = static_cast<double>(std::llabs(c.first - gx)),
+                   dy = static_cast<double>(std::llabs(c.second - gy));
+        return std::max(dx, dy) + (std::sqrt(2.0) - 1) * std::min(dx, dy);
+    };
+    struct Node {
+        double cost;
+        Cell from;
+        bool closed;
+    };
+    std::map<Cell, Node> nodes;
+    using Entry = std::pair<double, Cell>;
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<>> frontier;
+    nodes[{sx, sy}] = {0, {sx, sy}, false};
+    frontier.push({estimate({sx, sy}), {sx, sy}});
+    std::size_t searched = 0;
+    while (!frontier.empty()) {
+        const auto cell = frontier.top().second;
+        frontier.pop();
+        auto& node = nodes[cell];
+        if (node.closed) continue;
+        node.closed = true;
+        if (cell == Cell{gx, gy}) {
+            std::vector<Cell> route;
+            for (auto c = cell; c != Cell{sx, sy}; c = nodes[c].from)
+                route.push_back(c);
+            std::reverse(route.begin(), route.end());
+            // Keep only the turns and the end.
+            std::vector<Cell> turns;
+            for (std::size_t i = 0; i < route.size(); ++i) {
+                if (i + 1 < route.size()) {
+                    const auto& a = i ? route[i - 1] : Cell{sx, sy};
+                    const auto& b = route[i];
+                    const auto& c = route[i + 1];
+                    if (b.first - a.first == c.first - b.first && b.second - a.second == c.second - b.second)
+                        continue;
+                }
+                turns.push_back(route[i]);
+            }
+            return turns;
+        }
+        if (++searched > budget) return std::nullopt;
+        const double cost = node.cost;
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (!dx && !dy) continue;
+                const Cell next{cell.first + dx, cell.second + dy};
+                if (!open_at(next.first, next.second)) continue;
+                if (dx && dy &&
+                    (!open_at(cell.first + dx, cell.second) || !open_at(cell.first, cell.second + dy)))
+                    continue;
+                const double step = cost + (dx && dy ? std::sqrt(2.0) : 1.0);
+                auto found = nodes.find(next);
+                if (found != nodes.end() && (found->second.closed || found->second.cost <= step)) continue;
+                nodes[next] = {step, cell, false};
+                frontier.push({step + estimate(next), next});
+            }
+    }
+    return std::nullopt;
+}
+} // namespace
+
 struct ScriptApi {
     static constexpr const char* entity_type = "seed.entity";
 
@@ -205,6 +285,50 @@ struct ScriptApi {
         return 1;
     }
 
+    // Replaces fields of a loaded tile; the change is saved with the world. Fields left out keep
+    // their value; object = false (or "") removes the object.
+    static int set_tile(lua_State* lua) {
+        luaL_checktype(lua, 1, LUA_TTABLE);
+        auto& e = engine(lua);
+        lua_getfield(lua, 1, "x");
+        lua_getfield(lua, 1, "y");
+        const auto at = position_at(lua, -2);
+        lua_pop(lua, 2);
+        const auto* current = e.world.tile(at);
+        if (!current) {
+            lua_pushboolean(lua, false); // Not loaded: too far from the camera.
+            return 1;
+        }
+        Tile tile = *current;
+        lua_getfield(lua, 1, "ground");
+        if (!lua_isnil(lua, -1)) tile.material = e.materials.find(luaL_checkstring(lua, -1));
+        lua_pop(lua, 1);
+        lua_getfield(lua, 1, "object");
+        if (lua_isboolean(lua, -1) && !lua_toboolean(lua, -1))
+            tile.object = no_object;
+        else if (!lua_isnil(lua, -1)) {
+            const std::string name = luaL_checkstring(lua, -1);
+            tile.object = name.empty() ? no_object : tile_object(e.materials.find(name));
+        }
+        lua_pop(lua, 1);
+        lua_getfield(lua, 1, "solid");
+        if (!lua_isnil(lua, -1)) {
+            luaL_checktype(lua, -1, LUA_TBOOLEAN);
+            tile.flags = static_cast<std::uint8_t>(lua_toboolean(lua, -1) ? tile.flags | tile_solid
+                                                                          : tile.flags & ~tile_solid);
+        }
+        lua_pop(lua, 1);
+        lua_getfield(lua, 1, "elevation");
+        if (!lua_isnil(lua, -1)) {
+            const auto height = luaL_checknumber(lua, -1);
+            if (!(height >= -1000 && height <= 1000)) luaL_error(lua, "elevation must be -1000 to 1000");
+            tile.elevation = static_cast<float>(height);
+        }
+        lua_pop(lua, 1);
+        lua_pushboolean(lua, e.world.set_tile(at, tile));
+        return 1;
+    }
+
     // What the ground at a point is for walking: its material, speed and tags.
     static int surface(lua_State* lua) {
         auto& e = engine(lua);
@@ -272,6 +396,7 @@ struct ScriptApi {
     }
     static int walk(lua_State* lua) {
         auto& m = motion(lua, check_entity(lua, 1));
+        host(lua).cancel_route(check_entity(lua, 1));
         m.walk = {static_cast<float>(luaL_checknumber(lua, 2)), static_cast<float>(luaL_checknumber(lua, 3))};
         m.running = lua_toboolean(lua, 4);
         m.has_target = false;
@@ -287,6 +412,7 @@ struct ScriptApi {
             const auto gap = relative(target, position);
             return gap.x * gap.x + gap.y * gap.y < 1e-6F;
         }();
+        host(lua).cancel_route(entity);
         if (!there) {
             m.target = target;
             m.has_target = true;
@@ -296,7 +422,124 @@ struct ScriptApi {
         lua_pushboolean(lua, there);
         return 1;
     }
+    // Routes: a list of points to walk through in turn.
+    static void push_points(lua_State* lua, const std::vector<WorldPosition>& points) {
+        lua_createtable(lua, static_cast<int>(points.size()), 0);
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            lua_createtable(lua, 2, 0);
+            push_position(lua, points[i]);
+            lua_rawseti(lua, -3, 2);
+            lua_rawseti(lua, -2, 1);
+            lua_rawseti(lua, -2, static_cast<lua_Integer>(i + 1));
+        }
+    }
+    static std::vector<WorldPosition> read_points(lua_State* lua, int index) {
+        luaL_checktype(lua, index, LUA_TTABLE);
+        const auto count = luaL_len(lua, index);
+        if (count < 1 || count > 4096) luaL_error(lua, "a route has 1 to 4096 points");
+        std::vector<WorldPosition> points;
+        for (lua_Integer i = 1; i <= count; ++i) {
+            lua_rawgeti(lua, index, i);
+            if (!lua_istable(lua, -1)) luaL_error(lua, "each point is {x, y}");
+            lua_rawgeti(lua, -1, 1);
+            lua_rawgeti(lua, -2, 2);
+            points.push_back(position_at(lua, -2));
+            lua_pop(lua, 3);
+        }
+        return points;
+    }
+    // e:follow(points or a path entity [, loop [, run]]).
+    static int follow_route(lua_State* lua) {
+        const auto entity = check_entity(lua, 1);
+        auto& m = motion(lua, entity);
+        auto& self = host(lua);
+        ScriptHost::Route route{entity, {}, 0, false, false};
+        if (lua_isuserdata(lua, 2)) {
+            const auto path_entity = check_entity(lua, 2);
+            const auto found =
+                std::find_if(self.paths_.begin(), self.paths_.end(),
+                             [&](const ScriptHost::Path& p) { return p.entity == path_entity; });
+            if (found == self.paths_.end()) luaL_error(lua, "that entity has no path");
+            route.points = found->points;
+            route.loop = found->loop;
+        } else
+            route.points = read_points(lua, 2);
+        if (!lua_isnoneornil(lua, 3)) route.loop = lua_toboolean(lua, 3);
+        route.running = lua_toboolean(lua, 4);
+        self.cancel_route(entity);
+        m.target = route.points.front();
+        m.has_target = true;
+        m.walk = {};
+        m.running = route.running;
+        self.routes_.push_back(std::move(route));
+        return 0;
+    }
+    // world.find_path(x0, y0, x1, y1): the points to walk through, or nil.
+    static std::optional<std::vector<WorldPosition>> route_between(lua_State* lua, WorldPosition from,
+                                                                   WorldPosition to) {
+        const auto cell = [](double v) {
+            return static_cast<std::int64_t>(std::floor(v));
+        };
+        const double fx = global_coordinate(from.chunk.x, from.local.x),
+                     fy = global_coordinate(from.chunk.y, from.local.y);
+        const double tx = global_coordinate(to.chunk.x, to.local.x),
+                     ty = global_coordinate(to.chunk.y, to.local.y);
+        if (std::abs(tx - fx) > 512 || std::abs(ty - fy) > 512)
+            luaL_error(lua, "a path reaches at most 512 tiles");
+        const auto cells = find_route(engine(lua).world, cell(fx), cell(fy), cell(tx), cell(ty), 16384);
+        if (!cells) return std::nullopt;
+        std::vector<WorldPosition> points;
+        for (const auto& [x, y] : *cells)
+            points.push_back(from_global(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5));
+        if (points.empty())
+            points.push_back(to);
+        else
+            points.back() = to; // End on the point asked for, not its tile's centre.
+        return points;
+    }
+    static int find_path(lua_State* lua) {
+        const auto points = route_between(lua, position_at(lua, 1), position_at(lua, 3));
+        if (points)
+            push_points(lua, *points);
+        else
+            lua_pushnil(lua);
+        return 1;
+    }
+    // e:go_to(x, y [, run]): finds a way there and follows it; false if there is none.
+    static int go_to(lua_State* lua) {
+        const auto entity = check_entity(lua, 1);
+        motion(lua, entity);
+        const auto points = route_between(lua, transform(lua, entity).position, position_at(lua, 2));
+        if (!points) {
+            lua_pushboolean(lua, false);
+            return 1;
+        }
+        lua_settop(lua, 4);
+        const bool running = lua_toboolean(lua, 4);
+        lua_settop(lua, 1);
+        push_points(lua, *points);
+        lua_pushboolean(lua, false);
+        lua_pushboolean(lua, running);
+        follow_route(lua);
+        lua_pushboolean(lua, true);
+        return 1;
+    }
+    // world.path(entity): its points and whether it loops.
+    static int path(lua_State* lua) {
+        const auto entity = check_entity(lua, 1);
+        auto& self = host(lua);
+        const auto found = std::find_if(self.paths_.begin(), self.paths_.end(),
+                                        [&](const ScriptHost::Path& p) { return p.entity == entity; });
+        if (found == self.paths_.end()) {
+            lua_pushnil(lua);
+            return 1;
+        }
+        push_points(lua, found->points);
+        lua_pushboolean(lua, found->loop);
+        return 2;
+    }
     static int stop(lua_State* lua) {
+        host(lua).cancel_route(check_entity(lua, 1));
         auto& m = motion(lua, check_entity(lua, 1));
         m.walk = {};
         m.has_target = false;
@@ -320,7 +563,11 @@ struct ScriptApi {
     }
     static int moving(lua_State* lua) {
         const auto& m = motion(lua, check_entity(lua, 1));
-        lua_pushboolean(lua, m.has_target || m.walk.x != 0 || m.walk.y != 0);
+        const auto entity = check_entity(lua, 1);
+        const auto& routes = host(lua).routes_;
+        lua_pushboolean(lua, m.has_target || m.walk.x != 0 || m.walk.y != 0 ||
+                                 std::any_of(routes.begin(), routes.end(),
+                                             [&](const ScriptHost::Route& r) { return r.entity == entity; }));
         return 1;
     }
     static int time(lua_State* lua) {
@@ -723,9 +970,10 @@ struct ScriptApi {
                                          {"pointer", guarded<pointer>},
                                          {"screen_pointer", guarded<screen_pointer>},
                                          {nullptr, nullptr}};
-        static const luaL_Reg world[] = {{"find", guarded<find>}, {"spawn", guarded<spawn>},
-                                         {"tile", guarded<tile>}, {"surface", guarded<surface>},
-                                         {"near", guarded<near>}, {nullptr, nullptr}};
+        static const luaL_Reg world[] = {
+            {"find", guarded<find>},           {"spawn", guarded<spawn>},     {"tile", guarded<tile>},
+            {"set_tile", guarded<set_tile>},   {"surface", guarded<surface>}, {"near", guarded<near>},
+            {"find_path", guarded<find_path>}, {"path", guarded<path>},       {nullptr, nullptr}};
         static const luaL_Reg sound[] = {{"play", guarded<play>}, {nullptr, nullptr}};
         static const luaL_Reg particles[] = {{"burst", guarded<burst>}, {nullptr, nullptr}};
         static const luaL_Reg camera[] = {{"follow", guarded<follow>},
@@ -781,6 +1029,8 @@ struct ScriptApi {
                                            {"destroy", guarded<destroy>},
                                            {"walk", guarded<walk>},
                                            {"walk_to", guarded<walk_to>},
+                                           {"follow", guarded<follow_route>},
+                                           {"go_to", guarded<go_to>},
                                            {"stop", guarded<stop>},
                                            {"speed", guarded<speed>},
                                            {"set_speed", guarded<set_speed>},
@@ -819,8 +1069,37 @@ void ScriptHost::name(Entity entity, const std::string& name) {
     names_.at(entity.index) = name;
 }
 
+void ScriptHost::set_path(Entity entity, std::vector<WorldPosition> points, bool loop) {
+    if (points.empty()) throw std::invalid_argument("A path needs points");
+    std::erase_if(paths_, [&](const ScriptHost::Path& p) { return p.entity == entity; });
+    paths_.push_back({entity, std::move(points), loop});
+}
+
+void ScriptHost::cancel_route(Entity entity) {
+    std::erase_if(routes_, [&](const Route& r) { return r.entity == entity; });
+}
+
+void ScriptHost::advance_routes() {
+    auto& motions = engine_.scene.components<CharacterMotion>();
+    std::erase_if(routes_, [&](Route& route) {
+        auto* m = engine_.scene.alive(route.entity) ? motions.find(route.entity) : nullptr;
+        if (!m) return true;
+        if (m->has_target) return false; // Still on its way to the current point.
+        if (++route.next == route.points.size()) {
+            if (!route.loop) return true;
+            route.next = 0;
+        }
+        m->target = route.points[route.next];
+        m->has_target = true;
+        m->running = route.running;
+        return false;
+    });
+}
+
 void ScriptHost::forget(Entity entity) {
     names_.at(entity.index).clear();
+    cancel_route(entity);
+    std::erase_if(paths_, [&](const ScriptHost::Path& p) { return p.entity == entity; });
     for (auto& instance : instances_)
         if (instance.entity == entity) instance.failed = true; // Purged after the current update.
 }
@@ -833,7 +1112,7 @@ void ScriptHost::fail(Instance& instance, const std::string& message) {
 }
 
 void ScriptHost::attach(Entity entity, const std::string& file) {
-    Instance instance{entity, LUA_NOREF, file, false, false, {}};
+    Instance instance{entity, LUA_NOREF, file, false, false, {}, {}};
     std::string source;
     try {
         auto text = scripts_(file);
@@ -953,6 +1232,7 @@ void ScriptHost::draw_ui(Renderer& renderer) const {
 void ScriptHost::touches() {
     auto& scene = engine_.scene;
     auto& motions = scene.components<CharacterMotion>();
+    auto& areas = scene.components<AreaComponent>();
     // An entity's box: a character's collision box, else its visual's size; none for markers.
     const auto half_of = [&](Entity e, Vec2& half) {
         if (const auto* m = motions.find(e)) return half = m->half, true;
@@ -984,25 +1264,45 @@ void ScriptHost::touches() {
         const auto contains = [](const std::vector<Entity>& list, Entity e) {
             return std::find(list.begin(), list.end(), e) != list.end();
         };
+        // Calls may also attach scripts, so the instance is found again for each.
+        const auto notify = [&](Entity other, const char* function) {
+            for (auto& instance : instances_)
+                if (instance.entity == self && !instance.failed) {
+                    ScriptApi::push_entity(lua_, other);
+                    call(instance, function, 1);
+                    break;
+                }
+        };
         const auto started = now;
         for (const auto other : before)
-            if (!contains(started, other) && scene.alive(other)) {
-                for (auto& instance : instances_)
-                    if (instance.entity == self && !instance.failed) {
-                        ScriptApi::push_entity(lua_, other);
-                        call(instance, "on_leave", 1);
-                        break;
-                    }
-            }
+            if (!contains(started, other) && scene.alive(other)) notify(other, "on_leave");
         for (const auto other : started)
-            if (!contains(before, other) && scene.alive(other) && scene.alive(self)) {
-                for (auto& instance : instances_)
-                    if (instance.entity == self && !instance.failed) {
-                        ScriptApi::push_entity(lua_, other);
-                        call(instance, "on_touch", 1);
-                        break;
-                    }
-            }
+            if (!contains(before, other) && scene.alive(other) && scene.alive(self))
+                notify(other, "on_touch");
+
+        // An area: the characters whose centres are in it.
+        if (instances_[i].failed || !scene.alive(self)) continue;
+        const auto* area = areas.find(self);
+        at = scene.transforms.find(self);
+        if (!area || !at) continue;
+        const auto reach = static_cast<std::uint64_t>(std::max(area->half.x, area->half.y) / chunk_side) + 1;
+        const auto centre = at->position;
+        now.clear();
+        const auto characters = motions.owners();
+        for (const auto other : characters) {
+            const auto* t = scene.transforms.find(other);
+            if (other == self || !t || !nearby(t->position.chunk, centre.chunk, reach)) continue;
+            const auto r = relative(t->position, centre);
+            if (std::abs(r.x) < area->half.x && std::abs(r.y) < area->half.y) now.push_back(other);
+        }
+        const auto was_inside = instances_[i].inside;
+        instances_[i].inside = now;
+        const auto entered = now;
+        for (const auto other : was_inside)
+            if (!contains(entered, other) && scene.alive(other)) notify(other, "on_exit");
+        for (const auto other : entered)
+            if (!contains(was_inside, other) && scene.alive(other) && scene.alive(self))
+                notify(other, "on_enter");
     }
 }
 
@@ -1025,6 +1325,7 @@ void ScriptHost::update(float dt) {
         lua_pushnumber(lua_, dt);
         call(instances_[i], "update", 1);
     }
+    advance_routes();
     // Drop the scripts of destroyed entities.
     std::erase_if(instances_, [&](const Instance& instance) {
         if (scene.alive(instance.entity)) return false; // A failed script stays, switched off.

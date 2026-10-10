@@ -14,9 +14,11 @@ The 20-byte header contains five u32 values: magic `0x344c4453`, envelope versio
 
 A game made of several scenes keeps each scene's world in the same save, every file name starting with the scene's name and a dot: `cave.world.seed`, `cave.12_-3.chunk`, `cave.player.delta`. The scene name uses letters, digits, `_` and `-` (at most 64). Leaving a scene writes its world and the player's position under its prefix; coming back reads them, so each scene remembers its own changes. Games written in C++ with one world use no prefix. Project games saved before scenes had prefixes stored their one world without one; those saves are no longer read, and such a game starts a new world.
 
-## Chunk changes, version 4
+## Chunk changes, version 5
 
-`X_Y.chunk` contains u32 magic `0x4b4e4843`, u32 schema version 4, u64 generator ID, u32 generator version, u64 seed, two signed 64-bit chunk coordinates, and u16 terrain-record count. Each terrain record is u16 tile index (row-major 32×32) plus u8 change flags. The game defines what each change bit means (`WorldGenerator::edit_bits` and `apply_edit`); in the demo, bit 0 removes a tree and bit 1 excavates terrain into water. Bits outside the game's mask are rejected. Repeated edits compact into one record per tile.
+`X_Y.chunk` contains u32 magic `0x4b4e4843`, u32 schema version 5, u64 generator ID, u32 generator version, u64 seed, two signed 64-bit chunk coordinates, and u16 terrain-record count. Each terrain record is u16 tile index (row-major 32×32) plus u8 change flags. The game defines what each change bit means (`WorldGenerator::edit_bits` and `apply_edit`); in the demo, bit 0 removes a tree and bit 1 excavates terrain into water. Bits outside the game's mask are rejected. Repeated edits compact into one record per tile.
+
+Next is u16 replaced-tile count and, in ascending tile order without repeats, records of u16 tile index, f32 elevation, u8 material ID, u8 flags, u8 object (0 for none, otherwise material ID + 1) and the tile's four game bytes. These are tiles replaced outright (`World::set_tile`, Lua `world.set_tile`); loading generates the chunk, applies its change flags and then puts each replaced tile back whole. Elevations must be finite and within ±10⁶; when the generator states its material count (`WorldGenerator::materials`, set by project terrains), material and object IDs beyond it are rejected.
 
 Next are u16 body-record count and records containing u16 body ID plus an 81-byte body state: u8 existence flag; current and previous positions (each two i64 chunk coordinates and two f32 local offsets); then eight f32 values: half-width, half-height, angle, previous angle, height, previous height, inverse mass, health. Generated recipe IDs remain stable, and unchanged recipe bodies are omitted. Destroyed recipe bodies remain tombstones. Built bodies are stored densely after the recipe; destroyed built bodies are omitted. Built-body indices are not persistent external handles.
 
@@ -24,7 +26,7 @@ Next, u16 broken-joint count precedes u16 joint recipe IDs. Endpoints/rest lengt
 
 Finally, the saved-entity section: u16 entity count (at most 1,024), u32 section byte length, then that many records. Each record is a position (two i64 chunk coordinates and two canonical f32 local offsets), f32 angle, f32 visual width, f32 visual height, u8 material ID, u16 payload length (at most 4,096) and the game's payload bytes. The engine checks the record structure while loading; the game's `load_entity` must consume each payload exactly. Records keep scene order and are rewritten whole whenever a chunk's saved entities change. Unknown versions, duplicate IDs, invalid state, and trailing bytes are errors.
 
-Legacy migration is disabled by user decision. Terrain-only chunk version 1, standalone `0_0.bodies` files, flat pre-checkpoint saves, and mismatched generator versions are rejected with an explicit message. Choose a new save directory; old files are not deleted or rewritten. World metadata version 1 and chunk versions 1 to 3 from earlier builds are rejected the same way; the checkpoint container is still version 1.
+Legacy migration is disabled by user decision. Terrain-only chunk version 1, standalone `0_0.bodies` files, flat pre-checkpoint saves, and mismatched generator versions are rejected with an explicit message. Choose a new save directory; old files are not deleted or rewritten. World metadata version 1 and chunk versions 1 to 4 from earlier builds are rejected the same way; the checkpoint container is still version 1.
 
 ## Player
 

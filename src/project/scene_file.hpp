@@ -24,6 +24,20 @@ struct SceneLight {
     bool night_only{}; // Lit only as the scene's daylight fades.
     bool operator==(const SceneLight&) const = default;
 };
+// A region of the world, centred on its entity and unrotated: its script's on_enter(other) and
+// on_exit(other) run as characters' centres come into it and leave it.
+struct SceneArea {
+    Vec2 size{4, 4};
+    bool operator==(const SceneArea&) const = default;
+};
+// A route through the world: points relative to its entity (not rotated with it), for characters
+// to follow (e:follow) and scripts to read (world.path).
+struct ScenePath {
+    static constexpr std::size_t capacity = 256;
+    std::vector<Vec2> points;
+    bool loop{}; // Followers go from the last point back to the first.
+    bool operator==(const ScenePath&) const = default;
+};
 // The player-controlled character's settings: which actions move it, and how the camera follows it.
 struct ScenePlayer {
     std::string up{"move_up"}, down{"move_down"}, left{"move_left"}, right{"move_right"}, run{"run"};
@@ -52,9 +66,11 @@ struct SceneEntity {
     std::optional<SceneVisual> visual;
     std::optional<SceneLight> light;
     std::optional<SceneCharacter> character;
+    std::optional<SceneArea> area;
+    std::optional<ScenePath> path;
     std::string script; // A file in the project's scripts/ folder, such as "player.lua"; empty for none.
     // The prefab this entity was placed from (prefabs/<name>.json), or empty. A placed prefab keeps
-    // its own name, position and angle; its visual, light and script are the prefab's, copied here
+    // its own name, position and angle; its visual, light, area and script are the prefab's, copied here
     // so games load scenes without resolving prefabs.
     std::string prefab;
     // Editor-only: hidden entities are not drawn in the Scene view; locked ones cannot be picked
@@ -74,10 +90,24 @@ void apply_prefab(const SceneEntity& prefab, SceneEntity& placed);
 // Whether `name` is a plain script file name: letters, digits, '_', '-' and '.', ending in ".lua".
 bool valid_script_name(std::string_view name);
 
+// A sprite placed on the scene that is not an entity, such as a flower, a tuft of grass or a patch of
+// moss: no name, script or saved state, drawn near the camera. Flat ones lie on the ground under
+// objects and entities; standing ones are drawn with the entities (and sorted with them).
+struct SceneDecoration {
+    std::string material;
+    WorldPosition position{}; // Canonical, as an entity's.
+    Vec2 size{1, 1};
+    float angle{};
+    bool standing{};
+    bool operator==(const SceneDecoration&) const = default;
+};
+
 struct SceneFile {
-    static constexpr std::size_t capacity = 4096; // Entities per scene.
-    std::string terrain{"main"};                  // The project terrain this scene's world is generated from.
+    static constexpr std::size_t capacity = 4096;             // Entities per scene.
+    static constexpr std::size_t decoration_capacity = 16384; // Decorations per scene.
+    std::string terrain{"main"}; // The project terrain this scene's world is generated from.
     std::vector<SceneEntity> entities;
+    std::vector<SceneDecoration> decorations;
     TerrainPaint paint; // Tiles painted over the terrain, saved beside the scene as <name>.paint.
     SceneAtmosphere atmosphere;
     bool operator==(const SceneFile&) const = default;

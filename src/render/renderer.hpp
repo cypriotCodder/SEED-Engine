@@ -62,7 +62,8 @@ public:
     // A ground tile whose lower-left corner is at global tile coordinates (gx, gy), drawn at
     // (x, y) like sprite(). A textured material shows the part of its texture that falls on this
     // tile, so the texture continues across neighbouring tiles; other materials draw as sprite().
-    void ground(MaterialId material, float x, float y, double gx, double gy, unsigned edges = 0);
+    void ground(MaterialId material, float x, float y, double gx, double gy, unsigned edges = 0,
+                float shade = 1);
     // Neighbours of a ground tile, in this order: east (+x), west, north (+y), south, north-east,
     // north-west, south-east, south-west. The bits name them for ground().
     static constexpr unsigned edge_east = 1, edge_west = 2, edge_north = 4, edge_south = 8,
@@ -71,8 +72,9 @@ public:
     // A ground tile as ground() draws it, then each neighbouring material that blends over it
     // (MaterialDesc::blend higher than this tile's) fading in from the sides it borders. Pass the
     // tile's own material for a neighbour that is not known.
+    // `shade` darkens or lightens the tile and everything blended over it (see relief_shade).
     void ground_blended(MaterialId material, const std::array<MaterialId, 8>& neighbours, float x, float y,
-                        double gx, double gy);
+                        double gx, double gy, float shade = 1);
     void flush();
     void finish();
     // Where finish() places the frame in the window's framebuffer, in pixels from its bottom-left

@@ -21,6 +21,8 @@ struct WorldGenerator {
     // to a freshly generated or resident tile. The engine records and saves the bits.
     std::uint8_t edit_bits{};
     void (*apply_edit)(void*, Tile& tile, std::uint8_t bits){};
+    // How many materials are registered, so tiles read from saves can be checked; 0 skips the check.
+    std::size_t materials{};
 };
 
 // Generates the building recipe of one chunk. Everything it adds is part of the recipe baseline
@@ -38,6 +40,7 @@ inline void fill_chunk(const WorldGenerator& generator, std::uint64_t seed, Chun
     // Reset in place: a Chunk is tens of kilobytes and this runs on worker-thread stacks.
     chunk.tiles.fill({});
     chunk.changes.fill(0);
+    chunk.replaced.reset();
     chunk.entities.records.clear();
     chunk.entities.count = 0;
     chunk.dirty = false;

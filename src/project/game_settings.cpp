@@ -23,6 +23,7 @@ Json game_settings_json(const GameSettings& settings) {
     game.set("width", settings.width);
     game.set("height", settings.height);
     game.set("fullscreen", settings.fullscreen);
+    if (settings.sort_by_y) game.set("sort_by_y", true); // Written only when set.
     return game;
 }
 
@@ -34,6 +35,7 @@ GameSettings parse_game_settings(const Json* game) {
     if (const auto* v = game->find("width")) settings.width = static_cast<int>(v->as_int(0, 100000));
     if (const auto* v = game->find("height")) settings.height = static_cast<int>(v->as_int(0, 100000));
     if (const auto* v = game->find("fullscreen")) settings.fullscreen = v->as_bool();
+    if (const auto* v = game->find("sort_by_y")) settings.sort_by_y = v->as_bool();
     return settings;
 }
 } // namespace seed

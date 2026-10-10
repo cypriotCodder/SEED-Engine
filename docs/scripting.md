@@ -20,7 +20,7 @@ end
 
 ## How scripts run
 
-Each attached script runs in its own environment: its globals and `local`s belong to that entity alone, and `self` is the entity. The file's top level runs when the game starts, after every scene entity exists. `start()`, if defined, runs once before the first update; `update(dt)`, if defined, runs every fixed step (60 per second; `dt` is in seconds). `on_touch(other)` and `on_leave(other)`, if defined, run when the entity's box starts or stops overlapping another entity's: a character's box is its collision box, anything else's is its visual's size (unrotated); entities with neither have no box. On a character, `on_surface(material)`, if defined, runs when it steps onto a different ground material, and once when it first stands on loaded ground.
+Each attached script runs in its own environment: its globals and `local`s belong to that entity alone, and `self` is the entity. The file's top level runs when the game starts, after every scene entity exists. `start()`, if defined, runs once before the first update; `update(dt)`, if defined, runs every fixed step (60 per second; `dt` is in seconds). `on_touch(other)` and `on_leave(other)`, if defined, run when the entity's box starts or stops overlapping another entity's: a character's box is its collision box, anything else's is its visual's size (unrotated); entities with neither have no box. On an entity with an Area, `on_enter(other)` and `on_exit(other)`, if defined, run when a character's centre comes into or leaves the area's rectangle (centred on the entity, unrotated), after the step's touches; a character inside when the game starts enters on the first step. On a character, `on_surface(material)`, if defined, runs when it steps onto a different ground material, and once when it first stands on loaded ground.
 
 The player moves with the keys unless its Character's "Moves with the keys" is off; its script can add to that, or take over with `walk` and `walk_to`. NPCs move only through their scripts.
 
@@ -51,7 +51,9 @@ Positions are global tile coordinates: one unit per tile, `x` to the right and `
 | --- | --- |
 | `e:walk(x, y [, run])` | Keep walking in this direction (length up to 1) until told otherwise. |
 | `e:walk_to(x, y [, run])` | Walk to a point and stop there; returns `true` once there. |
-| `e:stop()` | Stop at once. |
+| `e:follow(route [, loop [, run]])` | Walk through a route's points in turn: `route` is a list of `{x, y}` points (1 to 4,096) or an entity with a Path (whose Loop setting applies unless `loop` is given). With `loop` it goes round for ever. A character that cannot reach a point keeps trying; `walk`, `walk_to`, `stop` or another `follow` end the route. `e:moving()` stays true until it ends. |
+| `e:go_to(x, y [, run])` | Find a way round walls, water and trees to a point (`world.find_path`) and follow it; returns `false`, without moving, when there is none. |
+| `e:stop()` | Stop at once, ending any route. |
 | `e:moving()` | Whether it is walking or heading somewhere. |
 | `e:speed()`, `e:set_speed(walk [, run])` | Speeds in tiles per second. |
 
@@ -74,6 +76,9 @@ Entities compare with `==`. Using a destroyed entity is an error, except `alive(
 | `atmosphere.daylight()` | How bright the scene is now: 1 from 09:00 to 15:00, 0 from 21:00 to 03:00. A scene without a day keeps its own hour's light while the game's clock runs on. |
 | `e:light()` | `{color={r,g,b}, radius=, intensity=, height=, flicker=, night_only=}`, or `nil` without a light. |
 | `e:set_light{...}` | Changes the fields given (same names and limits as the Light component); an entity without a light gets one. |
+| `world.find_path(x0, y0, x1, y1)` | The points to walk through from one point to another, as `{{x, y}, ...}` (the turns, then the destination itself), or `nil` if the destination's tile is blocked or no way is found among loaded tiles. It steps between tile centres, diagonally only where both tiles beside the step are open, avoiding what blocks walking by default (water, solid tiles and unloaded ground). It searches at most 16,384 tiles; the ends may be at most 512 tiles apart. |
+| `world.path(e)` | The points of an entity's Path, as `{{x, y}, ...}`, and whether it loops; `nil` for an entity without one. |
+| `world.set_tile{x=, y=, ground=, object=, solid=, elevation=}` | Changes a loaded tile and returns `true`, or returns `false` far from the camera, changing nothing. Fields left out keep their value; `object = false` (or `""`) removes the object; `elevation` is -1,000 to 1,000 (below 0 is water). An unknown material is an error. The tile is saved whole with the world, so the change lasts. |
 | `world.surface(x, y)` | `{material=, speed=, tags={...}}`: the ground material at a loaded tile, how fast characters walk on it (a multiple of their own speed, applied by the engine) and its tags from the Materials panel, or `nil` far from the camera. |
 | `sound.play(name)` | A sound from the Sounds panel, synthesized or recorded. |
 | `music.play(name [, loop])` | Plays `assets/music/<name>.ogg`, replacing any music; loops unless `loop` is `false`. An unknown or broken file is an error. |

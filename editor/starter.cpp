@@ -80,11 +80,15 @@ void starter_island(Assets& assets, const std::string& terrain) {
         {"moisture", 0, {term(K::fractal, 128, 1, true), term(K::perlin, 512, 0.5F)}},
         {"temperature", 1, {term(K::distance, 1, -1.4F), term(K::perlin, 512, 0.15F)}},
         {"ring", 0, {term(K::distance, 1, 1), term(K::perlin, 1024, 0.12F), term(K::perlin, 256, 0.04F)}},
+        // Ridged noise is near 1 along thin winding lines: rivers, where the rule below makes them.
+        {"river", 0, {term(K::ridged, 256, 1, true)}},
     };
     t.rules = {
         rule("Deep sea", "deep_water", {below("elevation", -0.25F)}),
         rule("Sea", "water", {below("elevation", 0)}),
         rule("Beach", "sand", {below("elevation", 0.06F)}),
+        // Rivers wind across the lowlands, but not through the middle, where the game starts.
+        rule("River", "water", {above("river", 0.94F), below("elevation", 0.55F), above("ring", 0.12F)}),
         rule("Snow", "snow", {below("temperature", -0.15F)}),
         rule("Meadow", "grass", {below("ring", 0.28F)}, "tree", 19),
         rule("Swamp", "mud", {below("ring", 0.55F), above("moisture", 0.3F), below("elevation", 0.45F)},
@@ -93,6 +97,14 @@ void starter_island(Assets& assets, const std::string& terrain) {
         rule("Mountain", "stone", {above("elevation", 0.55F)}),
         rule("Plains", "dry_grass", {}, "tree", 60),
     };
+    // Ruined stone pillars, now and then, on low dry land.
+    TerrainFeature ruins;
+    ruins.name = "Ruins";
+    ruins.one_in = 10;
+    ruins.when = {above("elevation", 0.1F), below("elevation", 0.5F)};
+    ruins.rows = {"#.#.#", ".....", "#...#", ".....", "#.#.#"};
+    ruins.cells = {{'#', "stone", "", true}};
+    t.features = {ruins};
 }
 
 } // namespace seed::editor

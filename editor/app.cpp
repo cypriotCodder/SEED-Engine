@@ -747,6 +747,7 @@ void App::workspace() {
     // Scene panels first: a dock node lists tabs in the order windows first appear, so Scene and
     // Inspector lead their nodes.
     scene_.set_game_view(edited_game_.width, edited_game_.height);
+    scene_.set_sort_by_y(edited_game_.sort_by_y);
     if (scene_.draw(assets_.edit())) assets_.changed();
     assets_.set_terrain(scene_.scene().terrain); // The Terrain panel edits this scene's terrain.
     if (!scene_.maximized) {
@@ -1153,6 +1154,10 @@ void App::settings_panel() {
     ImGui::SetNextItemWidth(-1);
     ImGui::InputInt2("##size", &edited_game_.width);
     ImGui::Checkbox("Start fullscreen", &edited_game_.fullscreen);
+    ImGui::Checkbox("Sort by depth", &edited_game_.sort_by_y);
+    ImGui::SetItemTooltip("Draw characters, trees and other entities from the top of the screen down,\n"
+                          "so whatever stands lower is in front: characters walk behind trees.\n"
+                          "Off: entities draw in Hierarchy order, over the terrain's objects.");
 
     if (!problem.empty()) ImGui::TextColored({0.95F, 0.65F, 0.35F, 1}, "%s", problem.c_str());
     ImGui::Dummy({0, 8});

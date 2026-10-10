@@ -51,6 +51,8 @@ public:
     const std::string& name() const { return name_; }
     const std::vector<std::string>& scene_names() const { return scene_names_; }
     // The game window's logical size, for the Scene view's player camera frame.
+    // Whether the Scene view draws entities back to front, as the game will (GameSettings::sort_by_y).
+    void set_sort_by_y(bool sort) { sort_by_y_ = sort; }
     void set_game_view(int width, int height) {
         game_view_ = {static_cast<float>(width), static_cast<float>(height)};
     }
@@ -113,7 +115,7 @@ private:
     // Terrain painting. A freehand stroke paints the tiles under the brush each frame the button is
     // held; a rectangle or line paints its tiles when the button is let go; fill paints the
     // connected area of the clicked tile's ground and object.
-    enum class Brush { ground, object, raise, lower, flatten, solid, erase };
+    enum class Brush { ground, object, raise, lower, flatten, solid, erase, decorate };
     enum class Shape { freehand, rectangle, line, fill };
     struct BrushSettings {
         Brush kind{Brush::ground};
@@ -128,10 +130,19 @@ private:
         bool object_solid{true};
         float height{0.15F}; // Height the flatten brush levels to; below 0 is water.
         bool block{true};    // The solid brush blocks walking, or clears blocking.
+        // The decorate brush: what it scatters, how big (each varying by `jitter`), how far apart,
+        // and whether the pieces are turned at random and stand up (sorted with entities).
+        std::string decoration;
+        float decoration_size{0.6F}, jitter{0.3F}, spacing{0.8F};
+        bool turn{true}, standing{};
     } brush_;
     unsigned stroke_{}; // Counts strokes, so partial-strength strokes pick different tiles.
     void brush_section(const Assets& assets);
     WorldPosition shape_from_{}; // Where a rectangle or line stroke began.
+    // The decorate brush places a piece whenever the pointer is `spacing` from the last one.
+    WorldPosition last_decoration_{};
+    unsigned decorations_placed_{};
+    void decorate_at(WorldPosition at);
     void paint_at(WorldPosition centre, float dt);
     // Applies the brush to one tile; `falloff` (0 to 1) eases height brushes.
     void paint_tile(std::int64_t x, std::int64_t y, float falloff, float dt);
@@ -209,6 +220,8 @@ private:
     void create_at(WorldPosition position);
     // Creates a character: the player (unless the scene has one, which is then selected) or an NPC.
     void create_character(WorldPosition position, bool player, const Assets& assets);
+    void create_area(WorldPosition position);
+    void create_path(WorldPosition position);
     // Makes `index` the scene's one player, taking the role from any other character.
     void make_player(int index);
     void duplicate_selection();
@@ -274,8 +287,9 @@ private:
     std::vector<Grabbed> grabbed_; // Per selected entity, at the drag's start.
     bool box_additive_{};
 
-    WorldPosition menu_at_{};   // Where the context menu was opened.
-    const Assets* assets_{};    // This frame's assets, for creating characters from menus.
+    WorldPosition menu_at_{}; // Where the context menu was opened.
+    const Assets* assets_{};  // This frame's assets, for creating characters from menus.
+    bool sort_by_y_{};
     Vec2 game_view_{1280, 720}; // The game window's logical size, for the camera frame.
     Scripts scripts_;
     std::string new_script_;

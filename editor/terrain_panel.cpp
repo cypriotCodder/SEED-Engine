@@ -141,6 +141,11 @@ void AssetPanels::terrain() {
         ImGui::SetNextItemWidth(-1);
         ImGui::SliderFloat("##coast", &t.coast, 0, 0.5F);
     }
+    ImGui::TextUnformatted("Relief");
+    ImGui::SetNextItemWidth(-1);
+    ImGui::SliderFloat("##relief", &t.relief, 0, 100, "%.0f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SetItemTooltip("Shades slopes as if lit from the north-west, so hills and cliffs show.\n"
+                          "0 draws the ground flat. It changes only how the world looks.");
     ImGui::TextUnformatted("Warp (tiles)");
     ImGui::SetNextItemWidth(-1);
     ImGui::SliderFloat("##warp", &t.warp, 0, 128, "%.0f");
@@ -283,6 +288,126 @@ void AssetPanels::terrain() {
                     ImGui::EndDisabled();
                 } else
                     ImGui::TextDisabled("Select a field.");
+                ImGui::EndTable();
+            }
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Features")) {
+            ImGui::TextWrapped(
+                "Patterns of tiles stamped into the world by chance: ruins, stone circles, ponds. "
+                "Each fits inside one chunk.");
+            if (ImGui::BeginTable("features", compact ? 1 : 2, ImGuiTableFlags_Resizable)) {
+                if (!compact) ImGui::TableSetupColumn("list", ImGuiTableColumnFlags_WidthFixed, 150);
+                ImGui::TableNextColumn();
+                list(t.features, feature_, "feature", TerrainAsset::feature_capacity,
+                     "Later features are stamped over earlier ones.", compact);
+                ImGui::TableNextColumn();
+                if (feature_ >= 0 && feature_ < static_cast<int>(t.features.size())) {
+                    auto& f = t.features[static_cast<std::size_t>(feature_)];
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::InputText("##name", &f.name);
+                    int one_in = static_cast<int>(f.one_in);
+                    ImGui::TextUnformatted("One chunk in");
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::DragInt("##one_in", &one_in, 0.2F, 1, 1000000))
+                        f.one_in = static_cast<std::uint32_t>(std::max(1, one_in));
+                    ImGui::SeparatorText("When (at its centre)");
+                    for (std::size_t i = 0; i < f.when.size(); ++i) {
+                        auto& c = f.when[i];
+                        ImGui::PushID(static_cast<int>(i));
+                        if (ImGui::SmallButton("x")) {
+                            f.when.erase(f.when.begin() + static_cast<std::ptrdiff_t>(i));
+                            ImGui::PopID();
+                            break;
+                        }
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(-1);
+                        field_combo("##field", c.field, t.fields);
+                        ImGui::TextUnformatted("From");
+                        ImGui::SameLine();
+                        bound("##min", c.min, -std::numeric_limits<float>::infinity());
+                        ImGui::TextUnformatted("To");
+                        ImGui::SameLine();
+                        bound("##max", c.max, std::numeric_limits<float>::infinity());
+                        ImGui::PopID();
+                    }
+                    if (f.when.empty()) ImGui::TextDisabled("Anywhere.");
+                    ImGui::BeginDisabled(t.fields.empty());
+                    if (ImGui::SmallButton("Add range")) f.when.push_back({t.fields.front().name});
+                    ImGui::EndDisabled();
+                    ImGui::SeparatorText("Pattern");
+                    ImGui::TextDisabled("Rows of symbols, north at the top; '.' leaves a tile as it is.");
+                    std::string text;
+                    for (const auto& row : f.rows)
+                        text += (text.empty() ? "" : "\n") + row;
+                    if (ImGui::InputTextMultiline(
+                            "##rows", &text,
+                            {-1, ImGui::GetTextLineHeight() *
+                                     static_cast<float>(std::max<std::size_t>(f.rows.size(), 3) + 1)})) {
+                        f.rows.clear();
+                        for (std::size_t start = 0; start <= text.size();) {
+                            auto end = text.find('\n', start);
+                            if (end == std::string::npos) end = text.size();
+                            if (end > start) f.rows.push_back(text.substr(start, end - start));
+                            start = end + 1;
+                        }
+                    }
+                    ImGui::SeparatorText("Cells");
+                    for (std::size_t i = 0; i < f.cells.size(); ++i) {
+                        auto& c = f.cells[i];
+                        ImGui::PushID(static_cast<int>(i + 100));
+                        std::string symbol(1, c.symbol);
+                        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 2);
+                        if (ImGui::InputText("##symbol", &symbol) && !symbol.empty())
+                            c.symbol = symbol.back();
+                        ImGui::SetItemTooltip("The character that stands for this cell in the pattern.");
+                        ImGui::SameLine();
+                        ImGui::Checkbox("Solid", &c.solid);
+                        ImGui::SameLine();
+                        const bool remove = ImGui::SmallButton("x");
+                        ImGui::TextUnformatted("Ground");
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(-1);
+                        if (ImGui::BeginCombo("##ground", c.ground.empty() ? "(keep)" : c.ground.c_str())) {
+                            if (ImGui::Selectable("(keep)", c.ground.empty())) c.ground.clear();
+                            for (const auto& m : edited_.materials)
+                                if (ImGui::Selectable(m.name.c_str(), m.name == c.ground)) c.ground = m.name;
+                            ImGui::EndCombo();
+                        }
+                        ImGui::TextUnformatted("Object");
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(-1);
+                        if (ImGui::BeginCombo("##object", c.object.empty() ? "(none)" : c.object.c_str())) {
+                            if (ImGui::Selectable("(none)", c.object.empty())) c.object.clear();
+                            for (const auto& m : edited_.materials)
+                                if (ImGui::Selectable(m.name.c_str(), m.name == c.object)) c.object = m.name;
+                            ImGui::EndCombo();
+                        }
+                        ImGui::PopID();
+                        if (remove) {
+                            f.cells.erase(f.cells.begin() + static_cast<std::ptrdiff_t>(i));
+                            break;
+                        }
+                    }
+                    ImGui::BeginDisabled(f.cells.size() >= TerrainFeature::cell_capacity);
+                    if (ImGui::SmallButton("Add cell")) {
+                        TerrainFeatureCell cell;
+                        for (const char symbol : std::string("#*+@%&=ox~^"))
+                            if (std::none_of(
+                                    f.cells.begin(), f.cells.end(),
+                                    [&](const TerrainFeatureCell& c) { return c.symbol == symbol; })) {
+                                cell.symbol = symbol;
+                                break;
+                            }
+                        f.cells.push_back(cell);
+                    }
+                    ImGui::EndDisabled();
+                    const auto problems = t.problems(edited_.material_names());
+                    if (problems.find("Feature \"" + f.name + "\"") != std::string::npos)
+                        ImGui::TextColored({0.95F, 0.65F, 0.35F, 1},
+                                           "Check this feature's pattern and cells.");
+                } else
+                    ImGui::TextDisabled("Select a feature.");
                 ImGui::EndTable();
             }
             ImGui::EndTabItem();

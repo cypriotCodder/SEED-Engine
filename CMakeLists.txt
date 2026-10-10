@@ -236,6 +236,12 @@ if(BUILD_TESTING)
         --save "${CMAKE_CURRENT_BINARY_DIR}/gameplay-save")
     set_tests_properties(gameplay PROPERTIES PASS_REGULAR_EXPRESSION "Gameplay checks passed"
         FAIL_REGULAR_EXPRESSION "Script error|Engine error" DEPENDS scripts_fresh_save)
+    # Paths and pathfinding: a walker routes round a wall it builds, a guard follows a scene path.
+    add_test(NAME navigation COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/navigation_project"
+        --smoke --replay "${CMAKE_CURRENT_SOURCE_DIR}/tests/navigation_project/run.replay"
+        --save "${CMAKE_CURRENT_BINARY_DIR}/navigation-save")
+    set_tests_properties(navigation PROPERTIES PASS_REGULAR_EXPRESSION "Navigation checks passed.*Path checks passed|Path checks passed.*Navigation checks passed"
+        FAIL_REGULAR_EXPRESSION "Script error|Engine error" DEPENDS scripts_fresh_save)
     # Changing scenes: there and back, each scene keeping its own world and player position.
     add_test(NAME scenes COMMAND seed_player --project "${CMAKE_CURRENT_SOURCE_DIR}/tests/scenes_project" --smoke
         --save "${CMAKE_CURRENT_BINARY_DIR}/scenes-save")

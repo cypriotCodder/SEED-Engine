@@ -199,6 +199,20 @@ void World::save() {
         if (state == State::active || state == State::ready) write(slot);
     }
 }
+bool World::set_tile(WorldPosition position, const Tile& tile) {
+    check_saved_tile(generator_, tile);
+    position.move({});
+    for (auto& slot : slots_)
+        if (slot.state.load(std::memory_order_acquire) == State::active && slot.coord == position.chunk) {
+            const auto index = static_cast<std::size_t>(position.local.y) * chunk_side +
+                               static_cast<std::size_t>(position.local.x);
+            slot.chunk->tiles[index] = tile;
+            slot.chunk->replaced.set(index);
+            slot.chunk->dirty = true;
+            return true;
+        }
+    return false;
+}
 const Tile* World::tile(WorldPosition position) const {
     position.move({});
     for (const auto& slot : slots_)

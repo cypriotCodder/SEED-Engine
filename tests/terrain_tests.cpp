@@ -42,6 +42,11 @@ void json_round_trip() {
     const auto text = seed::to_json(seed::terrain_json(t));
     check(seed::parse_terrain(seed::parse_json(text)) == t, "Terrain reads back unchanged");
     check(text.find("inf") == std::string::npos, "Open range ends are left out of the file");
+    check(text.find("relief") == std::string::npos, "Relief is written only when set");
+    auto shaded = t;
+    shaded.relief = 12.5F;
+    check(seed::parse_terrain(seed::parse_json(seed::to_json(seed::terrain_json(shaded)))) == shaded,
+          "Relief reads back unchanged");
 }
 
 void problems() {
@@ -52,9 +57,10 @@ void problems() {
     t.fields[1].terms[0].wavelength = 100;                 // perlin only if a power of two.
     t.rules[0].material = "lava";
     t.rules[1].when[0].min = 1; // Above its max of 0.05.
+    t.relief = 101;
     const auto report = t.problems(names());
     for (const char* expected : {"\"elevation\" is required", "powers of two", "unknown material \"lava\"",
-                                 "unknown field \"elevation\"", "minimum exceeds"})
+                                 "unknown field \"elevation\"", "minimum exceeds", "Relief must be"})
         check(report.find(expected) != std::string::npos, expected);
     check(seed::TerrainAsset{}.problems(names()).empty() && !seed::TerrainAsset{}.enabled(),
           "An empty terrain is valid and disabled");
@@ -101,6 +107,9 @@ void versions() {
     reseeded.default_seed = 99;
     check(seed::Terrain(reseeded, registry).version() == base,
           "The default seed does not change the version");
+    auto shaded = island();
+    shaded.relief = 40;
+    check(seed::Terrain(shaded, registry).version() == base, "Relief does not change the version");
     auto changed = island();
     changed.fields[0].terms[1].amplitude = 0.41F;
     check(seed::Terrain(changed, registry).version() != base, "Any setting change changes the version");
@@ -110,6 +119,99 @@ void versions() {
         seed::Terrain(broken, registry);
         throw std::logic_error("Invalid terrain compiled");
     } catch (const std::invalid_argument&) {}
+}
+// Features: patterns stamped into chunks by chance, wholly inside one, where their conditions hold.
+seed::TerrainFeature ruin() {
+    seed::TerrainFeature f;
+    f.name = "Ruin";
+    f.one_in = 1; // Every chunk.
+    f.rows = {"#.#", "#S#"};
+    f.cells = {{'#', "stone", "", true}, {'S', "sand", "tree", false}};
+    return f;
+}
+void features() {
+    const auto registry = materials();
+    auto t = island();
+    t.features = {ruin()};
+    check(t.problems(names()).empty(), "A feature is valid");
+    const auto text = seed::to_json(seed::terrain_json(t));
+    check(seed::parse_terrain(seed::parse_json(text)) == t, "Features read back unchanged");
+    check(seed::to_json(seed::terrain_json(island())).find("features") == std::string::npos,
+          "Terrains without features leave them out");
+    check(seed::Terrain(t, registry).version() != seed::Terrain(island(), registry).version(),
+          "Features change the version");
+
+    const seed::Terrain terrain(t, registry);
+    const auto generator = terrain.generator();
+    const auto stone = registry.find("stone"), sand = registry.find("sand");
+    // The pattern is found once in the chunk: stones at its corners, sand with a tree between, the
+    // gap left as generated.
+    const auto find_ruin = [&](const seed::Chunk& chunk, int& at_x, int& at_y) {
+        int found = 0;
+        for (int y = 0; y + 1 < seed::chunk_side; ++y)
+            for (int x = 0; x + 2 < seed::chunk_side; ++x) {
+                const auto& tile = [&](int dx, int dy) -> const seed::Tile& {
+                    return chunk.tiles[static_cast<std::size_t>((y + dy) * seed::chunk_side + x + dx)];
+                };
+                // Rows are top first: the "#S#" row is the southern one, at y.
+                if (tile(0, 0).material == stone && tile(1, 0).material == sand &&
+                    tile(2, 0).material == stone && tile(0, 1).material == stone &&
+                    tile(2, 1).material == stone &&
+                    tile(1, 0).object == seed::tile_object(registry.find("tree")) &&
+                    (tile(0, 1).flags & seed::tile_solid) && !(tile(1, 0).flags & seed::tile_solid) &&
+                    tile(0, 0).object == seed::no_object) {
+                    ++found;
+                    at_x = x;
+                    at_y = y;
+                }
+            }
+        return found;
+    };
+    auto chunk = std::make_unique<seed::Chunk>();
+    int x = -1, y = -1, x2 = -1, y2 = -1;
+    seed::fill_chunk(generator, 7, {0, 0}, *chunk);
+    check(find_ruin(*chunk, x, y) >= 1, "The feature is stamped into the chunk");
+    check(
+        terrain.sample(7, {{0, 0}, {static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F}}).material ==
+            stone,
+        "Sampling shows features too, as the editor previews them");
+    seed::fill_chunk(generator, 7, {0, 0}, *chunk);
+    check(find_ruin(*chunk, x2, y2) >= 1 && x2 == x && y2 == y, "In the same place every time");
+    seed::fill_chunk(generator, 7, {-3, 2}, *chunk);
+    check(find_ruin(*chunk, x2, y2) >= 1, "Including chunks at negative coordinates");
+
+    // Conditions at the centre: none of the land is above 100.
+    t.features[0].when = {{"elevation", 100, std::numeric_limits<float>::infinity()}};
+    const seed::Terrain never(t, registry);
+    seed::fill_chunk(never.generator(), 7, {0, 0}, *chunk);
+    check(find_ruin(*chunk, x, y) == 0, "A feature whose conditions fail is left out");
+
+    auto bad = island();
+    bad.features = {ruin()};
+    bad.features[0].rows = {"#.#", "#S"};
+    bad.features[0].cells[1].object = "lava";
+    bad.features[0].cells.push_back({'.', "", "", false});
+    const auto report = bad.problems(names());
+    for (const char* expected : {"same width", "unknown material \"lava\"", "other than '.'"})
+        check(report.find(expected) != std::string::npos, expected);
+    auto undefined = island();
+    undefined.features = {ruin()};
+    undefined.features[0].rows = {"#X#"};
+    check(undefined.problems(names()).find("no cell defines") != std::string::npos,
+          "Undefined symbols reported");
+}
+
+// Slope shading: flat ground, water and relief 0 are unshaded; slopes facing the north-west light
+// are lighter, the others darker, within bounds.
+void relief() {
+    check(seed::relief_shade(20, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F) == 1, "Level ground is unshaded");
+    check(seed::relief_shade(0, 0.5F, 0.9F, 0.1F, 0.5F, 0.5F) == 1, "Relief 0 draws flat");
+    check(seed::relief_shade(20, -0.1F, 0.9F, 0.1F, 0.5F, 0.5F) == 1, "Water is unshaded");
+    check(seed::relief_shade(10, 0.5F, 0.51F, 0.49F, 0.5F, 0.5F) > 1, "Rising to the east faces the light");
+    check(seed::relief_shade(10, 0.5F, 0.5F, 0.5F, 0.51F, 0.49F) < 1, "Rising to the north faces away");
+    check(seed::relief_shade(100, 0.5F, 4, -4, 0.5F, 0.5F) == 1.25F &&
+              seed::relief_shade(100, 0.5F, -4, 4, 0.5F, 0.5F) == 0.7F,
+          "Steep slopes are clamped");
 }
 // Painted tiles: stored sparsely by chunk, saved compactly, and applied over the generated
 // terrain, changing its version so saves of the unpainted world are not mixed in.
@@ -183,6 +285,8 @@ int main() {
         problems();
         sampling();
         versions();
+        relief();
+        features();
         painting();
         std::cout << "Terrain checks passed.\n";
     } catch (const std::exception& e) {

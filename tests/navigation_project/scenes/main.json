@@ -1,6 +1,5 @@
 {
   "format": 1,
-  "terrain": "main",
   "entities": [
     {
       "name": "Player",
@@ -51,96 +50,136 @@
       }
     },
     {
-      "name": "Collector",
+      "name": "Walker",
       "chunk": [
         0,
         0
       ],
       "position": [
-        30.5,
-        12.5
-      ],
-      "angle": 0,
-      "visual": {
-        "material": "flag",
-        "size": [
-          0.5,
-          0.5
-        ]
-      },
-      "character": {
-        "speed": 8,
-        "run_speed": 8,
-        "acceleration": 0,
-        "collision": [
-          0.5,
-          0.5
-        ],
-        "blocked_by": {
-          "water": false,
-          "solid": false,
-          "buildings": false
-        },
-        "face_movement": false
-      },
-      "script": "gameplay.lua"
-    },
-    {
-      "name": "Coin",
-      "chunk": [
-        0,
-        0
-      ],
-      "position": [
-        31.5,
-        12.5
+        5.5,
+        5.5
       ],
       "angle": 0,
       "visual": {
         "material": "sand",
         "size": [
-          0.5,
-          0.5
+          0.6,
+          0.6
         ]
-      }
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false
+      },
+      "script": "walker.lua"
     },
     {
-      "name": "Post",
+      "name": "Guard",
       "chunk": [
         0,
         0
       ],
       "position": [
-        32.5,
-        12.5
+        5.5,
+        14.5
       ],
       "angle": 0,
       "visual": {
-        "material": "stone",
+        "material": "sand",
         "size": [
-          0.5,
-          0.5
+          0.6,
+          0.6
         ]
-      }
+      },
+      "character": {
+        "speed": 5,
+        "run_speed": 8,
+        "acceleration": 0,
+        "collision": [
+          0.6,
+          0.6
+        ],
+        "blocked_by": {
+          "water": true,
+          "solid": true,
+          "buildings": true
+        },
+        "face_movement": false
+      },
+      "script": "guard.lua"
     },
     {
-      "name": "Zone",
+      "name": "Route",
       "chunk": [
         0,
         0
       ],
       "position": [
-        31.5,
-        12.5
+        5.5,
+        14.5
       ],
       "angle": 0,
-      "area": {
-        "size": [
-          1,
-          2
+      "path": {
+        "points": [
+          [
+            0,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            1
+          ]
         ]
-      },
-      "script": "zone.lua"
+      }
+    }
+  ],
+  "decorations": [
+    {
+      "material": "sand",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        4.5,
+        4.5
+      ],
+      "size": [
+        0.4,
+        0.4
+      ],
+      "angle": 0.5
+    },
+    {
+      "material": "tree",
+      "chunk": [
+        0,
+        0
+      ],
+      "position": [
+        12.5,
+        15.5
+      ],
+      "size": [
+        1.5,
+        2
+      ],
+      "standing": true
     }
   ]
 }

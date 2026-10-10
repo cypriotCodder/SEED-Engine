@@ -183,6 +183,25 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
         check(players() == 1 && e.character && e.character->player,
               "the player checkbox moves the role to the NPC");
     });
+    click([this] { return scene_.control("create"); });
+    click([this] { return scene_.control("create area"); });
+    add(3, [this] {
+        const auto& e = scene_.scene().entities.back();
+        check(e.name == "Area" && e.area && !e.visual && !e.character, "Create > Area adds an area");
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this] { check(!scene_.scene().entities.back().area, "Cmd+Z takes the area back"); });
+    click([this] { return scene_.control("create"); });
+    click([this] { return scene_.control("create path"); });
+    click([this] { return scene_.control("path add point"); });
+    add(3, [this] {
+        const auto& e = scene_.scene().entities.back();
+        check(e.name == "Path" && e.path && e.path->points.size() == 3 && e.path->points[2].x == 8,
+              "Create > Path adds a path, and Add Point continues it");
+    });
+    key(ImGuiKey_Z, true);
+    key(ImGuiKey_Z, true);
+    add(3, [this] { check(!scene_.scene().entities.back().path, "Cmd+Z takes the path back"); });
 
     // The Terrain object: selecting it, then New > Starter Island makes a terrain the scene uses.
     click([this] { return scene_.control("terrain row"); });
@@ -249,6 +268,16 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
     key(ImGuiKey_Z, true);
     add(3, [this] { check(!scene_.scene().paint.find(6, 6), "Cmd+Z takes back the fill"); });
     click([this] { return scene_.control("shape Freehand"); });
+    // Decorations: a stroke of the decorate brush scatters pieces along it; undo takes them back.
+    click([this] { return scene_.control("brush Decorate"); });
+    drag([this] { return world_point(2.5, 6.5); }, [this] { return world_point(8.5, 6.5); });
+    add(3, [this] {
+        const auto& d = scene_.scene().decorations;
+        check(d.size() >= 3 && !d.front().material.empty(),
+              "the decorate brush scatters decorations, not paint");
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this] { check(scene_.scene().decorations.empty(), "Cmd+Z takes the decorations back"); });
 
     // A shared material made unique from the Inspector changes only the selected entity.
     click([this] { return scene_.control("done painting"); });

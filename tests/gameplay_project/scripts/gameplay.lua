@@ -1,5 +1,5 @@
 -- Runs east at 8 tiles per second through a Coin (x 31.5) and then a Post (x 32.5), checking touch
--- events, nearby queries, ui drawing, the pointer and pausing.
+-- events, an area (Zone, x 31 to 32), nearby queries, ui drawing, the pointer and pausing.
 local touched, left, steps, paused_x = {}, {}, 0, 0
 
 function on_touch(other) touched[#touched + 1] = other:name() end
@@ -47,6 +47,7 @@ function update(dt)
   if steps == 25 then
     assert(table.concat(touched, ",") == "Coin,Post", "on_touch in order: " .. table.concat(touched, ","))
     assert(table.concat(left, ",") == "Coin,Post", "on_leave in order: " .. table.concat(left, ","))
+    assert(game.data.zone == "enter Collector;exit Collector;", "areas: " .. tostring(game.data.zone))
     game.set_paused(true)
     paused_x = self:position()
   end

@@ -68,6 +68,7 @@ void create_and_open(const fs::path& root) {
     configured.game.width = 800;
     configured.game.height = 600;
     configured.game.fullscreen = true;
+    configured.game.sort_by_y = true;
     save_project(configured);
     check(open_project(created.root).game == configured.game, "Game settings round trip");
     configured.game.width = 10;
@@ -150,6 +151,15 @@ void starter(const fs::path& root) {
     check(centre.elevation > 0.3F, "Spawn is on land");
     const auto sea = terrain.sample(1, {{200, 0}, {0, 0}});
     check(sea.material == registry.find("deep_water"), "Past the rim is deep water");
+    // Rivers: somewhere across the island, river tiles stand inland of the coast.
+    unsigned river = 0;
+    for (int y = -60; y <= 60; y += 2)
+        for (int x = -60; x <= 60; x += 2) {
+            const auto s = terrain.sample(1, {{x, y}, {0.5F, 0.5F}});
+            river += s.material == registry.find("water") && s.elevation > 0.06F;
+        }
+    check(river > 0, "The starter island has rivers inland");
+    check(assets.terrains.at("main").features.size() == 1, "And ruins");
 }
 // A project's terrains: an older project's single terrain.json becomes "main" and moves to
 // terrains/main.json on save; terrains are added and removed as files.

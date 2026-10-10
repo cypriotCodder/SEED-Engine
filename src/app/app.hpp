@@ -127,8 +127,19 @@ public:
     // Writes world, building and focus deltas, and the game's state, into the working save.
     // Physics is joined first.
     void write_deltas(WorldPosition focus);
-    // Draws every entity with a Visual near the camera, interpolated between fixed steps.
+    // Draws every entity with a Visual near the camera, interpolated between fixed steps. With
+    // sort_by_y, it draws them together with the sprites queued since the last call, from the back
+    // (the highest bottom edge) to the front, so things further down the screen stand in front;
+    // otherwise in entity order, over the queued sprites (drawn back to front among themselves).
     void draw_entities(const View& view);
+    // A sprite drawn with the entities: a tile object, say. Coordinates are camera-relative.
+    struct QueuedSprite {
+        MaterialId material{};
+        float x{}, y{}, width{1}, height{1}, angle{};
+        unsigned frame{Renderer::automatic};
+    };
+    void queue_sprite(const QueuedSprite& sprite);
+    bool sort_by_y{};
     WorldPosition focus_position();
     // Plays assets/music/<name>.ogg, replacing any music playing. Throws if it is missing or not Ogg
     // Vorbis. With audio off, music is checked and counts as playing, but is not decoded.
@@ -148,6 +159,7 @@ public:
     Jobs jobs;
 
 private:
+    std::vector<QueuedSprite> queued_; // Cleared each frame; keeps its capacity.
     std::unique_ptr<PackStream> assets_;
     Assets project_assets_; // Registries point at its names, so it is declared before them.
     ProjectFiles asset_files_;

@@ -7,6 +7,11 @@ namespace seed {
 class Engine;
 struct SceneCharacter;
 
+// A scene area at run time: half its size. See SceneArea.
+struct AreaComponent {
+    Vec2 half{};
+};
+
 // A walking entity's state: the player or an NPC. Whoever controls it (the keys, or a script)
 // only sets where it wants to go; move_characters moves every character by the same rules.
 struct CharacterMotion {

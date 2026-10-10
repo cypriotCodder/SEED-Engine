@@ -64,7 +64,7 @@ private:
     Assets saved_, edited_;
     std::string problems_;
     int material_{-1}, action_{-1}, sound_{-1}, particle_{-1}; // Selected rows.
-    int rule_{-1}, field_{-1};
+    int rule_{-1}, field_{-1}, feature_{-1};
     int capturing_{-1}; // Action waiting for a key or button press, or -1.
     std::string terrain_name_{"main"};
     bool textures_changed_{};

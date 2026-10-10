@@ -37,6 +37,10 @@ struct MaterialDesc {
     // ground whose value is lower, fading in across the shared edge; 0 never blends over others,
     // so its edges stay square.
     int blend{};
+    // Drawn as a tile object (a tree, a rock), the size of its picture in tiles (0.25 to 16 each way):
+    // standing on its tile's bottom edge, centred across it, so a big tree's crown overhangs the
+    // tiles behind. Blocking stays its own tile's.
+    float object_width{1}, object_height{1};
 };
 
 // The game's materials, registered once at startup before the renderer and world generation
@@ -55,6 +59,9 @@ public:
             throw std::invalid_argument("Animation speed must be 0 to 60 fps");
         if (!(desc.speed >= 0.1F && desc.speed <= 4))
             throw std::invalid_argument("Material speed must be from 0.1 to 4");
+        if (!(desc.object_width >= 0.25F && desc.object_width <= 16 && desc.object_height >= 0.25F &&
+              desc.object_height <= 16))
+            throw std::invalid_argument("Material object size must be 0.25 to 16 tiles each way");
         if (desc.blend < 0 || desc.blend > 255)
             throw std::invalid_argument("Material blend must be 0 to 255");
         if (desc.tags) check_tags(desc.tags);

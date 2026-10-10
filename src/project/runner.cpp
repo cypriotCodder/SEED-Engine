@@ -12,6 +12,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -29,6 +30,14 @@ constexpr DefaultAction default_actions[] = {{"move_up", {SDL_SCANCODE_W, SDL_SC
                                              {"move_right", {SDL_SCANCODE_D, SDL_SCANCODE_RIGHT}},
                                              {"run", {SDL_SCANCODE_LSHIFT, SDL_SCANCODE_RSHIFT}}};
 
+// A scene decoration ready to draw: its material resolved and its place within its chunk.
+struct Decoration {
+    MaterialId material{};
+    Vec2 local{}, size{};
+    float angle{};
+    bool standing{};
+};
+
 struct Runner {
     ProjectFiles files;
     std::string id, name, title, save;
@@ -36,6 +45,7 @@ struct Runner {
     GameSettings game;
     Assets data; // For the scene's material names and the default seed.
     SceneFile scene;
+    std::map<std::pair<std::int64_t, std::int64_t>, std::vector<Decoration>> decorations; // By chunk.
     std::size_t player_index{}; // The scene entity that is the player.
     ScenePlayer player_settings;
     std::array<ActionId, 5> moves{}; // up, down, left, right, run
@@ -82,6 +92,16 @@ Entity instantiate(Runner& runner, Engine& engine, const SceneEntity& e, WorldPo
                                                                e.light->intensity, e.light->height,
                                                                e.light->flicker, e.light->night_only});
     if (e.character) engine.scene.components<CharacterMotion>().add(entity, character_motion(*e.character));
+    if (e.area) engine.scene.components<AreaComponent>().add(entity, {e.area->size * 0.5F});
+    if (e.path) {
+        std::vector<WorldPosition> points;
+        for (const auto p : e.path->points) {
+            auto point = at;
+            point.move(p);
+            points.push_back(point);
+        }
+        runner.scripts->set_path(entity, std::move(points), e.path->loop);
+    }
     runner.scripts->name(entity, e.name);
     return entity;
 }
@@ -191,6 +211,8 @@ Entity setup(void* context, Engine& engine, WorldPosition spawn) {
     auto& runner = *static_cast<Runner*>(context);
     engine.scene.add_component<LightComponent>();
     engine.scene.add_component<CharacterMotion>();
+    engine.scene.add_component<AreaComponent>();
+    engine.sort_by_y = runner.game.sort_by_y;
     runner.scripts = std::make_unique<ScriptHost>(engine, subfolder(runner.files, "scripts/"));
     // Scripts spawn prefabs through the same path as scene entities, lights and scripts included.
     runner.scripts->set_prefab_spawner(
@@ -263,26 +285,52 @@ void render(void* context, Engine& engine, const View& view) {
                 const float px = offset.x + static_cast<float>(x) + 0.5F,
                             py = offset.y + static_cast<float>(y) + 0.5F;
                 if (std::abs(px) > half_w || std::abs(py) > half_h) continue;
-                // Ground textures continue across tiles, placed by the tile's world position, and
-                // blend into their neighbours'. Neighbours in chunks that are not active count as
-                // this tile's own ground.
-                const auto ground_at = [&](int dx, int dy) {
+                // Ground textures continue across tiles, placed by the tile's world position, blend
+                // into their neighbours' and are shaded by slope. A neighbour in a chunk that is
+                // not active counts as this tile.
+                const auto at = [&](int dx, int dy) -> const Tile& {
                     const int nx = x + dx, ny = y + dy;
                     if (nx >= 0 && ny >= 0 && nx < chunk_side && ny < chunk_side)
-                        return chunk.tiles[static_cast<std::size_t>(ny * chunk_side + nx)].material;
+                        return chunk.tiles[static_cast<std::size_t>(ny * chunk_side + nx)];
                     const auto* n = engine.world.tile(
                         {coord, {static_cast<float>(nx) + 0.5F, static_cast<float>(ny) + 0.5F}});
-                    return n ? n->material : tile.material;
+                    return n ? *n : tile;
                 };
+                const auto ground_at = [&](int dx, int dy) {
+                    return at(dx, dy).material;
+                };
+                const float shade =
+                    relief_shade(runner.data.terrain.relief, tile.elevation, at(1, 0).elevation,
+                                 at(-1, 0).elevation, at(0, 1).elevation, at(0, -1).elevation);
                 engine.renderer.ground_blended(tile.material,
                                                {ground_at(1, 0), ground_at(-1, 0), ground_at(0, 1),
                                                 ground_at(0, -1), ground_at(1, 1), ground_at(-1, 1),
                                                 ground_at(1, -1), ground_at(-1, -1)},
                                                px, py, global_coordinate(coord.x, static_cast<float>(x)),
-                                               global_coordinate(coord.y, static_cast<float>(y)));
-                if (tile.object != no_object)
-                    engine.renderer.sprite(static_cast<MaterialId>(tile.object - 1), px, py);
+                                               global_coordinate(coord.y, static_cast<float>(y)), shade);
+                if (tile.object != no_object) {
+                    // Standing on the tile's bottom edge, centred across it.
+                    const auto object = static_cast<MaterialId>(tile.object - 1);
+                    const auto& m = engine.materials[object];
+                    engine.queue_sprite(
+                        {object, px, py - 0.5F + m.object_height / 2, m.object_width, m.object_height});
+                }
             }
+    });
+    // Decorations of the chunks in view: flat ones on the ground, standing ones with the entities.
+    engine.world.each([&](ChunkCoord coord, const Chunk&) {
+        const auto found = runner.decorations.find({coord.x, coord.y});
+        if (found == runner.decorations.end()) return;
+        const auto offset = relative({coord, {}}, view.camera);
+        for (const auto& d : found->second) {
+            const float x = offset.x + d.local.x, y = offset.y + d.local.y;
+            const float reach = std::max(d.size.x, d.size.y);
+            if (std::abs(x) > half_w + reach || std::abs(y) > half_h + reach) continue;
+            if (d.standing)
+                engine.queue_sprite({d.material, x, y, d.size.x, d.size.y, d.angle});
+            else
+                engine.renderer.sprite(d.material, x, y, d.size.x, d.size.y, d.angle);
+        }
     });
     engine.draw_entities(view);
     engine.particles.draw(engine.renderer, view.camera);
@@ -362,6 +410,15 @@ void read_scene(Runner& runner, const std::string& name, bool start) {
     }
     runner.player_index = static_cast<std::size_t>(found - entities.begin());
     runner.player_settings = *found->character->player;
+    // Decorations by chunk, so drawing looks only at the chunks in view.
+    runner.decorations.clear();
+    const auto names = runner.data.material_names();
+    for (const auto& d : scene.decorations) {
+        const auto found_material = std::find(names.begin(), names.end(), d.material);
+        runner.decorations[{d.position.chunk.x, d.position.chunk.y}].push_back(
+            {static_cast<MaterialId>(found_material - names.begin()), d.position.local, d.size, d.angle,
+             d.standing});
+    }
     runner.scene = std::move(scene);
     runner.data.terrain = std::move(data.terrain);
     runner.data.paint = std::move(data.paint);

@@ -336,7 +336,25 @@ void Engine::change_world(const TerrainAsset& terrain, const TerrainPaint& paint
     camera_placed_ = false;     // The camera jumps rather than gliding between worlds.
 }
 
+void Engine::queue_sprite(const QueuedSprite& sprite) {
+    queued_.push_back(sprite);
+}
+
 void Engine::draw_entities(const View& view) {
+    const auto draw = [&](const QueuedSprite& s) {
+        renderer.sprite(s.material, s.x, s.y, s.width, s.height, s.angle, 1, s.frame);
+    };
+    // Back to front by bottom edge; stable, so equal edges keep their order (later on top).
+    const auto back_to_front = [&] {
+        std::stable_sort(queued_.begin(), queued_.end(), [](const QueuedSprite& a, const QueuedSprite& b) {
+            return a.y - a.height / 2 > b.y - b.height / 2;
+        });
+    };
+    if (!sort_by_y) { // Queued sprites, among themselves, then the entities over them.
+        back_to_front();
+        for (const auto& s : queued_)
+            draw(s);
+    }
     const auto owners = scene.visuals.owners();
     const auto visuals = scene.visuals.values();
     for (std::size_t i = 0; i < owners.size(); ++i) {
@@ -344,9 +362,19 @@ void Engine::draw_entities(const View& view) {
         if (!nearby(t.position.chunk, view.camera.chunk, 3)) continue;
         const auto p = relative(t.previous, view.camera) + relative(t.position, t.previous) * view.alpha;
         const auto& v = visuals[i];
-        renderer.sprite(v.material, p.x, p.y, v.size.x, v.size.y, t.angle, 1,
-                        v.still ? v.frame : Renderer::automatic);
+        const QueuedSprite s{
+            v.material, p.x, p.y, v.size.x, v.size.y, t.angle, v.still ? v.frame : Renderer::automatic};
+        if (sort_by_y)
+            queued_.push_back(s);
+        else
+            draw(s);
     }
+    if (sort_by_y) {
+        back_to_front();
+        for (const auto& s : queued_)
+            draw(s);
+    }
+    queued_.clear();
 }
 
 WorldPosition Engine::follow(WorldPosition target, float dt) {

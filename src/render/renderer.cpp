@@ -496,8 +496,9 @@ void Renderer::sprite(MaterialId material, float x, float y, float width, float 
         sprite.v1 = 1;
     }
 }
-void Renderer::ground(MaterialId material, float x, float y, double gx, double gy, unsigned edges) {
-    sprite(material, x, y, 1, 1, 0, 1, automatic);
+void Renderer::ground(MaterialId material, float x, float y, double gx, double gy, unsigned edges,
+                      float shade) {
+    sprite(material, x, y, 1, 1, 0, shade, automatic);
     if (edges) {
         // The wave pattern repeats every 64 tiles; small remainders keep float precision.
         auto& s = sprites_[size_ - 1];
@@ -548,12 +549,12 @@ std::size_t ground_overlays(const std::array<std::uint8_t, Materials::capacity>&
     return count;
 }
 void Renderer::ground_blended(MaterialId material, const std::array<MaterialId, 8>& neighbours, float x,
-                              float y, double gx, double gy) {
-    ground(material, x, y, gx, gy);
+                              float y, double gx, double gy, float shade) {
+    ground(material, x, y, gx, gy, 0, shade);
     std::array<GroundOverlay, 8> over{};
     const auto count = ground_overlays(blend_, material_count_, material, neighbours, over);
     for (std::size_t i = 0; i < count; ++i)
-        ground(over[i].material, x, y, gx, gy, over[i].edges);
+        ground(over[i].material, x, y, gx, gy, over[i].edges, shade);
 }
 
 void Renderer::flush() {

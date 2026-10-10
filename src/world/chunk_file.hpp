@@ -8,7 +8,7 @@
 
 namespace seed {
 constexpr std::uint32_t chunk_file_magic = 0x4b4e4843;
-constexpr std::uint32_t chunk_file_version = 4;
+constexpr std::uint32_t chunk_file_version = 5;
 constexpr std::size_t body_record_size = 81;
 
 // One saved entity: where it is, how it looks, and the game's own bytes for its other components.
@@ -28,6 +28,10 @@ void each_entity(const ChunkEntities& entities, F&& visit);
 // Validates the structure of every record without visiting them.
 void check_entities(const ChunkEntities& entities);
 EntityRecord read_entity(Reader& in);
+
+// Throws unless `tile` could be saved and loaded: a finite elevation within +-1e6, and a material
+// and object the generator's `materials` covers (when it is set).
+void check_saved_tile(const WorldGenerator& generator, const Tile& tile);
 
 // Fixed-size little-endian encoding of one body, used both for saving and for change detection.
 std::array<std::uint8_t, body_record_size> encode_body(const BodyState& body);

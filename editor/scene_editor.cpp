@@ -28,8 +28,12 @@ constexpr float snap_steps[] = {0, 0.25F, 0.5F, 1};
 constexpr const char* snap_labels[] = {"Snap off", "Snap 1/4", "Snap 1/2", "Snap 1"};
 constexpr float angle_step = pi / 12; // 15 degrees, when snapping.
 
+ScenePath new_path() {
+    return ScenePath{{{0, 0}, {4, 0}}, false};
+}
 Vec2 extent(const SceneEntity& e) {
-    return e.visual ? e.visual->size : Vec2{marker_size, marker_size};
+    if (e.visual) return e.visual->size;
+    return e.area ? e.area->size : Vec2{marker_size, marker_size};
 }
 ImU32 rgba(float r, float g, float b, float a) {
     return ImGui::ColorConvertFloat4ToU32({r, g, b, a});
@@ -372,6 +376,30 @@ void SceneEditor::create_character(WorldPosition position, bool player, const As
     if (!assets.materials.empty()) e.visual = SceneVisual{assets.materials.front().name, {0.6F, 0.6F}};
     e.character = SceneCharacter{};
     if (player) make_player(static_cast<int>(edited_.entities.size()) - 1);
+}
+
+void SceneEditor::create_area(WorldPosition position) {
+    if (edited_.entities.size() >= SceneFile::capacity)
+        return log_(true, "A scene holds at most 4096 entities.");
+    create_at(position);
+    auto& e = edited_.entities.back();
+    const auto taken = [&](const std::string& name) {
+        return std::any_of(edited_.entities.begin(), edited_.entities.end(),
+                           [&](const SceneEntity& other) { return &other != &e && other.name == name; });
+    };
+    e.name = "Area";
+    for (int n = 2; taken(e.name); ++n)
+        e.name = "Area " + std::to_string(n);
+    e.area = SceneArea{};
+}
+
+void SceneEditor::create_path(WorldPosition position) {
+    if (edited_.entities.size() >= SceneFile::capacity)
+        return log_(true, "A scene holds at most 4096 entities.");
+    create_at(position);
+    auto& e = edited_.entities.back();
+    e.name = "Path";
+    e.path = new_path();
 }
 
 void SceneEditor::duplicate_selection() {
@@ -906,11 +934,16 @@ void SceneEditor::scene_view() {
                 drag_ = Drag::paint;
                 ++stroke_;
                 shape_from_ = to_world(mouse);
-                if (brush_.shape == Shape::fill) paint_fill(shape_from_);
+                decorations_placed_ = 0;
+                if (brush_.shape == Shape::fill && brush_.kind != Brush::decorate) paint_fill(shape_from_);
             }
         }
-        if (drag_ == Drag::paint && brush_.shape == Shape::freehand &&
+        // The decorate brush always works freehand.
+        if (drag_ == Drag::paint && brush_.kind == Brush::decorate &&
             ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            decorate_at(to_world(mouse));
+        else if (drag_ == Drag::paint && brush_.shape == Shape::freehand &&
+                 ImGui::IsMouseDown(ImGuiMouseButton_Left))
             paint_at(to_world(mouse), std::min(io.DeltaTime, 0.1F));
     } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
         const bool adding = io.KeyShift || io.KeyCtrl;
@@ -933,7 +966,8 @@ void SceneEditor::scene_view() {
         ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2))
         continue_drag(mouse);
     if (drag_ != Drag::none && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        if (drag_ == Drag::paint && (brush_.shape == Shape::rectangle || brush_.shape == Shape::line))
+        if (drag_ == Drag::paint && brush_.kind != Brush::decorate &&
+            (brush_.shape == Shape::rectangle || brush_.shape == Shape::line))
             paint_shape(to_world(mouse));
         if (drag_ == Drag::box) {
             if (!box_additive_) clear_selection();
@@ -962,6 +996,8 @@ void SceneEditor::scene_view() {
         if (ImGui::MenuItem("Create Entity Here")) create_at(menu_at_);
         if (ImGui::MenuItem("Create Player Here")) create_character(menu_at_, true, *assets_);
         if (ImGui::MenuItem("Create NPC Here")) create_character(menu_at_, false, *assets_);
+        if (ImGui::MenuItem("Create Area Here")) create_area(menu_at_);
+        if (ImGui::MenuItem("Create Path Here")) create_path(menu_at_);
         if (ImGui::MenuItem("Paste", "Cmd+V")) paste();
         if (!selection_.empty()) {
             ImGui::Separator();
@@ -1042,6 +1078,25 @@ void SceneEditor::overlays(ImDrawList* draw) {
             const ImU32 color = e.light ? rgba(1, 0.8F, 0.4F, 0.9F) : rgba(0.6F, 0.8F, 1, 0.9F);
             draw->AddQuadFilled({centre.x, centre.y - r}, {centre.x + r, centre.y}, {centre.x, centre.y + r},
                                 {centre.x - r, centre.y}, color);
+        }
+        if (e.path && e.path->points.size() >= 2) {
+            // The route, with a dot at each point and the first one larger.
+            std::vector<ImVec2> line;
+            for (const auto p : e.path->points)
+                line.push_back({centre.x + p.x * zoom_, centre.y - p.y * zoom_});
+            const ImU32 color = rgba(1, 0.7F, 0.25F, 0.85F);
+            draw->AddPolyline(line.data(), static_cast<int>(line.size()), color,
+                              e.path->loop ? ImDrawFlags_Closed : ImDrawFlags_None, 2.0F);
+            for (std::size_t k = 0; k < line.size(); ++k)
+                draw->AddCircleFilled(line[k], k == 0 ? 5.0F : 3.5F, color);
+        }
+        if (e.area) {
+            // Areas are invisible in games; the editor shows their extent.
+            const ImVec2 half{e.area->size.x / 2 * zoom_, e.area->size.y / 2 * zoom_};
+            draw->AddRectFilled({centre.x - half.x, centre.y - half.y},
+                                {centre.x + half.x, centre.y + half.y}, rgba(0.75F, 0.5F, 1, 0.1F));
+            draw->AddRect({centre.x - half.x, centre.y - half.y}, {centre.x + half.x, centre.y + half.y},
+                          rgba(0.75F, 0.5F, 1, 0.8F), 0, 0, 1.5F);
         }
         if (e.character) {
             // The collision box, and for the player what the game camera will show.
@@ -1207,9 +1262,33 @@ void SceneEditor::render() {
     const float half_w = (view_max_.x - view_min_.x) / 2 / zoom_,
                 half_h = (view_max_.y - view_min_.y) / 2 / zoom_;
     if (show_terrain_ && terrain_) draw_terrain(half_w, half_h); // Under the entities.
+    // Decorations: flat ones, then standing ones, under the entities.
+    for (const bool standing : {false, true})
+        for (const auto& d : edited_.decorations) {
+            if (d.standing != standing || !nearby(d.position.chunk, camera_.chunk, view_reach)) continue;
+            const auto at = relative(d.position, camera_);
+            const float reach = std::max(d.size.x, d.size.y);
+            if (std::abs(at.x) > half_w + reach || std::abs(at.y) > half_h + reach) continue;
+            const auto found = std::find_if(rendered_.begin(), rendered_.end(),
+                                            [&](const MaterialAsset& m) { return m.name == d.material; });
+            if (found != rendered_.end())
+                r.sprite(static_cast<MaterialId>(found - rendered_.begin()), at.x, at.y, d.size.x, d.size.y,
+                         d.angle);
+        }
     std::size_t lights = 0;
-    for (const auto& e : edited_.entities) {
-        if (e.hidden || !nearby(e.position.chunk, camera_.chunk, view_reach)) continue;
+    // Hierarchy order, or back to front by bottom edge as the game draws with Sort by depth.
+    std::vector<const SceneEntity*> order;
+    for (const auto& e : edited_.entities)
+        if (!e.hidden && nearby(e.position.chunk, camera_.chunk, view_reach)) order.push_back(&e);
+    if (sort_by_y_)
+        std::stable_sort(order.begin(), order.end(), [&](const SceneEntity* a, const SceneEntity* b) {
+            const auto bottom = [&](const SceneEntity& e) {
+                return relative(e.position, camera_).y - (e.visual ? e.visual->size.y / 2 : 0);
+            };
+            return bottom(*a) > bottom(*b);
+        });
+    for (const auto* entity : order) {
+        const auto& e = *entity;
         const auto at = relative(e.position, camera_);
         if (e.visual) {
             const auto found = std::find_if(rendered_.begin(), rendered_.end(), [&](const MaterialAsset& m) {
@@ -1310,6 +1389,22 @@ void SceneEditor::draw_terrain(float half_w, float half_h) {
                 ground = static_cast<MaterialId>(painted_ids[p->ground]);
         return ground;
     };
+    // Its height, the same way.
+    const auto height_at = [&](int x, int y, float fallback) {
+        if (x < cache_.x0 || y < cache_.y0 || x >= cache_.x0 + cache_.columns || y >= cache_.y0 + cache_.rows)
+            return fallback;
+        if (const auto* p = paint.empty() ? nullptr : paint.find(ox + x, oy + y))
+            if (p->mask & paint_height) return p->elevation;
+        return cache_.cells[static_cast<std::size_t>((y - cache_.y0) * cache_.columns + (x - cache_.x0))]
+            .elevation;
+    };
+    // Objects stand over the ground and overhang the tiles behind them, so they are drawn after
+    // all of it, back to front.
+    struct Placed {
+        std::uint8_t object;
+        float x, y;
+    };
+    std::vector<Placed> objects;
     for (int y = vy0; y <= vy1; ++y)
         for (int x = vx0; x <= vx1; ++x) {
             auto cell =
@@ -1331,20 +1426,28 @@ void SceneEditor::draw_terrain(float half_w, float half_h) {
             const float cy = origin.y + (static_cast<float>(y) + 0.5F) * size;
             if (block == 1) {
                 const auto g = cell.ground;
+                const float e = height_at(x, y, 0);
+                const float shade =
+                    relief_shade(compiled_terrain_.relief, e, height_at(x + 1, y, e), height_at(x - 1, y, e),
+                                 height_at(x, y + 1, e), height_at(x, y - 1, e));
                 renderer_->ground_blended(g,
                                           {ground_at(x + 1, y, g), ground_at(x - 1, y, g),
                                            ground_at(x, y + 1, g), ground_at(x, y - 1, g),
                                            ground_at(x + 1, y + 1, g), ground_at(x - 1, y + 1, g),
                                            ground_at(x + 1, y - 1, g), ground_at(x - 1, y - 1, g)},
                                           cx, cy, global_coordinate(cache_.origin.x, static_cast<float>(x)),
-                                          global_coordinate(cache_.origin.y, static_cast<float>(y)));
+                                          global_coordinate(cache_.origin.y, static_cast<float>(y)), shade);
             } else
                 renderer_->sprite(cell.ground, cx, cy, size, size);
             // Objects show only up close: zoomed out, a block's one sample would blow a single tree
             // up to the size of the whole block.
-            if (block == 1 && cell.object != no_object)
-                renderer_->sprite(static_cast<MaterialId>(cell.object - 1), cx, cy);
+            if (block == 1 && cell.object != no_object) objects.push_back({cell.object, cx, cy});
         }
+    for (auto it = objects.rbegin(); it != objects.rend(); ++it) {
+        const auto& m = rendered_[static_cast<std::size_t>(it->object - 1)];
+        renderer_->sprite(static_cast<MaterialId>(it->object - 1), it->x, it->y - 0.5F + m.object_height / 2,
+                          m.object_width, m.object_height);
+    }
 }
 
 bool SceneEditor::view_tile(std::int64_t x, std::int64_t y, ViewTile& out) const {
@@ -1366,6 +1469,13 @@ void SceneEditor::paint_at(WorldPosition centre, float dt) {
     const double cx = global_coordinate(centre.chunk.x, centre.local.x),
                  cy = global_coordinate(centre.chunk.y, centre.local.y);
     const double r = std::max(0.5, brush_.size / 2.0);
+    if (brush_.kind == Brush::erase) // Erasing takes decorations under the brush too.
+        std::erase_if(edited_.decorations, [&](const SceneDecoration& d) {
+            if (!nearby(d.position.chunk, centre.chunk, 2)) return false;
+            const double dx = global_coordinate(d.position.chunk.x, d.position.local.x) - cx,
+                         dy = global_coordinate(d.position.chunk.y, d.position.local.y) - cy;
+            return brush_.square ? std::max(std::abs(dx), std::abs(dy)) <= r : std::hypot(dx, dy) <= r;
+        });
     const auto x0 = static_cast<std::int64_t>(std::floor(cx - r)),
                x1 = static_cast<std::int64_t>(std::floor(cx + r));
     const auto y0 = static_cast<std::int64_t>(std::floor(cy - r)),
@@ -1376,6 +1486,7 @@ void SceneEditor::paint_at(WorldPosition centre, float dt) {
             const double d = brush_.square ? std::max(std::abs(dx), std::abs(dy)) : std::hypot(dx, dy);
             // A one-tile brush always paints the tile under the pointer.
             if (d > r && !(brush_.size <= 1 && std::abs(dx) <= 0.5 && std::abs(dy) <= 0.5)) continue;
+            if (brush_.kind == Brush::decorate) continue;
             // Height brushes ease off towards a round brush's edge.
             const float falloff =
                 brush_.square ? 1.0F : static_cast<float>(std::clamp(1 - (d / r) * (d / r), 0.15, 1.0));
@@ -1434,8 +1545,37 @@ void SceneEditor::paint_tile(std::int64_t x, std::int64_t y, float falloff, floa
         if (!chosen) return;
         tile = {};
         break;
+    case Brush::decorate:
+        return; // Places decorations, not tiles (decorate_at).
     }
     if (!(existing && *existing == tile)) paint.set(x, y, tile);
+}
+
+void SceneEditor::decorate_at(WorldPosition at) {
+    if (brush_.decoration.empty()) return;
+    if (decorations_placed_ > 0 && nearby(at.chunk, last_decoration_.chunk, 2) &&
+        std::hypot(relative(at, last_decoration_).x, relative(at, last_decoration_).y) < brush_.spacing)
+        return;
+    if (edited_.decorations.size() >= SceneFile::decoration_capacity)
+        return log_(true, "A scene holds at most 16384 decorations.");
+    last_decoration_ = at;
+    // Spread within the brush, sized and turned by a hash of the stroke and count, so it is varied
+    // but repeats exactly if the same stroke is replayed.
+    const auto random = [&](std::uint64_t salt) {
+        return static_cast<float>(world_hash(stroke_, decorations_placed_, salt) % 100000) / 100000.0F;
+    };
+    ++decorations_placed_;
+    const float r = std::max(0.0F, brush_.size / 2 - brush_.decoration_size / 2);
+    const float angle = random(1) * 2 * pi, distance = r * std::sqrt(random(2));
+    SceneDecoration d;
+    d.material = brush_.decoration;
+    d.position = at;
+    d.position.move({std::cos(angle) * distance, std::sin(angle) * distance});
+    const float scale = brush_.decoration_size * (1 + brush_.jitter * (random(3) * 2 - 1));
+    d.size = {std::clamp(scale, 0.05F, 16.0F), std::clamp(scale, 0.05F, 16.0F)};
+    d.angle = brush_.turn ? random(4) * 2 * pi : 0;
+    d.standing = brush_.standing;
+    edited_.decorations.push_back(std::move(d));
 }
 
 namespace {
@@ -1566,7 +1706,8 @@ void SceneEditor::brush_section(const Assets& assets) {
         ImGui::TextDisabled("%zu painted tiles.", edited_.paint.tiles());
         return;
     }
-    static const char* kinds[] = {"Ground", "Objects", "Raise", "Lower", "Flatten", "Solid", "Erase"};
+    static const char* kinds[] = {"Ground",  "Objects", "Raise", "Lower",
+                                  "Flatten", "Solid",   "Erase", "Decorate"};
     static const char* tips[] = {
         "Paint a ground material.",
         "Place an object, such as a tree or rock, on each tile; None removes objects.",
@@ -1574,8 +1715,9 @@ void SceneEditor::brush_section(const Assets& assets) {
         "Lower the ground; take it below 0 for water.",
         "Level the ground to a height: below 0 makes water, above makes land.",
         "Block walking, or clear blocking, without changing how the ground looks.",
-        "Take paint off, back to the generated terrain."};
-    for (int i = 0; i < 7; ++i) {
+        "Take paint off, back to the generated terrain, and remove decorations.",
+        "Scatter decorations, such as flowers or pebbles: sprites that are not entities."};
+    for (int i = 0; i < 8; ++i) {
         const bool on = brush_.kind == static_cast<Brush>(i);
         if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
         if (i > 0) toolbar_next(button_width(kinds[i]));
@@ -1655,6 +1797,29 @@ void SceneEditor::brush_section(const Assets& assets) {
         mark("brush mix");
         if (!brush_.object.empty() || !brush_.mix.empty())
             ImGui::Checkbox("Blocks walking", &brush_.object_solid);
+        break;
+    case Brush::decorate:
+        if (brush_.decoration.empty() && !assets.materials.empty())
+            brush_.decoration = assets.materials.front().name;
+        ImGui::TextUnformatted("Decoration");
+        material_combo("##brush decoration", brush_.decoration, nullptr);
+        mark("brush decoration");
+        ImGui::TextUnformatted("Piece size (tiles)");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderFloat("##decoration size", &brush_.decoration_size, 0.05F, 16, "%.2f",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::TextUnformatted("Size variation");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderFloat("##jitter", &brush_.jitter, 0, 0.9F, "%.2f");
+        ImGui::TextUnformatted("Spacing (tiles)");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderFloat("##spacing", &brush_.spacing, 0.1F, 16, "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::SetItemTooltip("How far the pointer moves between pieces.");
+        ImGui::Checkbox("Turn at random", &brush_.turn);
+        ImGui::Checkbox("Standing", &brush_.standing);
+        ImGui::SetItemTooltip("Standing pieces are drawn with the entities (sorted with them when the\n"
+                              "game sorts by depth); others lie flat on the ground beneath them.");
+        ImGui::TextDisabled("%zu decorations. The Erase brush removes them.", edited_.decorations.size());
         break;
     case Brush::flatten:
         ImGui::TextUnformatted("Height");
@@ -1855,6 +2020,12 @@ void SceneEditor::hierarchy() {
         mark("create player");
         if (ImGui::MenuItem("NPC")) create_character(camera_, false, *assets_);
         mark("create npc");
+        if (ImGui::MenuItem("Area")) create_area(camera_);
+        mark("create area");
+        ImGui::SetItemTooltip("A region whose script hears on_enter and on_exit as characters come and go.");
+        if (ImGui::MenuItem("Path")) create_path(camera_);
+        mark("create path");
+        ImGui::SetItemTooltip("A route for characters to follow with e:follow, or for scripts to read.");
         ImGui::EndPopup();
     }
     toolbar_next(button_width("Duplicate"));
@@ -2367,6 +2538,12 @@ void SceneEditor::multi_inspector(const Assets& assets) {
         toggle_field("Only at night",
                      [](SceneEntity& e) { return e.light ? &e.light->night_only : nullptr; });
     }
+    if (component("Area", &SceneEntity::area, [] { return SceneArea{}; })) {
+        number("Area X", [](SceneEntity& e) { return e.area ? &e.area->size.x : nullptr; }, 0.1F, 1024);
+        number("Area Y", [](SceneEntity& e) { return e.area ? &e.area->size.y : nullptr; }, 0.1F, 1024);
+    }
+    if (component("Path", &SceneEntity::path, [] { return new_path(); }))
+        toggle_field("Loop", [](SceneEntity& e) { return e.path ? &e.path->loop : nullptr; });
     if (component("Character", &SceneEntity::character, [] { return SceneCharacter{}; })) {
         number(
             "Walk speed", [](SceneEntity& e) { return e.character ? &e.character->speed : nullptr; }, 0, 100);
@@ -2519,6 +2696,53 @@ bool SceneEditor::inspector(Assets& assets) {
         }
         if (!keep) e.light.reset();
     }
+    if (e.area) {
+        bool keep = true;
+        if (ImGui::CollapsingHeader("Area", &keep, ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextUnformatted("Size (tiles)");
+            ImGui::SetNextItemWidth(-1);
+            ImGui::DragFloat2("##area size", &e.area->size.x, 0.05F, 0.1F, 1024, "%.2f",
+                              ImGuiSliderFlags_AlwaysClamp);
+            ImGui::TextDisabled(
+                "Its script's on_enter(other) and on_exit(other) run as characters come and go.");
+        }
+        if (!keep) e.area.reset();
+    }
+    if (e.path) {
+        bool keep = true;
+        if (ImGui::CollapsingHeader("Path", &keep, ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto& points = e.path->points;
+            ImGui::TextDisabled("Points, in tiles from the entity.");
+            for (std::size_t k = 0; k < points.size();) {
+                ImGui::PushID(static_cast<int>(k));
+                ImGui::SetNextItemWidth(-button_width("x") - ImGui::GetStyle().ItemSpacing.x);
+                ImGui::DragFloat2("##point", &points[k].x, 0.05F, -4096, 4096, "%.2f",
+                                  ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SameLine();
+                ImGui::BeginDisabled(points.size() <= 2);
+                const bool removed = ImGui::Button("x");
+                ImGui::EndDisabled();
+                ImGui::PopID();
+                if (removed)
+                    points.erase(points.begin() + static_cast<std::ptrdiff_t>(k));
+                else
+                    ++k;
+            }
+            ImGui::BeginDisabled(points.size() >= ScenePath::capacity);
+            if (ImGui::Button("Add Point", {-1, 0})) {
+                const auto last = points.back();
+                const auto before = points.size() > 1 ? points[points.size() - 2] : Vec2{};
+                const auto step = last - before;
+                points.push_back(last + (step.x == 0 && step.y == 0 ? Vec2{1, 0} : step));
+            }
+            ImGui::EndDisabled();
+            mark("path add point");
+            ImGui::Checkbox("Loop", &e.path->loop);
+            ImGui::SetItemTooltip("Followers go from the last point back to the first and round again.");
+            ImGui::TextDisabled("Scripts walk it with e:follow(world.find(\"%s\")).", e.name.c_str());
+        }
+        if (!keep) e.path.reset();
+    }
     character_section(e, assets);
     const auto script_folder = folder_.parent_path() / "scripts";
     if (!e.script.empty()) {
@@ -2548,7 +2772,7 @@ bool SceneEditor::inspector(Assets& assets) {
         if (!keep) e.script.clear();
     }
     ImGui::Dummy({0, 4});
-    const bool full = e.visual && e.light && e.character && !e.script.empty();
+    const bool full = e.visual && e.light && e.area && e.path && e.character && !e.script.empty();
     ImGui::BeginDisabled(full);
     if (ImGui::Button("Add Component", {-1, 0})) ImGui::OpenPopup("add component");
     ImGui::EndDisabled();
@@ -2558,6 +2782,8 @@ bool SceneEditor::inspector(Assets& assets) {
             if (!assets.materials.empty()) e.visual->material = assets.materials.front().name;
         }
         if (!e.light && ImGui::MenuItem("Light")) e.light = SceneLight{};
+        if (!e.area && ImGui::MenuItem("Area")) e.area = SceneArea{};
+        if (!e.path && ImGui::MenuItem("Path")) e.path = new_path();
         if (!e.character && ImGui::MenuItem("Character")) e.character = SceneCharacter{};
         if (e.script.empty() && ImGui::BeginMenu("Script")) {
             for (const auto& name : Scripts::list(script_folder))

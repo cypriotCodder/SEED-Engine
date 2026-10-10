@@ -26,7 +26,7 @@ void rejects(F&& f, const char* message) {
 }
 
 constexpr std::uint64_t seed = 77;
-constexpr std::size_t header_only_size = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 2 + 2 + 2 + 4;
+constexpr std::size_t header_only_size = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 2 + 2 + 2 + 2 + 4;
 
 std::unique_ptr<seed::Chunk> generated(seed::ChunkCoord coord) {
     auto chunk = std::make_unique<seed::Chunk>();
@@ -104,14 +104,15 @@ void codec() {
         },
         "File for another coordinate accepted");
     auto old_version = bytes;
-    old_version[4] = 3;
-    rejects([&] { decode_into_fresh(old_version); }, "Version 3 chunk file accepted");
+    old_version[4] = 4;
+    rejects([&] { decode_into_fresh(old_version); }, "Version 4 chunk file accepted");
     auto other_generator = bytes;
     other_generator[8] ^= 1; // Low byte of the generator ID.
     rejects([&] { decode_into_fresh(other_generator); }, "Chunk file from another generator accepted");
 
-    // Offsets: 42-byte header prefix up to the tile count, then 3 bytes per tile record.
-    const std::size_t body_count_offset = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 3;
+    // Offsets: 44-byte header up to the tile count, 3 bytes per tile record, then the
+    // replaced-tile count.
+    const std::size_t body_count_offset = 4 + 4 + 8 + 4 + 8 + 8 + 8 + 2 + 3 + 2;
     const std::size_t first_record = body_count_offset + 2;
     auto duplicate = bytes;
     duplicate[first_record + 2 + seed::body_record_size] = duplicate[first_record]; // Second ID = first ID.
@@ -120,6 +121,64 @@ void codec() {
     auto far_away = bytes;
     far_away[first_record + 3] = 9; // Position chunk x of the first record: 9 chunks from its owner.
     rejects([&] { decode_into_fresh(far_away); }, "Body outside owner reach accepted");
+}
+
+// Replaced tiles (World::set_tile) are saved whole and restored over the generated, edited tile.
+void replaced_tiles() {
+    const seed::ChunkCoord origin{};
+    auto generator = test_world::generator();
+    generator.materials = 4;
+    auto baseline = generated(origin);
+    auto edited = generated(origin);
+    const seed::Tile replacement{0.75F, 2, seed::tile_solid, seed::tile_object(3), {1, 2, 3, 4}};
+    edited->changes[40] = 1; // Edited, then replaced: the replacement wins.
+    edited->tiles[40] = replacement;
+    edited->replaced.set(40);
+    edited->tiles[41] = replacement;
+    edited->replaced.set(41);
+    auto replaced_only = generated(origin);
+    replaced_only->replaced.set(7);
+    check(!seed::chunk_matches_baseline(*replaced_only, baseline->bodies),
+          "Replaced tiles make a chunk differ");
+    const auto bytes = seed::encode_chunk(generator, seed, origin, *edited, baseline->bodies);
+
+    auto loaded = generated(origin);
+    seed::decode_chunk(bytes, generator, seed, origin, *loaded);
+    const auto same = [&](const seed::Tile& a) {
+        return a.elevation == replacement.elevation && a.material == replacement.material &&
+               a.flags == replacement.flags && a.object == replacement.object && a.game == replacement.game;
+    };
+    check(same(loaded->tiles[40]) && same(loaded->tiles[41]) && loaded->changes[40] == 1 &&
+              loaded->replaced == edited->replaced && !loaded->replaced[42],
+          "Replaced tiles round trip whole");
+
+    auto decode_into_fresh = [&](std::vector<std::uint8_t> data) {
+        auto target = generated(origin);
+        seed::decode_chunk(data, generator, seed, origin, *target);
+    };
+    // After the 44-byte header and the tile count: one 3-byte tile record, the replaced count, then 13-byte
+    // records of u16 index, f32 elevation, material, flags, object and four game bytes.
+    const std::size_t first = 44 + 2 + 3 + 2;
+    auto unregistered = bytes;
+    unregistered[first + 6] = 4;
+    rejects([&] { decode_into_fresh(unregistered); }, "Unregistered replaced material accepted");
+    auto bad_object = bytes;
+    bad_object[first + 8] = 5;
+    rejects([&] { decode_into_fresh(bad_object); }, "Unregistered replaced object accepted");
+    auto infinite = bytes;
+    infinite[first + 4] = 0x80;
+    infinite[first + 5] = 0x7f;
+    rejects([&] { decode_into_fresh(infinite); }, "Non-finite replaced elevation accepted");
+    auto out_of_order = bytes;
+    out_of_order[first + 13] = 40; // The second record repeats the first index.
+    rejects([&] { decode_into_fresh(out_of_order); }, "Repeated replaced tile accepted");
+
+    auto invalid = generated(origin);
+    invalid->tiles[3].material = 9;
+    invalid->replaced.set(3);
+    rejects<std::invalid_argument>(
+        [&] { seed::encode_chunk(generator, seed, origin, *invalid, baseline->bodies); },
+        "An unregistered material was saved");
 }
 
 // Saved entities travel verbatim in the chunk file and are validated on load.
@@ -381,6 +440,7 @@ int main() {
         job_groups();
         codec();
         entity_codec();
+        replaced_tiles();
         residency();
         save_identity();
         built_slots_are_reclaimed();

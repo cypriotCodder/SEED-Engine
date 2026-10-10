@@ -50,6 +50,8 @@ public:
     // lights and scripts. Without one, spawning a prefab is an error.
     using PrefabSpawner = std::function<Entity(const std::string& name, WorldPosition at, float angle)>;
     void set_prefab_spawner(PrefabSpawner spawner) { spawn_prefab_ = std::move(spawner); }
+    // Gives `entity` a path (a scene Path component), in world positions, for world.path and e:follow.
+    void set_path(Entity entity, std::vector<WorldPosition> points, bool loop);
     // The entity game.player() returns.
     void set_player(Entity player) { player_ = player; }
     // The time of day the atmosphere API reads and sets; without one, those calls are errors.
@@ -61,7 +63,8 @@ public:
     void surfaces();
     // Calls on_touch(other) and on_leave(other) on scripted entities whose box (a character's
     // collision box, else its visual's size, unrotated) starts or stops overlapping another
-    // entity's. Call after everything has moved in a step.
+    // entity's. Then calls on_enter(other) and on_exit(other) on scripted areas (AreaComponent) as
+    // characters' centres come into and leave them. Call after everything has moved in a step.
     void touches();
     // Where the mouse is, for input.pointer(): in the world, and in logical pixels on a screen of
     // `width` x `height`. Call once a frame.
@@ -95,7 +98,23 @@ private:
         std::string file;
         bool started{}, failed{};
         std::vector<Entity> touching; // What its box overlapped after the last step.
+        std::vector<Entity> inside;   // For an area: the characters in it after the last step.
     };
+    // A path from the scene, and a character following points one after another (e:follow, e:go_to).
+    struct Path {
+        Entity entity;
+        std::vector<WorldPosition> points;
+        bool loop{};
+    };
+    struct Route {
+        Entity entity;
+        std::vector<WorldPosition> points;
+        std::size_t next{};
+        bool loop{}, running{};
+    };
+    void cancel_route(Entity entity);
+    // Starts the next point of each route whose character reached the last; ends finished ones.
+    void advance_routes();
     struct UiCommand {
         float x, y, width, height, scale;
         float color[4];
@@ -122,6 +141,8 @@ private:
     lua_State* lua_{};
     std::size_t memory_{};
     std::vector<Instance> instances_;
+    std::vector<Path> paths_;
+    std::vector<Route> routes_;
     std::vector<std::string> names_; // By entity index.
     std::chrono::steady_clock::time_point call_start_{};
     double time_{};

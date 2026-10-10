@@ -223,6 +223,12 @@ void AssetPanels::materials() {
                 ImGui::SliderFloat("##speed", &m.speed, 0.1F, 4, "%.2fx", ImGuiSliderFlags_Logarithmic);
             ImGui::SetItemTooltip("How fast characters walk on this ground, times their own speed:\n"
                                   "below 1 for mud or deep snow, above 1 for roads.");
+            field("Object size (tiles)");
+            changed |= ImGui::DragFloat2("##object size", &m.object_width, 0.05F, 0.25F, 16, "%.2f",
+                                         ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SetItemTooltip(
+                "Placed on the terrain as an object (a tree or rock), how big its picture is.\n"
+                "It stands on its tile and overhangs the tiles behind; only its own tile blocks.");
             field("Edge blend");
             changed |= ImGui::SliderInt("##blend", &m.blend, 0, 255);
             ImGui::SetItemTooltip("How this ground meets its neighbours. It fades over neighbouring\n"

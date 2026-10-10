@@ -2,6 +2,8 @@
 #include "io/binary.hpp"
 #include <algorithm>
 #include <bit>
+#include <cmath>
+#include <string>
 
 namespace seed {
 namespace {
@@ -61,6 +63,14 @@ bool same_body(const BodyState& a, const BodyState& b) {
 }
 } // namespace
 
+void check_saved_tile(const WorldGenerator& generator, const Tile& tile) {
+    if (!std::isfinite(tile.elevation) || std::abs(tile.elevation) > 1e6F)
+        throw std::invalid_argument("Tile elevation must be finite and within 1e6");
+    if (generator.materials && (tile.material >= generator.materials ||
+                                (tile.object != no_object && tile.object > generator.materials)))
+        throw std::invalid_argument("Tile material is not registered");
+}
+
 void append_entity(ChunkEntities& entities, const EntityRecord& record) {
     if (entities.count == chunk_entity_capacity) throw std::length_error("Chunk entity budget exhausted");
     if (record.payload.size() > entity_payload_capacity) throw std::length_error("Entity payload too large");
@@ -116,7 +126,8 @@ std::array<std::uint8_t, body_record_size> encode_body(const BodyState& body) {
 
 bool chunk_matches_baseline(const Chunk& chunk, const ChunkBodies& baseline) {
     const auto& bodies = chunk.bodies;
-    if (std::any_of(chunk.changes.begin(), chunk.changes.end(), [](auto change) { return change != 0; }))
+    if (chunk.replaced.any() ||
+        std::any_of(chunk.changes.begin(), chunk.changes.end(), [](auto change) { return change != 0; }))
         return false;
     if (bodies.count != baseline.count || bodies.broken.any() || chunk.entities.count) return false;
     for (std::size_t i = 0; i < bodies.count; ++i)
@@ -147,6 +158,21 @@ std::vector<std::uint8_t> encode_chunk(const WorldGenerator& generator, std::uin
         if (chunk.changes[i]) {
             out.u16(static_cast<std::uint16_t>(i));
             out.u8(chunk.changes[i]);
+        }
+
+    // Replaced tiles: each whole, in tile order.
+    out.u16(static_cast<std::uint16_t>(chunk.replaced.count()));
+    for (std::size_t i = 0; i < chunk.tiles.size(); ++i)
+        if (chunk.replaced[i]) {
+            const auto& tile = chunk.tiles[i];
+            check_saved_tile(generator, tile);
+            out.u16(static_cast<std::uint16_t>(i));
+            put_float(out, tile.elevation);
+            out.u8(tile.material);
+            out.u8(tile.flags);
+            out.u8(tile.object);
+            for (const auto byte : tile.game)
+                out.u8(byte);
         }
 
     // Bodies: changed recipe bodies, then every built body, in ascending ID order.
@@ -197,6 +223,30 @@ void decode_chunk(std::span<const std::uint8_t> bytes, const WorldGenerator& gen
             throw std::runtime_error("Invalid or duplicate tile change");
         chunk.changes[index] = change;
         generator.apply_edit(generator.context, chunk.tiles[index], change);
+    }
+
+    const auto replaced = in.u16();
+    if (replaced > chunk.tiles.size()) throw std::runtime_error("Invalid replaced tile count");
+    int previous_tile = -1;
+    for (unsigned i = 0; i < replaced; ++i) {
+        const auto index = in.u16();
+        if (index >= chunk.tiles.size() || static_cast<int>(index) <= previous_tile)
+            throw std::runtime_error("Replaced tiles out of order or out of range");
+        previous_tile = index;
+        Tile tile;
+        tile.elevation = std::bit_cast<float>(in.u32());
+        tile.material = in.u8();
+        tile.flags = in.u8();
+        tile.object = in.u8();
+        for (auto& byte : tile.game)
+            byte = in.u8();
+        try {
+            check_saved_tile(generator, tile);
+        } catch (const std::invalid_argument& error) {
+            throw std::runtime_error(std::string("Invalid replaced tile: ") + error.what());
+        }
+        chunk.tiles[index] = tile;
+        chunk.replaced.set(index);
     }
 
     auto& bodies = chunk.bodies;

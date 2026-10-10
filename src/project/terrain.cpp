@@ -47,6 +47,7 @@ std::string TerrainAsset::problems(const std::vector<std::string>& materials) co
     if (!(radius >= 1 && radius <= 100000)) out += "Radius must be 1 to 100000 chunks\n";
     if (!(coast >= 0 && coast <= 1)) out += "Coast must be 0 to 1\n";
     if (!(warp >= 0 && warp <= 256)) out += "Warp must be 0 to 256 tiles\n";
+    if (!(relief >= 0 && relief <= 100)) out += "Relief must be 0 to 100\n";
     if (!power_of_two(warp_wavelength)) out += "Warp wavelength must be a power of two up to 1024\n";
     if (fields.size() > field_capacity) out += "At most 8 fields\n";
     if (rules.size() > rule_capacity) out += "At most 64 rules\n";
@@ -83,7 +84,52 @@ std::string TerrainAsset::problems(const std::vector<std::string>& materials) co
             if (!r.scatter->one_in) out += where + "scatter chance must be 1 in 1 or rarer\n";
         }
     }
+    if (features.size() > feature_capacity) out += "At most 16 features\n";
+    for (const auto& f : features) {
+        const auto where = "Feature \"" + f.name + "\": ";
+        if (f.name.empty() || f.name.size() > 32) out += where + "names need 1 to 32 characters\n";
+        if (!f.one_in || f.one_in > 1000000) out += where + "the chance must be 1 in 1 to 1 in 1000000\n";
+        for (const auto& c : f.when) {
+            if (!field_known(c.field)) out += where + "unknown field \"" + c.field + "\"\n";
+            if (std::isnan(c.min) || std::isnan(c.max) || c.min > c.max)
+                out += where + "a range's minimum exceeds its maximum\n";
+        }
+        if (f.rows.empty() || f.rows.size() > TerrainFeature::side_capacity ||
+            std::any_of(f.rows.begin(), f.rows.end(), [&](const std::string& row) {
+                return row.empty() || row.size() > TerrainFeature::side_capacity ||
+                       row.size() != f.rows[0].size();
+            }))
+            out += where + "rows must be 1 to 16, all the same width of 1 to 16\n";
+        if (f.cells.size() > TerrainFeature::cell_capacity) out += where + "at most 16 kinds of cell\n";
+        for (std::size_t i = 0; i < f.cells.size(); ++i) {
+            const auto& c = f.cells[i];
+            if (c.symbol <= ' ' || c.symbol > '~' || c.symbol == '.')
+                out += where + "cell symbols are printable characters other than '.'\n";
+            for (std::size_t j = 0; j < i; ++j)
+                if (f.cells[j].symbol == c.symbol) out += where + "duplicate cell symbol\n";
+            if (!c.ground.empty() && !known(c.ground))
+                out += where + "unknown material \"" + c.ground + "\"\n";
+            if (!c.object.empty() && !known(c.object))
+                out += where + "unknown material \"" + c.object + "\"\n";
+        }
+        const bool undefined = std::any_of(f.rows.begin(), f.rows.end(), [&](const std::string& row) {
+            return std::any_of(row.begin(), row.end(), [&](char symbol) {
+                return symbol != '.' &&
+                       std::none_of(f.cells.begin(), f.cells.end(),
+                                    [&](const TerrainFeatureCell& c) { return c.symbol == symbol; });
+            });
+        });
+        if (undefined) out += where + "the rows use a symbol no cell defines\n";
+    }
     return out;
+}
+
+float relief_shade(float relief, float elevation, float east, float west, float north, float south) {
+    if (relief <= 0 || !(elevation >= 0)) return 1;
+    // Rising to the east or falling to the north faces the north-west light.
+    const float facing = ((east - west) - (north - south)) / 2;
+    const float shade = 1 + relief * facing;
+    return std::isfinite(shade) ? std::clamp(shade, 0.7F, 1.25F) : 1;
 }
 
 Json terrain_json(const TerrainAsset& t) {
@@ -93,6 +139,7 @@ Json terrain_json(const TerrainAsset& t) {
     out.set("coast", json_float(t.coast));
     out.set("warp", json_float(t.warp));
     out.set("warp_wavelength", static_cast<int>(t.warp_wavelength));
+    if (t.relief != 0) out.set("relief", json_float(t.relief)); // Written only when set.
     out.set("default_seed", static_cast<std::int64_t>(t.default_seed & ((std::uint64_t(1) << 53) - 1)));
     auto fields = Json::array();
     for (const auto& f : t.fields) {
@@ -138,6 +185,39 @@ Json terrain_json(const TerrainAsset& t) {
         rules.push(rule);
     }
     out.set("rules", rules);
+    if (!t.features.empty()) { // Written only when there are any, so older terrains keep their version.
+        auto features = Json::array();
+        for (const auto& f : t.features) {
+            auto feature = Json::object();
+            feature.set("name", f.name);
+            feature.set("one_in", static_cast<std::int64_t>(f.one_in));
+            auto when = Json::array();
+            for (const auto& c : f.when) {
+                auto condition = Json::object();
+                condition.set("field", c.field);
+                if (std::isfinite(c.min)) condition.set("min", json_float(c.min));
+                if (std::isfinite(c.max)) condition.set("max", json_float(c.max));
+                when.push(condition);
+            }
+            feature.set("when", when);
+            auto rows = Json::array();
+            for (const auto& row : f.rows)
+                rows.push(row);
+            feature.set("rows", rows);
+            auto cells = Json::array();
+            for (const auto& c : f.cells) {
+                auto cell = Json::object();
+                cell.set("symbol", std::string(1, c.symbol));
+                if (!c.ground.empty()) cell.set("ground", c.ground);
+                if (!c.object.empty()) cell.set("object", c.object);
+                cell.set("solid", c.solid);
+                cells.push(cell);
+            }
+            feature.set("cells", cells);
+            features.push(feature);
+        }
+        out.set("features", features);
+    }
     return out;
 }
 
@@ -147,6 +227,7 @@ TerrainAsset parse_terrain(const Json& json) {
     t.radius = get(json, "radius", t.radius);
     t.coast = get(json, "coast", t.coast);
     t.warp = get(json, "warp", t.warp);
+    t.relief = get(json, "relief", t.relief);
     if (const auto* w = json.find("warp_wavelength"))
         t.warp_wavelength = static_cast<unsigned>(w->as_int(1, 1024));
     if (const auto* s = json.find("default_seed"))
@@ -191,11 +272,40 @@ TerrainAsset parse_terrain(const Json& json) {
             }
             t.rules.push_back(std::move(r));
         }
+    if (const auto* features = json.find("features"))
+        for (const auto& item : features->items()) {
+            TerrainFeature f;
+            f.name = item.at("name").as_string();
+            f.one_in = static_cast<std::uint32_t>(item.at("one_in").as_int(1, 1000000));
+            if (const auto* when = item.find("when"))
+                for (const auto& entry : when->items()) {
+                    TerrainCondition c;
+                    c.field = entry.at("field").as_string();
+                    c.min = get(entry, "min", c.min);
+                    c.max = get(entry, "max", c.max);
+                    f.when.push_back(c);
+                }
+            f.rows.clear(); // Replacing a new feature's one-cell pattern.
+            f.cells.clear();
+            for (const auto& row : item.at("rows").items())
+                f.rows.push_back(row.as_string());
+            for (const auto& entry : item.at("cells").items()) {
+                TerrainFeatureCell c;
+                const auto symbol = entry.at("symbol").as_string();
+                if (symbol.size() != 1) throw std::runtime_error("a cell symbol is one character");
+                c.symbol = symbol[0];
+                if (const auto* ground = entry.find("ground")) c.ground = ground->as_string();
+                if (const auto* object = entry.find("object")) c.object = object->as_string();
+                if (const auto* solid = entry.find("solid")) c.solid = solid->as_bool();
+                f.cells.push_back(std::move(c));
+            }
+            t.features.push_back(std::move(f));
+        }
     return t;
 }
 
 Terrain::Terrain(const TerrainAsset& asset, const Materials& materials, const TerrainPaint& paint)
-    : asset_(asset) {
+    : asset_(asset), materials_(materials.size()) {
     std::vector<std::string> names;
     for (std::size_t i = 0; i < materials.size(); ++i)
         names.emplace_back(materials[static_cast<MaterialId>(i)].name);
@@ -225,8 +335,30 @@ Terrain::Terrain(const TerrainAsset& asset, const Materials& materials, const Te
         }
         rules_.push_back(std::move(rule));
     }
+    for (const auto& f : asset.features) {
+        Feature feature{
+            mix64(stable_id("feature:" + f.name)), f.one_in, {}, static_cast<int>(f.rows[0].size()),
+            static_cast<int>(f.rows.size()),       {},       {}};
+        for (const auto& c : f.when)
+            feature.when.push_back({field_index(c.field), c.min, c.max});
+        for (const auto& c : f.cells)
+            feature.cells.push_back(
+                {!c.ground.empty(), c.ground.empty() ? MaterialId{} : materials.find(c.ground),
+                 c.object.empty() ? no_object : tile_object(materials.find(c.object)), c.solid});
+        for (const auto& row : f.rows)
+            for (const char symbol : row) {
+                const auto found =
+                    std::find_if(f.cells.begin(), f.cells.end(),
+                                 [&](const TerrainFeatureCell& c) { return c.symbol == symbol; });
+                feature.layout.push_back(found == f.cells.end()
+                                             ? std::int8_t{-1}
+                                             : static_cast<std::int8_t>(found - f.cells.begin()));
+            }
+        features_.push_back(std::move(feature));
+    }
     auto identity = asset;
     identity.default_seed = 0; // The seed chooses a world; it does not change the generator.
+    identity.relief = 0;       // Nor does shading.
     auto identity_text = to_json(terrain_json(identity));
     if (!paint.empty()) {
         if (const auto problems = paint.problems(names); !problems.empty())
@@ -249,10 +381,9 @@ Terrain::Terrain(const TerrainAsset& asset, const Materials& materials, const Te
     version_ = fnv32(identity_text);
 }
 
-Terrain::Sample Terrain::sample(std::uint64_t seed, WorldPosition position) const {
+std::array<float, TerrainAsset::field_capacity> Terrain::values(std::uint64_t seed,
+                                                                WorldPosition position) const {
     position.move({});
-    Sample out;
-    if (rules_.empty()) return out;
     const double wx = static_cast<double>(position.chunk.x) * chunk_side + position.local.x;
     const double wy = static_cast<double>(position.chunk.y) * chunk_side + position.local.y;
     const double tiles = std::sqrt(wx * wx + wy * wy);
@@ -297,6 +428,14 @@ Terrain::Sample Terrain::sample(std::uint64_t seed, WorldPosition position) cons
     if (asset_.island)
         values[elevation_] =
             open_sea ? -1.0F : values[elevation_] - smoothstep(1 - asset_.coast, 1, distance) * 1.6F;
+    return values;
+}
+
+Terrain::Sample Terrain::sample(std::uint64_t seed, WorldPosition position) const {
+    position.move({});
+    Sample out;
+    if (rules_.empty()) return out;
+    const auto values = this->values(seed, position);
     out.elevation = values[elevation_];
 
     const Rule* chosen = &rules_.back();
@@ -321,6 +460,32 @@ Terrain::Sample Terrain::sample(std::uint64_t seed, WorldPosition position) cons
             out.object = tile_object(chosen->scatter_material);
             out.solid = out.solid || chosen->scatter_solid;
         }
+    }
+    // Features: at most one of each per chunk, wholly inside it, stamped in order.
+    const int tx = static_cast<int>(position.local.x), ty = static_cast<int>(position.local.y);
+    for (const auto& f : features_) {
+        const auto chance = world_hash(seed ^ f.stream, static_cast<std::uint64_t>(position.chunk.x),
+                                       static_cast<std::uint64_t>(position.chunk.y));
+        if (chance % f.one_in != 0) continue;
+        const auto place = mix64(chance);
+        const int x0 = static_cast<int>(place % static_cast<std::uint64_t>(chunk_side - f.width + 1));
+        const int y0 =
+            static_cast<int>((place >> 32) % static_cast<std::uint64_t>(chunk_side - f.height + 1));
+        if (tx < x0 || ty < y0 || tx >= x0 + f.width || ty >= y0 + f.height) continue;
+        const int row = y0 + f.height - 1 - ty; // The top row is the northernmost.
+        const auto cell = f.layout[static_cast<std::size_t>(row * f.width + tx - x0)];
+        if (cell < 0) continue;
+        const auto centre = this->values(seed, {position.chunk,
+                                                {static_cast<float>(x0) + static_cast<float>(f.width) / 2,
+                                                 static_cast<float>(y0) + static_cast<float>(f.height) / 2}});
+        if (!std::all_of(f.when.begin(), f.when.end(), [&](const Condition& c) {
+                return centre[c.field] >= c.min && centre[c.field] <= c.max;
+            }))
+            continue;
+        const auto& c = f.cells[static_cast<std::size_t>(cell)];
+        if (c.ground) out.material = c.material;
+        out.object = c.object;
+        out.solid = c.solid;
     }
     return out;
 }
@@ -356,6 +521,7 @@ WorldGenerator Terrain::generator() const {
     generator.name = "seed-terrain";
     generator.version = version_;
     generator.terrain = fill;
+    generator.materials = materials_;
     return generator;
 }
 } // namespace seed

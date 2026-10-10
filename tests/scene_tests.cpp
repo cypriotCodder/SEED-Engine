@@ -38,7 +38,15 @@ seed::SceneFile sample() {
     lamp.light = seed::SceneLight{};
     seed::SceneEntity spawn;
     spawn.name = "Spawn";
-    scene.entities = {ground, lamp, spawn};
+    seed::SceneEntity cave;
+    cave.name = "Cave mouth";
+    cave.area = seed::SceneArea{{3, 1.5F}};
+    seed::SceneEntity patrol;
+    patrol.name = "Patrol";
+    patrol.path = seed::ScenePath{{{0, 0}, {4, -2.5F}, {4, 3}}, true};
+    scene.entities = {ground, lamp, spawn, cave, patrol};
+    scene.decorations = {{"grass", {{-2, 5}, {3.5F, 30.25F}}, {0.5F, 0.4F}, 1.25F, true},
+                         {"grass", {{0, 0}, {1, 2}}, {1, 1}, 0, false}};
     return scene;
 }
 
@@ -48,7 +56,15 @@ void round_trip(const fs::path& root) {
     seed::save_scene(root / "scenes" / "main.json", scene);
     const auto loaded = seed::load_scene(root / "scenes" / "main.json");
     check(loaded == scene, "Scene reads back unchanged, including far chunk coordinates");
-    check(!loaded.entities[2].visual && !loaded.entities[2].light, "Component-free entities stay empty");
+    check(!loaded.entities[2].visual && !loaded.entities[2].light && !loaded.entities[2].area,
+          "Component-free entities stay empty");
+    check(loaded.entities[3].area && loaded.entities[3].area->size.x == 3, "Areas read back");
+    check(loaded.entities[4].path && loaded.entities[4].path->points.size() == 3 &&
+              loaded.entities[4].path->points[1].y == -2.5F && loaded.entities[4].path->loop,
+          "Paths read back");
+    check(loaded.decorations == scene.decorations, "Decorations read back");
+    const auto text = seed::read_text(root / "scenes" / "main.json");
+    check(text.find("\"standing\": true") != std::string::npos, "Standing decorations are marked");
     check(seed::read_text(root / "scenes" / "main.json").find("atmosphere") == std::string::npos,
           "A default atmosphere is left out of the file");
     auto lit = scene;
@@ -111,6 +127,7 @@ void prefabs() {
     torch.visual = seed::SceneVisual{"grass", {0.5F, 1}};
     torch.light = seed::SceneLight{};
     torch.script = "flicker.lua";
+    torch.area = seed::SceneArea{{2, 2}};
     const auto stored = seed::parse_prefab(seed::parse_json(seed::to_json(seed::prefab_json(torch))));
     check(stored.position == seed::WorldPosition{} && stored.angle == 0 && stored.prefab.empty() &&
               stored.visual == torch.visual && stored.light == torch.light && stored.script == torch.script,
@@ -123,7 +140,8 @@ void prefabs() {
     placed.prefab = "torch";
     seed::apply_prefab(stored, placed);
     check(placed.name == "Torch by the door" && placed.position.local.x == 7 && placed.angle == 0.5F &&
-              placed.visual == torch.visual && placed.script == "flicker.lua" && placed.prefab == "torch",
+              placed.visual == torch.visual && placed.area == torch.area && placed.script == "flicker.lua" &&
+              placed.prefab == "torch",
           "Applying a prefab keeps the copy's name, placement and link");
     check(seed::parse_entity(seed::entity_json(placed)).prefab == "torch",
           "The link is saved with the scene");
@@ -142,11 +160,20 @@ void problems() {
     scene.entities[0].visual->material = "stone";
     scene.entities[1].light->radius = 0;
     scene.entities[2].name.clear();
+    scene.entities[3].area->size.y = 0;
+    scene.entities[4].path->points.resize(1);
+    scene.decorations[0].material = "lava";
+    scene.decorations[1].size.x = 0;
     const auto report = scene.problems(assets());
     check(report.find("Unknown material \"stone\"") != std::string::npos, "Unknown material reported");
     check(report.find("Light values out of range") != std::string::npos, "Bad light reported");
     check(report.find("Names need") != std::string::npos, "Empty name reported");
-    check(std::count(report.begin(), report.end(), '\n') == 3, "One line per problem");
+    check(report.find("Area size") != std::string::npos, "Bad area reported");
+    check(report.find("A path has 2 to 256 points") != std::string::npos, "Short path reported");
+    check(report.find("Decoration 1: unknown material \"lava\"") != std::string::npos &&
+              report.find("Decoration 2: size") != std::string::npos,
+          "Bad decorations reported");
+    check(std::count(report.begin(), report.end(), '\n') == 7, "One line per problem");
 }
 
 void malformed() {

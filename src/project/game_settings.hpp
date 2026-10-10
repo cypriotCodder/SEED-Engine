@@ -9,6 +9,7 @@ struct GameSettings {
     std::string title;               // Window title; empty uses the project's name.
     int width{1280}, height{720};    // Window size in logical pixels.
     bool fullscreen{};
+    bool sort_by_y{}; // Draw characters, objects and entities back to front (Engine::sort_by_y).
     bool operator==(const GameSettings&) const = default;
     // Every problem, one per line; empty when valid.
     std::string problems() const;

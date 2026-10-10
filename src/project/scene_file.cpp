@@ -60,6 +60,7 @@ SceneEntity parse_prefab(const Json& json) {
 void apply_prefab(const SceneEntity& prefab, SceneEntity& placed) {
     placed.visual = prefab.visual;
     placed.light = prefab.light;
+    placed.area = prefab.area;
     placed.script = prefab.script;
     // A prefab can be a character; whether this copy is the player, and its player settings, stay
     // the copy's own.
@@ -113,6 +114,17 @@ std::string SceneFile::problems(const Assets& assets) const {
             report(i, "Prefab names use letters, digits, '_' and '-'");
         if (!e.script.empty() && !valid_script_name(e.script))
             report(i, "Script names are file names in scripts/ ending in .lua");
+        if (e.area && !(e.area->size.x >= 0.1F && e.area->size.x <= 1024 && e.area->size.y >= 0.1F &&
+                        e.area->size.y <= 1024))
+            report(i, "Area size must be 0.1 to 1024 tiles");
+        if (e.path) {
+            const auto& points = e.path->points;
+            if (points.size() < 2 || points.size() > ScenePath::capacity)
+                report(i, "A path has 2 to 256 points");
+            if (std::any_of(points.begin(), points.end(),
+                            [](Vec2 p) { return !(std::abs(p.x) <= 4096 && std::abs(p.y) <= 4096); }))
+                report(i, "Path points must be within 4096 tiles of their entity");
+        }
         if (e.light) {
             const auto& l = *e.light;
             const bool color =
@@ -123,6 +135,17 @@ std::string SceneFile::problems(const Assets& assets) const {
         }
     }
     if (players > 1) result += "Only one character can be the player; the others are NPCs\n";
+    if (decorations.size() > decoration_capacity) result += "More than 16384 decorations in one scene\n";
+    for (std::size_t i = 0; i < decorations.size(); ++i) {
+        const auto& d = decorations[i];
+        const auto where = "Decoration " + std::to_string(i + 1) + ": ";
+        if (std::none_of(assets.materials.begin(), assets.materials.end(),
+                         [&](const MaterialAsset& m) { return m.name == d.material; }))
+            result += where + "unknown material \"" + d.material + "\"\n";
+        if (!(d.size.x >= 0.05F && d.size.x <= 16 && d.size.y >= 0.05F && d.size.y <= 16) ||
+            !finite(d.angle) || !finite(d.position.local.x) || !finite(d.position.local.y))
+            result += where + "size must be 0.05 to 16 tiles, and its place and angle finite\n";
+    }
     return result;
 }
 
@@ -153,6 +176,20 @@ Json entity_json(const SceneEntity& e) {
         if (e.light->flicker != 0) light.set("flicker", json_float(e.light->flicker));
         if (e.light->night_only) light.set("night_only", true);
         entity.set("light", light);
+    }
+    if (e.area) {
+        auto area = Json::object();
+        area.set("size", pair(e.area->size.x, e.area->size.y));
+        entity.set("area", area);
+    }
+    if (e.path) {
+        auto path = Json::object();
+        auto points = Json::array();
+        for (const auto p : e.path->points)
+            points.push(pair(p.x, p.y));
+        path.set("points", points);
+        if (e.path->loop) path.set("loop", true);
+        entity.set("path", path);
     }
     if (e.character) {
         const auto& c = *e.character;
@@ -206,6 +243,23 @@ Json scene_json(const SceneFile& scene) {
     file.set("terrain", scene.terrain);
     if (scene.atmosphere != SceneAtmosphere{}) file.set("atmosphere", atmosphere_json(scene.atmosphere));
     file.set("entities", entities);
+    if (!scene.decorations.empty()) {
+        auto decorations = Json::array();
+        for (const auto& d : scene.decorations) {
+            auto item = Json::object();
+            item.set("material", d.material);
+            auto chunk = Json::array();
+            chunk.push(d.position.chunk.x);
+            chunk.push(d.position.chunk.y);
+            item.set("chunk", chunk);
+            item.set("position", pair(d.position.local.x, d.position.local.y));
+            item.set("size", pair(d.size.x, d.size.y));
+            if (d.angle != 0) item.set("angle", json_float(d.angle));
+            if (d.standing) item.set("standing", true);
+            decorations.push(item);
+        }
+        file.set("decorations", decorations);
+    }
     return file;
 }
 
@@ -281,6 +335,21 @@ SceneEntity parse_entity(const Json& json) {
         }
         e.character = c;
     }
+    if (const auto* area = json.find("area")) {
+        const auto size = read_pair(area->at("size"));
+        e.area = SceneArea{{size[0], size[1]}};
+    }
+    if (const auto* path = json.find("path")) {
+        ScenePath p;
+        const auto& points = path->at("points").items();
+        if (points.size() > ScenePath::capacity) throw std::runtime_error("A path has at most 256 points");
+        for (const auto& point : points) {
+            const auto xy = read_pair(point);
+            p.points.push_back({xy[0], xy[1]});
+        }
+        if (const auto* loop = path->find("loop")) p.loop = loop->as_bool();
+        e.path = std::move(p);
+    }
     if (const auto* script = json.find("script")) e.script = script->as_string();
     if (const auto* prefab = json.find("prefab")) e.prefab = prefab->as_string();
     if (const auto* editor = json.find("editor")) {
@@ -305,6 +374,30 @@ SceneFile parse_scene(const Json& json) {
             throw std::runtime_error("Entity " + std::to_string(scene.entities.size() + 1) + ": " +
                                      error.what());
         }
+    if (const auto* decorations = json.find("decorations")) {
+        const auto& items = decorations->items();
+        if (items.size() > SceneFile::decoration_capacity)
+            throw std::runtime_error("More than 16384 decorations");
+        for (const auto& item : items)
+            try {
+                SceneDecoration d;
+                d.material = item.at("material").as_string();
+                const auto& chunk = item.at("chunk").items();
+                if (chunk.size() != 2) throw std::runtime_error("chunk needs two whole numbers");
+                d.position.chunk = {chunk[0].as_int(), chunk[1].as_int()};
+                const auto local = read_pair(item.at("position"));
+                d.position.local = {local[0], local[1]};
+                d.position.move({});
+                const auto size = read_pair(item.at("size"));
+                d.size = {size[0], size[1]};
+                if (const auto* angle = item.find("angle")) d.angle = static_cast<float>(angle->as_number());
+                if (const auto* standing = item.find("standing")) d.standing = standing->as_bool();
+                scene.decorations.push_back(std::move(d));
+            } catch (const std::exception& error) {
+                throw std::runtime_error("Decoration " + std::to_string(scene.decorations.size() + 1) + ": " +
+                                         error.what());
+            }
+    }
     return scene;
 }
 

@@ -32,7 +32,9 @@ void add_material(Materials& out, const MaterialAsset& material) {
              .fps = material.fps,
              .speed = material.speed,
              .tags = material.tags.empty() ? nullptr : material.tags.c_str(),
-             .blend = material.blend});
+             .blend = material.blend,
+             .object_width = material.object_width,
+             .object_height = material.object_height});
 }
 void add_action(Actions& out, const ActionAsset& action) {
     out.add(action.name.c_str(), action.bindings);
@@ -104,6 +106,12 @@ MaterialAsset read_material(const Json& entry) {
     material.fps = get_float(entry, "fps", 0);
     material.speed = get_float(entry, "speed", 1);
     if (const auto* blend = entry.find("blend")) material.blend = static_cast<int>(blend->as_int(0, 255));
+    if (const auto* size = entry.find("object_size")) {
+        const auto& items = size->items();
+        if (items.size() != 2) throw std::runtime_error("object_size needs two numbers");
+        material.object_width = static_cast<float>(items[0].as_number());
+        material.object_height = static_cast<float>(items[1].as_number());
+    }
     if (const auto* tags = entry.find("tags"))
         for (const auto& tag : tags->items())
             material.tags += (material.tags.empty() ? "" : " ") + tag.as_string();
@@ -165,6 +173,12 @@ Json write_material(const MaterialAsset& material) {
     // Written only when set, so projects that never use them keep their files unchanged.
     if (material.speed != 1) entry.set("speed", json_float(material.speed));
     if (material.blend) entry.set("blend", material.blend);
+    if (material.object_width != 1 || material.object_height != 1) {
+        auto size = Json::array();
+        size.push(json_float(material.object_width));
+        size.push(json_float(material.object_height));
+        entry.set("object_size", size);
+    }
     if (!material.tags.empty()) {
         auto tags = Json::array();
         for (std::size_t start = 0; start <= material.tags.size();) {
