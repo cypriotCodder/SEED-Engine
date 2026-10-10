@@ -223,6 +223,10 @@ void AssetPanels::materials() {
                 ImGui::SliderFloat("##speed", &m.speed, 0.1F, 4, "%.2fx", ImGuiSliderFlags_Logarithmic);
             ImGui::SetItemTooltip("How fast characters walk on this ground, times their own speed:\n"
                                   "below 1 for mud or deep snow, above 1 for roads.");
+            field("Edge blend");
+            changed |= ImGui::SliderInt("##blend", &m.blend, 0, 255);
+            ImGui::SetItemTooltip("How this ground meets its neighbours. It fades over neighbouring\n"
+                                  "ground with a lower value; 0 keeps square edges.");
             field("Tags");
             changed |= ImGui::InputTextWithHint("##tags", "e.g. slippery hurts", &m.tags);
             ImGui::SetItemTooltip(

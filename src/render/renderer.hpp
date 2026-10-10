@@ -14,6 +14,10 @@ struct Sprite {
     float u0{}, v0{}, u1{}, v1{};
     float red{1}, green{1}, blue{1}, alpha{1};
     float angle{};
+    // Ground blending (see Renderer::ground_blended): which of the tile's edges and corners this
+    // sprite fades in from, as Renderer::edge_* bits, and the tile's global position for the
+    // wavy fade. 0 draws the whole sprite.
+    float edges{}, gx{}, gy{};
 };
 
 struct Color {
@@ -27,6 +31,17 @@ struct Lighting {
     std::array<float, 3> haze{0.085F, 0.13F, 0.17F};    // Colour blended in towards the edges.
     float haze_amount{0.2F};                            // 0 disables the edge haze.
 };
+
+// The neighbouring materials that blend over a ground tile of `material`, lowest first, each with
+// the Renderer::edge_* bits it fades in from. `blend` holds MaterialDesc::blend by material ID;
+// neighbours are in Renderer::ground_blended's order. Returns how many entries of `out` it filled.
+struct GroundOverlay {
+    MaterialId material{};
+    unsigned edges{};
+};
+std::size_t ground_overlays(const std::array<std::uint8_t, Materials::capacity>& blend, std::size_t materials,
+                            MaterialId material, const std::array<MaterialId, 8>& neighbours,
+                            std::array<GroundOverlay, 8>& out);
 
 class Renderer final {
 public:
@@ -47,7 +62,17 @@ public:
     // A ground tile whose lower-left corner is at global tile coordinates (gx, gy), drawn at
     // (x, y) like sprite(). A textured material shows the part of its texture that falls on this
     // tile, so the texture continues across neighbouring tiles; other materials draw as sprite().
-    void ground(MaterialId material, float x, float y, double gx, double gy);
+    void ground(MaterialId material, float x, float y, double gx, double gy, unsigned edges = 0);
+    // Neighbours of a ground tile, in this order: east (+x), west, north (+y), south, north-east,
+    // north-west, south-east, south-west. The bits name them for ground().
+    static constexpr unsigned edge_east = 1, edge_west = 2, edge_north = 4, edge_south = 8,
+                              edge_north_east = 16, edge_north_west = 32, edge_south_east = 64,
+                              edge_south_west = 128;
+    // A ground tile as ground() draws it, then each neighbouring material that blends over it
+    // (MaterialDesc::blend higher than this tile's) fading in from the sides it borders. Pass the
+    // tile's own material for a neighbour that is not known.
+    void ground_blended(MaterialId material, const std::array<MaterialId, 8>& neighbours, float x, float y,
+                        double gx, double gy);
     void flush();
     void finish();
     // Where finish() places the frame in the window's framebuffer, in pixels from its bottom-left
@@ -82,6 +107,7 @@ private:
     std::array<float, Materials::capacity> texture_scales_{}; // Tiles per texture copy.
     std::array<std::uint8_t, Materials::capacity> frames_{};  // Animation frames; 0 or 1 for none.
     std::array<float, Materials::capacity> fps_{}, frame_inset_{};
+    std::array<std::uint8_t, Materials::capacity> blend_{}; // MaterialDesc::blend.
     double time_{};
     unsigned frame_of(MaterialId material, unsigned frame) const;
     GLuint bound_{}; // Texture currently bound for sprites.

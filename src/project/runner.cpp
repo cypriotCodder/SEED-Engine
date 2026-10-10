@@ -263,10 +263,23 @@ void render(void* context, Engine& engine, const View& view) {
                 const float px = offset.x + static_cast<float>(x) + 0.5F,
                             py = offset.y + static_cast<float>(y) + 0.5F;
                 if (std::abs(px) > half_w || std::abs(py) > half_h) continue;
-                // Ground textures continue across tiles, placed by the tile's world position.
-                engine.renderer.ground(tile.material, px, py,
-                                       global_coordinate(coord.x, static_cast<float>(x)),
-                                       global_coordinate(coord.y, static_cast<float>(y)));
+                // Ground textures continue across tiles, placed by the tile's world position, and
+                // blend into their neighbours'. Neighbours in chunks that are not active count as
+                // this tile's own ground.
+                const auto ground_at = [&](int dx, int dy) {
+                    const int nx = x + dx, ny = y + dy;
+                    if (nx >= 0 && ny >= 0 && nx < chunk_side && ny < chunk_side)
+                        return chunk.tiles[static_cast<std::size_t>(ny * chunk_side + nx)].material;
+                    const auto* n = engine.world.tile(
+                        {coord, {static_cast<float>(nx) + 0.5F, static_cast<float>(ny) + 0.5F}});
+                    return n ? n->material : tile.material;
+                };
+                engine.renderer.ground_blended(tile.material,
+                                               {ground_at(1, 0), ground_at(-1, 0), ground_at(0, 1),
+                                                ground_at(0, -1), ground_at(1, 1), ground_at(-1, 1),
+                                                ground_at(1, -1), ground_at(-1, -1)},
+                                               px, py, global_coordinate(coord.x, static_cast<float>(x)),
+                                               global_coordinate(coord.y, static_cast<float>(y)));
                 if (tile.object != no_object)
                     engine.renderer.sprite(static_cast<MaterialId>(tile.object - 1), px, py);
             }

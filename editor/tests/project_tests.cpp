@@ -132,6 +132,14 @@ void starter(const fs::path& root) {
     check(assets.problems().empty(), "Starter island assets are valid");
     starter_island(assets, "main");
     check(assets.materials.size() == 10, "Applying the starter again adds no duplicate materials");
+    const auto blend_of = [&](const char* name) {
+        return std::find_if(assets.materials.begin(), assets.materials.end(),
+                            [&](const seed::MaterialAsset& m) { return m.name == name; })
+            ->blend;
+    };
+    check(blend_of("deep_water") == 0 && blend_of("water") < blend_of("sand") &&
+              blend_of("sand") < blend_of("grass") && blend_of("grass") < blend_of("snow"),
+          "Starter ground blends upwards from the sea");
     seed::save_assets(project.root / "assets", assets);
     check(seed::load_assets(project.root / "assets") == assets, "Starter assets read back unchanged");
 

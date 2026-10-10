@@ -13,6 +13,7 @@
 #include <cmath>
 #include <imgui_stdlib.h>
 #include <optional>
+#include <set>
 
 namespace seed::editor {
 namespace {
@@ -899,12 +900,17 @@ void SceneEditor::scene_view() {
             if (!terrain_)
                 log_(true, terrain_error_.empty() ? "Pick or create a terrain for this scene before painting."
                                                   : terrain_error_);
+            else if (io.KeyAlt)
+                pick_brush(to_world(mouse));
             else {
                 drag_ = Drag::paint;
                 ++stroke_;
+                shape_from_ = to_world(mouse);
+                if (brush_.shape == Shape::fill) paint_fill(shape_from_);
             }
         }
-        if (drag_ == Drag::paint && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        if (drag_ == Drag::paint && brush_.shape == Shape::freehand &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left))
             paint_at(to_world(mouse), std::min(io.DeltaTime, 0.1F));
     } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
         const bool adding = io.KeyShift || io.KeyCtrl;
@@ -927,6 +933,8 @@ void SceneEditor::scene_view() {
         ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2))
         continue_drag(mouse);
     if (drag_ != Drag::none && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        if (drag_ == Drag::paint && (brush_.shape == Shape::rectangle || brush_.shape == Shape::line))
+            paint_shape(to_world(mouse));
         if (drag_ == Drag::box) {
             if (!box_additive_) clear_selection();
             const ImVec2 lo{std::min(grab_screen_.x, mouse.x), std::min(grab_screen_.y, mouse.y)};
@@ -1087,7 +1095,27 @@ void SceneEditor::overlays(ImDrawList* draw) {
                 }
         }
         const ImU32 outline = rgba(1, 1, 1, 0.85F);
-        if (brush_.square)
+        // A rectangle or line being dragged shows the tiles it will paint when let go.
+        if (drag_ == Drag::paint && brush_.shape == Shape::rectangle) {
+            const auto a = to_screen(shape_from_);
+            const auto corner = [&](float sx, float sy, bool high) {
+                const auto w = to_world({sx, sy});
+                const double gx = std::floor(global_coordinate(w.chunk.x, w.local.x)) + (high ? 1 : 0),
+                             gy = std::floor(global_coordinate(w.chunk.y, w.local.y)) + (high ? 1 : 0);
+                return to_screen(from_global(gx, gy));
+            };
+            const auto lo = corner(std::min(a.x, mouse.x), std::max(a.y, mouse.y), false);
+            const auto hi = corner(std::max(a.x, mouse.x), std::min(a.y, mouse.y), true);
+            draw->AddRectFilled({lo.x, hi.y}, {hi.x, lo.y}, rgba(1, 1, 1, 0.12F));
+            draw->AddRect({lo.x, hi.y}, {hi.x, lo.y}, outline, 0, 0, 1.5F);
+        } else if (drag_ == Drag::paint && brush_.shape == Shape::line)
+            draw->AddLine(to_screen(shape_from_), mouse, rgba(1, 1, 1, 0.35F), std::max(1.5F, r * 2 * zoom_));
+        if (brush_.shape == Shape::fill)
+            draw->AddRect({mouse.x - zoom_ / 2, mouse.y - zoom_ / 2},
+                          {mouse.x + zoom_ / 2, mouse.y + zoom_ / 2}, outline, 0, 0, 1.5F);
+        else if (brush_.shape == Shape::rectangle && drag_ == Drag::paint) {
+            // The rectangle above is the outline.
+        } else if (brush_.square)
             draw->AddRect({mouse.x - r * zoom_, mouse.y - r * zoom_},
                           {mouse.x + r * zoom_, mouse.y + r * zoom_}, outline, 0, 0, 1.5F);
         else
@@ -1271,6 +1299,17 @@ void SceneEditor::draw_terrain(float half_w, float half_h) {
         painted_ids.push_back(found == rendered_.end() ? -1 : static_cast<int>(found - rendered_.begin()));
     }
     const auto ox = cache_.origin.x * chunk_side, oy = cache_.origin.y * chunk_side;
+    // The ground shown at a cached cell, painted or generated; `fallback` outside the cache.
+    const auto ground_at = [&](int x, int y, MaterialId fallback) {
+        if (x < cache_.x0 || y < cache_.y0 || x >= cache_.x0 + cache_.columns || y >= cache_.y0 + cache_.rows)
+            return fallback;
+        auto ground =
+            cache_.cells[static_cast<std::size_t>((y - cache_.y0) * cache_.columns + (x - cache_.x0))].ground;
+        if (const auto* p = paint.empty() ? nullptr : paint.find(ox + x, oy + y))
+            if ((p->mask & paint_ground) && painted_ids[p->ground] >= 0)
+                ground = static_cast<MaterialId>(painted_ids[p->ground]);
+        return ground;
+    };
     for (int y = vy0; y <= vy1; ++y)
         for (int x = vx0; x <= vx1; ++x) {
             auto cell =
@@ -1290,11 +1329,16 @@ void SceneEditor::draw_terrain(float half_w, float half_h) {
             }
             const float cx = origin.x + (static_cast<float>(x) + 0.5F) * size;
             const float cy = origin.y + (static_cast<float>(y) + 0.5F) * size;
-            if (block == 1)
-                renderer_->ground(cell.ground, cx, cy,
-                                  global_coordinate(cache_.origin.x, static_cast<float>(x)),
-                                  global_coordinate(cache_.origin.y, static_cast<float>(y)));
-            else
+            if (block == 1) {
+                const auto g = cell.ground;
+                renderer_->ground_blended(g,
+                                          {ground_at(x + 1, y, g), ground_at(x - 1, y, g),
+                                           ground_at(x, y + 1, g), ground_at(x, y - 1, g),
+                                           ground_at(x + 1, y + 1, g), ground_at(x - 1, y + 1, g),
+                                           ground_at(x + 1, y - 1, g), ground_at(x - 1, y - 1, g)},
+                                          cx, cy, global_coordinate(cache_.origin.x, static_cast<float>(x)),
+                                          global_coordinate(cache_.origin.y, static_cast<float>(y)));
+            } else
                 renderer_->sprite(cell.ground, cx, cy, size, size);
             // Objects show only up close: zoomed out, a block's one sample would blow a single tree
             // up to the size of the whole block.
@@ -1322,8 +1366,6 @@ void SceneEditor::paint_at(WorldPosition centre, float dt) {
     const double cx = global_coordinate(centre.chunk.x, centre.local.x),
                  cy = global_coordinate(centre.chunk.y, centre.local.y);
     const double r = std::max(0.5, brush_.size / 2.0);
-    auto& paint = edited_.paint;
-    const auto seed = compiled_terrain_.default_seed;
     const auto x0 = static_cast<std::int64_t>(std::floor(cx - r)),
                x1 = static_cast<std::int64_t>(std::floor(cx + r));
     const auto y0 = static_cast<std::int64_t>(std::floor(cy - r)),
@@ -1334,57 +1376,185 @@ void SceneEditor::paint_at(WorldPosition centre, float dt) {
             const double d = brush_.square ? std::max(std::abs(dx), std::abs(dy)) : std::hypot(dx, dy);
             // A one-tile brush always paints the tile under the pointer.
             if (d > r && !(brush_.size <= 1 && std::abs(dx) <= 0.5 && std::abs(dy) <= 0.5)) continue;
-            // Partial strength paints a fixed share of tiles per stroke, so holding still does not
-            // fill the rest in.
-            const bool chosen =
-                brush_.strength >= 1 || static_cast<float>(world_hash(stroke_, static_cast<std::uint64_t>(x),
-                                                                      static_cast<std::uint64_t>(y)) %
-                                                           1000) < brush_.strength * 1000;
-            const auto* existing = paint.find(x, y);
-            PaintedTile tile = existing ? *existing : PaintedTile{};
-            const auto generated = [&] {
-                return terrain_->sample(seed, from_global(double(x) + 0.5, double(y) + 0.5));
-            };
-            switch (brush_.kind) {
-            case Brush::ground:
-                if (!chosen || brush_.ground.empty()) continue;
-                tile.mask |= paint_ground;
-                tile.ground = paint.material(brush_.ground);
-                break;
-            case Brush::object:
-                if (!chosen) continue;
-                tile.mask |= paint_object | paint_solid;
-                tile.object =
-                    brush_.object.empty() ? 0 : static_cast<std::uint8_t>(paint.material(brush_.object) + 1);
-                tile.solid = !brush_.object.empty() && brush_.object_solid;
-                break;
-            case Brush::raise:
-            case Brush::lower:
-            case Brush::flatten: {
-                // Height brushes ease off towards a round brush's edge.
-                const float falloff =
-                    brush_.square ? 1.0F : static_cast<float>(std::clamp(1 - (d / r) * (d / r), 0.15, 1.0));
-                const float from = (tile.mask & paint_height) ? tile.elevation : generated().elevation;
-                const float amount = brush_.strength * dt * 2 * falloff;
-                float to = brush_.kind == Brush::raise ? from + amount
-                           : brush_.kind == Brush::lower
-                               ? from - amount
-                               : from + std::clamp(brush_.height - from, -amount * 4, amount * 4);
-                tile.mask |= paint_height;
-                tile.elevation = std::clamp(to, -4.0F, 4.0F);
-                break;
-            }
-            case Brush::solid:
-                tile.mask |= paint_solid;
-                tile.solid = brush_.block;
-                break;
-            case Brush::erase:
-                if (!chosen) continue;
-                tile = {};
-                break;
-            }
-            if (!(existing && *existing == tile)) paint.set(x, y, tile);
+            // Height brushes ease off towards a round brush's edge.
+            const float falloff =
+                brush_.square ? 1.0F : static_cast<float>(std::clamp(1 - (d / r) * (d / r), 0.15, 1.0));
+            paint_tile(x, y, falloff, dt);
         }
+}
+
+void SceneEditor::paint_tile(std::int64_t x, std::int64_t y, float falloff, float dt) {
+    auto& paint = edited_.paint;
+    const auto seed = compiled_terrain_.default_seed;
+    const auto hash = [&](std::uint64_t salt) {
+        return world_hash(stroke_ * 2 + salt, static_cast<std::uint64_t>(x), static_cast<std::uint64_t>(y));
+    };
+    // Partial strength paints a fixed share of tiles per stroke, so holding still does not fill the
+    // rest in.
+    const bool chosen = brush_.strength >= 1 || static_cast<float>(hash(0) % 1000) < brush_.strength * 1000;
+    const auto* existing = paint.find(x, y);
+    PaintedTile tile = existing ? *existing : PaintedTile{};
+    switch (brush_.kind) {
+    case Brush::ground:
+        if (!chosen || brush_.ground.empty()) return;
+        tile.mask |= paint_ground;
+        tile.ground = paint.material(brush_.ground);
+        break;
+    case Brush::object: {
+        if (!chosen) return;
+        // A mixed brush picks one of its objects for each tile.
+        const auto pick = brush_.mix.empty() ? 0 : hash(1) % (brush_.mix.size() + 1);
+        const auto& object = pick == 0 ? brush_.object : brush_.mix[pick - 1];
+        tile.mask |= paint_object | paint_solid;
+        tile.object = object.empty() ? 0 : static_cast<std::uint8_t>(paint.material(object) + 1);
+        tile.solid = !object.empty() && brush_.object_solid;
+        break;
+    }
+    case Brush::raise:
+    case Brush::lower:
+    case Brush::flatten: {
+        const float from =
+            (tile.mask & paint_height)
+                ? tile.elevation
+                : terrain_->sample(seed, from_global(double(x) + 0.5, double(y) + 0.5)).elevation;
+        const float amount = brush_.strength * dt * 2 * falloff;
+        float to = brush_.kind == Brush::raise ? from + amount
+                   : brush_.kind == Brush::lower
+                       ? from - amount
+                       : from + std::clamp(brush_.height - from, -amount * 4, amount * 4);
+        tile.mask |= paint_height;
+        tile.elevation = std::clamp(to, -4.0F, 4.0F);
+        break;
+    }
+    case Brush::solid:
+        tile.mask |= paint_solid;
+        tile.solid = brush_.block;
+        break;
+    case Brush::erase:
+        if (!chosen) return;
+        tile = {};
+        break;
+    }
+    if (!(existing && *existing == tile)) paint.set(x, y, tile);
+}
+
+namespace {
+// Height brushes change a shape's tiles as much as holding the brush still this long would; flatten
+// levels them fully at full strength.
+constexpr float shape_seconds = 0.25F;
+// Fill stops after this many tiles, so a click on open sea does not paint the whole view.
+constexpr std::size_t fill_capacity = 1 << 16;
+} // namespace
+
+void SceneEditor::paint_shape(WorldPosition to) {
+    if (!terrain_) return;
+    const double ax = global_coordinate(shape_from_.chunk.x, shape_from_.local.x),
+                 ay = global_coordinate(shape_from_.chunk.y, shape_from_.local.y);
+    const double bx = global_coordinate(to.chunk.x, to.local.x),
+                 by = global_coordinate(to.chunk.y, to.local.y);
+    if (brush_.shape == Shape::rectangle) {
+        // Every tile the rectangle touches, corners included.
+        const auto x0 = static_cast<std::int64_t>(std::floor(std::min(ax, bx))),
+                   x1 = static_cast<std::int64_t>(std::floor(std::max(ax, bx)));
+        const auto y0 = static_cast<std::int64_t>(std::floor(std::min(ay, by))),
+                   y1 = static_cast<std::int64_t>(std::floor(std::max(ay, by)));
+        if ((x1 - x0 + 1) * (y1 - y0 + 1) > static_cast<std::int64_t>(fill_capacity)) {
+            log_(true, "That rectangle is too large to paint at once; paint it in parts.");
+            return;
+        }
+        for (auto y = y0; y <= y1; ++y)
+            for (auto x = x0; x <= x1; ++x)
+                paint_tile(x, y, 1, shape_seconds);
+        return;
+    }
+    // A line: the brush stamped along it every half tile, each tile painted once.
+    const double length = std::hypot(bx - ax, by - ay);
+    if (length > 4096) {
+        log_(true, "That line is too long to paint at once; paint it in parts.");
+        return;
+    }
+    const double r = std::max(0.5, brush_.size / 2.0);
+    std::set<std::pair<std::int64_t, std::int64_t>> done;
+    const auto steps = static_cast<int>(std::ceil(length * 2));
+    for (int i = 0; i <= steps; ++i) {
+        const double t = steps ? static_cast<double>(i) / steps : 0;
+        const double cx = ax + (bx - ax) * t, cy = ay + (by - ay) * t;
+        for (auto y = static_cast<std::int64_t>(std::floor(cy - r));
+             y <= static_cast<std::int64_t>(std::floor(cy + r)); ++y)
+            for (auto x = static_cast<std::int64_t>(std::floor(cx - r));
+                 x <= static_cast<std::int64_t>(std::floor(cx + r)); ++x) {
+                const double dx = static_cast<double>(x) + 0.5 - cx, dy = static_cast<double>(y) + 0.5 - cy;
+                const double d = brush_.square ? std::max(std::abs(dx), std::abs(dy)) : std::hypot(dx, dy);
+                if (d > r && !(brush_.size <= 1 && std::abs(dx) <= 0.5 && std::abs(dy) <= 0.5)) continue;
+                if (done.insert({x, y}).second) paint_tile(x, y, 1, shape_seconds);
+            }
+    }
+}
+
+void SceneEditor::paint_fill(WorldPosition at) {
+    if (!terrain_) return;
+    const auto sx = static_cast<std::int64_t>(std::floor(global_coordinate(at.chunk.x, at.local.x))),
+               sy = static_cast<std::int64_t>(std::floor(global_coordinate(at.chunk.y, at.local.y)));
+    std::string ground, object;
+    if (!shown_materials(sx, sy, ground, object)) {
+        log_(true, "Zoom in until single tiles show to fill.");
+        return;
+    }
+    // The connected tiles in view showing the same ground and object, found before any changes.
+    std::vector<std::pair<std::int64_t, std::int64_t>> region, open{{sx, sy}};
+    std::set<std::pair<std::int64_t, std::int64_t>> seen{{sx, sy}};
+    std::string g, o;
+    while (!open.empty()) {
+        const auto [x, y] = open.back();
+        open.pop_back();
+        region.push_back({x, y});
+        if (region.size() == fill_capacity) {
+            log_(true, "Fill stopped after 65,536 tiles; the area is larger than that.");
+            break;
+        }
+        for (const auto& [nx, ny] :
+             {std::pair{x + 1, y}, std::pair{x - 1, y}, std::pair{x, y + 1}, std::pair{x, y - 1}})
+            if (!seen.count({nx, ny}) && shown_materials(nx, ny, g, o) && g == ground && o == object) {
+                seen.insert({nx, ny});
+                open.push_back({nx, ny});
+            }
+    }
+    for (const auto& [x, y] : region)
+        paint_tile(x, y, 1, shape_seconds);
+}
+
+void SceneEditor::pick_brush(WorldPosition at) {
+    const auto x = static_cast<std::int64_t>(std::floor(global_coordinate(at.chunk.x, at.local.x))),
+               y = static_cast<std::int64_t>(std::floor(global_coordinate(at.chunk.y, at.local.y)));
+    std::string ground, object;
+    if (!shown_materials(x, y, ground, object)) return;
+    if (brush_.kind == Brush::object) {
+        brush_.object = object;
+        brush_.mix.clear();
+    } else {
+        brush_.kind = Brush::ground;
+        brush_.ground = ground;
+    }
+}
+
+bool SceneEditor::shown_materials(std::int64_t x, std::int64_t y, std::string& ground,
+                                  std::string& object) const {
+    if (cache_.block != 1 || cache_.cells.empty()) return false;
+    const auto cx = x - cache_.origin.x * chunk_side - cache_.x0,
+               cy = y - cache_.origin.y * chunk_side - cache_.y0;
+    if (cx < 0 || cy < 0 || cx >= cache_.columns || cy >= cache_.rows) return false;
+    const auto& cell = cache_.cells[static_cast<std::size_t>(cy * cache_.columns + cx)];
+    const auto name = [&](MaterialId id) {
+        return id < rendered_.size() ? rendered_[id].name : std::string();
+    };
+    ground = name(cell.ground);
+    object = cell.object == no_object ? std::string() : name(static_cast<MaterialId>(cell.object - 1));
+    if (const auto* p = edited_.paint.find(x, y)) {
+        const auto& names = edited_.paint.materials;
+        if (p->mask & paint_ground) ground = names[p->ground];
+        if (p->mask & paint_object) object = p->object ? names[p->object - 1u] : std::string();
+    }
+    return true;
 }
 
 void SceneEditor::brush_section(const Assets& assets) {
@@ -1414,6 +1584,21 @@ void SceneEditor::brush_section(const Assets& assets) {
         ImGui::SetItemTooltip("%s", tips[i]);
         mark((std::string("brush ") + kinds[i]).c_str());
     }
+    static const char* shapes[] = {"Freehand", "Rectangle", "Line", "Fill"};
+    static const char* shape_tips[] = {
+        "Paint where the pointer goes while the button is held.",
+        "Drag out a rectangle; its tiles are painted when you let go.",
+        "Drag a line; the brush paints along it when you let go.",
+        "Click to paint every connected tile in view with the same ground and object."};
+    for (int i = 0; i < 4; ++i) {
+        const bool on = brush_.shape == static_cast<Shape>(i);
+        if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (i > 0) toolbar_next(button_width(shapes[i]));
+        if (ImGui::Button(shapes[i])) brush_.shape = static_cast<Shape>(i);
+        if (on) ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("%s", shape_tips[i]);
+        mark((std::string("shape ") + shapes[i]).c_str());
+    }
     ImGui::TextUnformatted("Size (tiles)");
     ImGui::SetNextItemWidth(-1);
     ImGui::SliderFloat("##brush size", &brush_.size, 1, 64, "%.0f", ImGuiSliderFlags_Logarithmic);
@@ -1431,8 +1616,8 @@ void SceneEditor::brush_section(const Assets& assets) {
                                   ? "How fast the height changes while the button is held."
                                   : "The share of tiles under the brush that each stroke paints.");
     }
-    const auto material_combo = [&](const char* id, std::string& value, const char* none) {
-        ImGui::SetNextItemWidth(-1);
+    const auto material_combo = [&](const char* id, std::string& value, const char* none, float width = -1) {
+        ImGui::SetNextItemWidth(width);
         if (ImGui::BeginCombo(id, value.empty() ? none : value.c_str())) {
             if (none && ImGui::Selectable(none, value.empty())) value.clear();
             for (const auto& m : assets.materials)
@@ -1450,7 +1635,26 @@ void SceneEditor::brush_section(const Assets& assets) {
     case Brush::object:
         ImGui::TextUnformatted("Object");
         material_combo("##brush object", brush_.object, "None (remove)");
-        if (!brush_.object.empty()) ImGui::Checkbox("Blocks walking", &brush_.object_solid);
+        // Further objects mixed in, each tile taking one of them at random.
+        for (std::size_t i = 0; i < brush_.mix.size();) {
+            ImGui::PushID(static_cast<int>(i));
+            material_combo("##mix", brush_.mix[i], "None (remove)",
+                           -button_width("x") - ImGui::GetStyle().ItemSpacing.x);
+            ImGui::SameLine();
+            const bool removed = ImGui::Button("x");
+            ImGui::PopID();
+            if (removed)
+                brush_.mix.erase(brush_.mix.begin() + static_cast<std::ptrdiff_t>(i));
+            else
+                ++i;
+        }
+        if (brush_.mix.size() < 7 && ImGui::Button("Mix In Another")) brush_.mix.push_back(brush_.object);
+        ImGui::SetItemTooltip(
+            "Each painted tile takes one of the objects at random, for varied woods and rocks.\n"
+            "Lower the strength to scatter them.");
+        mark("brush mix");
+        if (!brush_.object.empty() || !brush_.mix.empty())
+            ImGui::Checkbox("Blocks walking", &brush_.object_solid);
         break;
     case Brush::flatten:
         ImGui::TextUnformatted("Height");
@@ -1474,6 +1678,7 @@ void SceneEditor::brush_section(const Assets& assets) {
         break;
     }
     ImGui::TextDisabled("%zu painted tiles. Undo takes back a whole stroke.", edited_.paint.tiles());
+    ImGui::TextDisabled("Alt+click picks the ground (or object) under the pointer.");
     if (brush_.kind == Brush::raise || brush_.kind == Brush::lower || brush_.kind == Brush::flatten ||
         brush_.kind == Brush::solid)
         ImGui::TextDisabled("Near the brush, blue shows water and red shows blocked tiles.");

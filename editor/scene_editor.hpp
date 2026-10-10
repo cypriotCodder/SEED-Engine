@@ -110,22 +110,39 @@ private:
     // What a left-button drag in the Scene view is doing.
     enum class Drag { none, body, free, axis_x, axis_y, rotate, scale_x, scale_y, scale_both, box, paint };
 
-    // Terrain painting. A stroke paints the tiles under the brush each frame the button is held.
+    // Terrain painting. A freehand stroke paints the tiles under the brush each frame the button is
+    // held; a rectangle or line paints its tiles when the button is let go; fill paints the
+    // connected area of the clicked tile's ground and object.
     enum class Brush { ground, object, raise, lower, flatten, solid, erase };
+    enum class Shape { freehand, rectangle, line, fill };
     struct BrushSettings {
         Brush kind{Brush::ground};
+        Shape shape{Shape::freehand};
         float size{3};      // Tiles across.
         bool square{};      // Otherwise round.
         float strength{1};  // Ground and objects: the share of tiles painted; height: how fast.
         std::string ground; // Material painted by the ground brush.
         std::string object; // Object placed by the object brush; empty removes objects.
+        // Further objects the object brush mixes in: each tile takes one of them or `object`.
+        std::vector<std::string> mix;
         bool object_solid{true};
         float height{0.15F}; // Height the flatten brush levels to; below 0 is water.
         bool block{true};    // The solid brush blocks walking, or clears blocking.
     } brush_;
     unsigned stroke_{}; // Counts strokes, so partial-strength strokes pick different tiles.
     void brush_section(const Assets& assets);
+    WorldPosition shape_from_{}; // Where a rectangle or line stroke began.
     void paint_at(WorldPosition centre, float dt);
+    // Applies the brush to one tile; `falloff` (0 to 1) eases height brushes.
+    void paint_tile(std::int64_t x, std::int64_t y, float falloff, float dt);
+    // Rectangle and line strokes, from shape_from_ to `to`; fill from the tile at `at`.
+    void paint_shape(WorldPosition to);
+    void paint_fill(WorldPosition at);
+    // Alt+click: the brush takes the ground or object of the tile under the pointer.
+    void pick_brush(WorldPosition at);
+    // The ground and object names shown at global tile (x, y), paint included; false outside the
+    // cached view or when zoomed out past single tiles.
+    bool shown_materials(std::int64_t x, std::int64_t y, std::string& ground, std::string& object) const;
     // Ground under global tile (x, y) as the view shows it, paint included; false when the tile is
     // outside the cached view.
     struct ViewTile {

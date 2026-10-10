@@ -40,7 +40,7 @@ TerrainRule rule(const char* name, const char* material, std::vector<TerrainCond
 } // namespace
 
 void starter_island(Assets& assets, const std::string& terrain) {
-    const MaterialAsset wanted[] = {
+    MaterialAsset wanted[] = {
         material("deep_water", 22, 58, 98, Pattern::water, 10),
         material("water", 34, 92, 132, Pattern::water, 12),
         material("sand", 214, 196, 140, Pattern::speckle, 14),
@@ -52,6 +52,13 @@ void starter_island(Assets& assets, const std::string& terrain) {
         material("snow", 236, 240, 246, Pattern::speckle, 8),
         material("tree", 34, 78, 40, Pattern::round, 30),
     };
+    // Ground blends upwards from the sea: each band fades over the one below it.
+    const std::pair<const char*, int> blends[] = {{"water", 10}, {"sand", 20},      {"mud", 25},
+                                                  {"grass", 30}, {"dry_grass", 30}, {"forest_floor", 40},
+                                                  {"stone", 50}, {"snow", 60}};
+    for (auto& m : wanted)
+        for (const auto& [name, blend] : blends)
+            if (m.name == name) m.blend = blend;
     for (const auto& m : wanted)
         if (std::none_of(assets.materials.begin(), assets.materials.end(),
                          [&](const MaterialAsset& e) { return e.name == m.name; }) &&

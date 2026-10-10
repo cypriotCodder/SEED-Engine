@@ -27,6 +27,7 @@ struct MaterialAsset {
     float fps{};            // Animation frames per second; 0 holds the first frame.
     float speed{1};         // Walking speed on this ground, times the character's own (0.1 to 4).
     std::string tags;       // Words for scripts, separated by spaces, such as "slippery hurts".
+    int blend{};            // 0 to 255: blends over neighbouring ground with a lower value.
     bool operator==(const MaterialAsset&) const = default;
 };
 struct ActionAsset {

@@ -216,6 +216,39 @@ UiTest::UiTest(SceneEditor& scene, Log log) : scene_(scene), log_(std::move(log)
         const auto* tile = scene_.scene().paint.find(3, 3);
         check(tile && tile->mask == paint_height, "the raise brush paints height alone");
     });
+    // Shapes: a rectangle paints the tiles it covers when let go, a line paints along itself, and
+    // fill paints the connected tiles under the click; each is one undo step.
+    click([this] { return scene_.control("brush Ground"); });
+    click([this] { return scene_.control("shape Rectangle"); });
+    drag([this] { return world_point(6.5, 5.5); }, [this] { return world_point(9.5, 7.5); });
+    add(3, [this] {
+        const auto& paint = scene_.scene().paint;
+        const auto* corner = paint.find(9, 7);
+        check(paint.find(6, 5) && corner && (corner->mask & paint_ground) && paint.find(8, 6) &&
+                  !paint.find(10, 6) && !paint.find(7, 8) && !paint.find(5, 6),
+              "a rectangle paints exactly the tiles it covers");
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this] { check(!scene_.scene().paint.find(8, 6), "Cmd+Z takes back the rectangle"); });
+    click([this] { return scene_.control("shape Line"); });
+    drag([this] { return world_point(5.5, 5.5); }, [this] { return world_point(9.5, 5.5); });
+    add(3, [this] {
+        const auto& paint = scene_.scene().paint;
+        const auto* tile = paint.find(7, 6);
+        check(tile && (tile->mask & paint_ground) && paint.find(5, 5) && paint.find(10, 5) &&
+                  !paint.find(11, 5) && !paint.find(7, 7),
+              "a line paints the brush's width along it");
+    });
+    key(ImGuiKey_Z, true);
+    click([this] { return scene_.control("shape Fill"); });
+    click([this] { return world_point(6.5, 6.5); });
+    add(3, [this] {
+        const auto& paint = scene_.scene().paint;
+        check(paint.find(6, 6) && paint.find(7, 6) && paint.tiles() > 50, "fill paints the connected area");
+    });
+    key(ImGuiKey_Z, true);
+    add(3, [this] { check(!scene_.scene().paint.find(6, 6), "Cmd+Z takes back the fill"); });
+    click([this] { return scene_.control("shape Freehand"); });
 
     // A shared material made unique from the Inspector changes only the selected entity.
     click([this] { return scene_.control("done painting"); });

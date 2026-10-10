@@ -34,6 +34,7 @@ seed::Assets sample() {
     assets.materials[1].variation = 12;
     assets.materials[1].speed = 0.5F;
     assets.materials[1].tags = "wet slow";
+    assets.materials[1].blend = 7;
     assets.materials[2].pattern = seed::Pattern::planks;
     assets.materials[2].texture = "crate.bc3";
     assets.materials[2].frames = 4;
@@ -81,6 +82,7 @@ void registration() {
     check(std::string_view(materials[2].texture) == "crate.bc3" && !materials[0].texture,
           "Texture names kept");
     check(materials[1].speed == 0.5F && materials[0].speed == 1, "Ground speeds kept");
+    check(materials[1].blend == 7 && materials[0].blend == 0, "Edge blends kept");
     check(materials[2].frames == 4 && materials[2].fps == 12 && materials[0].frames == 1, "Animation kept");
     check(materials.tagged(1, "wet") && materials.tagged(1, "slow") && !materials.tagged(1, "we") &&
               !materials.tagged(0, "wet"),
@@ -111,7 +113,9 @@ void problems() {
     assets.materials.push_back(material("goo", {0, 255, 0}));
     assets.materials.back().tags = "sticky!";
     assets.materials.push_back(material("reel", {9, 9, 9}));
-    assets.materials.back().frames = 65;    // Above 64.
+    assets.materials.back().frames = 65; // Above 64.
+    assets.materials.push_back(material("mist", {9, 9, 9}));
+    assets.materials.back().blend = 256;    // Above 255.
     assets.actions.push_back({"quit", {}}); // Clashes with an engine action.
     seed::SoundAsset loud;
     loud.name = "loud";
@@ -122,11 +126,12 @@ void problems() {
     dust.material = "sand"; // Unknown material.
     assets.particles.push_back(dust);
     const auto report = assets.problems();
-    for (const char* expected : {"Material \"grass\"", "Material \"hot\"", "Material \"ice\"",
-                                 "Material \"lava\"", "Material \"goo\"", "Material \"reel\"",
-                                 "Action \"quit\"", "Sound \"loud\"", "Particle style \"dust\""})
+    for (const char* expected :
+         {"Material \"grass\"", "Material \"hot\"", "Material \"ice\"", "Material \"lava\"",
+          "Material \"goo\"", "Material \"reel\"", "Material \"mist\"", "Action \"quit\"", "Sound \"loud\"",
+          "Particle style \"dust\""})
         check(report.find(expected) != std::string::npos, expected);
-    check(std::count(report.begin(), report.end(), '\n') == 9, "One line per problem");
+    check(std::count(report.begin(), report.end(), '\n') == 10, "One line per problem");
 }
 
 void bad_files(const fs::path& root) {
@@ -137,6 +142,9 @@ void bad_files(const fs::path& root) {
     };
     write("materials.json", R"({"format": 1, "materials": [{"name": "a", "color": [1, 2]}]})");
     rejects([&] { seed::load_assets(root); }, "Short colour accepted");
+    write("materials.json",
+          R"({"format": 1, "materials": [{"name": "a", "color": [1, 2, 3], "blend": -1}]})");
+    rejects([&] { seed::load_assets(root); }, "Negative blend accepted");
     write("materials.json",
           R"({"format": 1, "materials": [{"name": "a", "color": [1, 2, 3], "pattern": "zigzag"}]})");
     try {

@@ -19,7 +19,8 @@
         132
       ],
       "pattern": "water",
-      "variation": 12
+      "variation": 12,
+      "blend": 10
     },
     {
       "name": "sand",
@@ -31,6 +32,7 @@
       "pattern": "speckle",
       "variation": 12,
       "speed": 0.8,
+      "blend": 20,
       "tags": [
         "beach"
       ]
@@ -43,7 +45,8 @@
         70
       ],
       "pattern": "speckle",
-      "variation": 18
+      "variation": 18,
+      "blend": 30
     },
     {
       "name": "cave_floor",

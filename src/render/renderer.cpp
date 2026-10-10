@@ -13,11 +13,14 @@ layout(location=0) in vec4 rectangle;
 layout(location=1) in vec4 region;
 layout(location=2) in vec4 tint;
 layout(location=3) in float angle;
+layout(location=4) in vec3 blend;
 uniform vec2 camera;
 uniform vec2 scale;
 out vec2 uv;
 out vec4 color;
 out vec2 rotation;
+out vec2 cell;
+flat out vec3 edges;
 void main() {
     const vec2 corner[6] = vec2[6](vec2(0,0),vec2(1,0),vec2(1,1),vec2(0,0),vec2(1,1),vec2(0,1));
     vec2 q = corner[gl_VertexID];
@@ -28,18 +31,45 @@ void main() {
     uv = mix(region.xy,region.zw,q);
     color = tint;
     rotation = vec2(c,s);
+    cell = q;
+    edges = blend;
 })GLSL";
 constexpr const char* fragment = R"GLSL(#version 410 core
 in vec2 uv;
 in vec4 color;
 in vec2 rotation;
+in vec2 cell;
+flat in vec3 edges;
 uniform sampler2D atlas;
 uniform sampler2D normalAtlas;
 uniform int normalEnabled;
 layout(location=0) out vec4 pixel;
 layout(location=1) out vec4 surface;
+// A wavy line along a tile edge, from the position along it in global tiles. Whole periods per 64
+// tiles, so it stays continuous where the positions wrap.
+float wave(float s) {
+    const float k = 6.2831853 / 64.0;
+    return 0.42 + 0.1 * sin(s * k * 37.0) + 0.05 * sin(s * k * 101.0 + 1.3);
+}
+float fade(float d, float s) {
+    return 1.0 - smoothstep(-0.07, 0.07, d - wave(s));
+}
 void main() {
     pixel = texture(atlas,uv) * color;
+    int e = int(edges.x + 0.5);
+    if (e != 0) {
+        vec2 g = edges.yz + cell;
+        float cover = 0.0;
+        if ((e & 1) != 0) cover = max(cover, fade(1.0 - cell.x, g.y));
+        if ((e & 2) != 0) cover = max(cover, fade(cell.x, g.y));
+        if ((e & 4) != 0) cover = max(cover, fade(1.0 - cell.y, g.x));
+        if ((e & 8) != 0) cover = max(cover, fade(cell.y, g.x));
+        if ((e & 16) != 0) cover = max(cover, fade(length(vec2(1.0) - cell), g.x + g.y));
+        if ((e & 32) != 0) cover = max(cover, fade(length(vec2(cell.x, 1.0 - cell.y)), g.x - g.y));
+        if ((e & 64) != 0) cover = max(cover, fade(length(vec2(1.0 - cell.x, cell.y)), g.x - g.y));
+        if ((e & 128) != 0) cover = max(cover, fade(length(cell), g.x + g.y));
+        pixel.a *= cover;
+    }
     if (pixel.a < 0.01) discard;
     vec3 n = normalEnabled != 0 ? texture(normalAtlas,uv).xyz*2.0-1.0 : vec3(0,0,1);
     n.xy = mat2(rotation.x,rotation.y,-rotation.y,rotation.x)*n.xy;
@@ -164,6 +194,8 @@ Renderer::Renderer(const Pack& pack, const Materials& registry)
       sprites_(std::make_unique<Sprite[]>(capacity)) {
     if (!material_count_) throw std::invalid_argument("Register at least one material before rendering");
     const int materials = static_cast<int>(material_count_);
+    for (std::size_t m = 0; m < material_count_; ++m)
+        blend_[m] = static_cast<std::uint8_t>(registry[static_cast<MaterialId>(m)].blend);
     const int atlas_width = pitch * materials;
     atlas_width_ = static_cast<float>(atlas_width);
     GLuint vs{}, fs{};
@@ -192,11 +224,13 @@ Renderer::Renderer(const Pack& pack, const Materials& registry)
         gl_.GenBuffers(1, &buffer_);
         gl_.BindBuffer(GL_ARRAY_BUFFER, buffer_);
         gl_.BufferData(GL_ARRAY_BUFFER, capacity * sizeof(Sprite), nullptr, GL_STREAM_DRAW);
-        constexpr std::array<std::size_t, 4> offsets{offsetof(Sprite, x), offsetof(Sprite, u0),
-                                                     offsetof(Sprite, red), offsetof(Sprite, angle)};
+        constexpr std::array<std::size_t, 5> offsets{offsetof(Sprite, x), offsetof(Sprite, u0),
+                                                     offsetof(Sprite, red), offsetof(Sprite, angle),
+                                                     offsetof(Sprite, edges)};
+        constexpr std::array<GLint, 5> sizes{4, 4, 4, 1, 3};
         for (GLuint i = 0; i < offsets.size(); ++i) {
             gl_.EnableVertexAttribArray(i);
-            gl_.VertexAttribPointer(i, i == 3 ? 1 : 4, GL_FLOAT, GL_FALSE, sizeof(Sprite),
+            gl_.VertexAttribPointer(i, sizes[i], GL_FLOAT, GL_FALSE, sizeof(Sprite),
                                     reinterpret_cast<const void*>(offsets[i]));
             gl_.VertexAttribDivisor(i, 1);
         }
@@ -462,8 +496,15 @@ void Renderer::sprite(MaterialId material, float x, float y, float width, float 
         sprite.v1 = 1;
     }
 }
-void Renderer::ground(MaterialId material, float x, float y, double gx, double gy) {
+void Renderer::ground(MaterialId material, float x, float y, double gx, double gy, unsigned edges) {
     sprite(material, x, y, 1, 1, 0, 1, automatic);
+    if (edges) {
+        // The wave pattern repeats every 64 tiles; small remainders keep float precision.
+        auto& s = sprites_[size_ - 1];
+        s.edges = static_cast<float>(edges);
+        s.gx = static_cast<float>(gx - 64 * std::floor(gx / 64));
+        s.gy = static_cast<float>(gy - 64 * std::floor(gy / 64));
+    }
     if (material >= material_count_ || !textures_[material] || texture_scales_[material] <= 1) return;
     // The part of the texture over this tile: its world position modulo the texture's span. Packed
     // images store their bottom row first, so v runs upwards like world y.
@@ -476,6 +517,43 @@ void Renderer::ground(MaterialId material, float x, float y, double gx, double g
     s.u1 = static_cast<float>((f + u + 1 / scale) / frames);
     s.v0 = static_cast<float>(v);
     s.v1 = static_cast<float>(v + 1 / scale);
+}
+std::size_t ground_overlays(const std::array<std::uint8_t, Materials::capacity>& blend, std::size_t materials,
+                            MaterialId material, const std::array<MaterialId, 8>& neighbours,
+                            std::array<GroundOverlay, 8>& out) {
+    if (material >= materials) return 0;
+    // Each blending neighbour once, lowest first, so the highest ends on top.
+    std::size_t count = 0;
+    for (const auto n : neighbours)
+        if (n < materials && blend[n] > blend[material] &&
+            std::none_of(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(count),
+                         [&](const GroundOverlay& o) { return o.material == n; }))
+            out[count++] = {n, 0};
+    std::sort(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(count),
+              [&](const GroundOverlay& a, const GroundOverlay& b) {
+                  return blend[a.material] != blend[b.material] ? blend[a.material] < blend[b.material]
+                                                                : a.material < b.material;
+              });
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto n = out[i].material;
+        for (unsigned side = 0; side < 4; ++side)
+            if (neighbours[side] == n) out[i].edges |= 1U << side;
+        // A corner fades in only where neither side next to it already does.
+        constexpr std::array<std::array<unsigned, 2>, 4> beside{{{0, 2}, {1, 2}, {0, 3}, {1, 3}}};
+        for (unsigned corner = 0; corner < 4; ++corner)
+            if (neighbours[4 + corner] == n && neighbours[beside[corner][0]] != n &&
+                neighbours[beside[corner][1]] != n)
+                out[i].edges |= 16U << corner;
+    }
+    return count;
+}
+void Renderer::ground_blended(MaterialId material, const std::array<MaterialId, 8>& neighbours, float x,
+                              float y, double gx, double gy) {
+    ground(material, x, y, gx, gy);
+    std::array<GroundOverlay, 8> over{};
+    const auto count = ground_overlays(blend_, material_count_, material, neighbours, over);
+    for (std::size_t i = 0; i < count; ++i)
+        ground(over[i].material, x, y, gx, gy, over[i].edges);
 }
 
 void Renderer::flush() {

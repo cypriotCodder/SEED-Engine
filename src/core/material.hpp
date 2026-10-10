@@ -33,6 +33,10 @@ struct MaterialDesc {
     // Labels for scripts, separated by spaces, such as "slippery hurts"; the engine gives them no
     // meaning. Null for none.
     const char* tags{};
+    // How ground tiles meet their neighbours (0 to 255). A material blends over neighbouring
+    // ground whose value is lower, fading in across the shared edge; 0 never blends over others,
+    // so its edges stay square.
+    int blend{};
 };
 
 // The game's materials, registered once at startup before the renderer and world generation
@@ -51,6 +55,8 @@ public:
             throw std::invalid_argument("Animation speed must be 0 to 60 fps");
         if (!(desc.speed >= 0.1F && desc.speed <= 4))
             throw std::invalid_argument("Material speed must be from 0.1 to 4");
+        if (desc.blend < 0 || desc.blend > 255)
+            throw std::invalid_argument("Material blend must be 0 to 255");
         if (desc.tags) check_tags(desc.tags);
         for (int c : desc.color)
             if (c < 0 || c > 255) throw std::invalid_argument("Material colour out of range");
